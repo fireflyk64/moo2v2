@@ -4,8 +4,9 @@
 // Phase 3 implements S0-S6 + S12/S13; encounters/combat (S7-S10) and empire
 // upkeep systems (S11) arrive in Phases 4-6.
 
-import { buildableById, CP_SOURCES, CP_USAGE } from './data/index';
+import { CP_SOURCES, CP_USAGE } from './data/index';
 import { detectBattles, resolveBattle } from './battles';
+import { itemCost, parseDesignItem } from './items';
 import { colonyOutput, colonyPopUnits, groupGrowthK, maxPopulation, traitsOf } from './economy';
 import { normalizeJobsForGroup } from './commands';
 import { rngFor } from './rng';
@@ -240,7 +241,11 @@ function s3_buildAdvance(state: GameState, outputs: TurnOutputs, events: TurnEve
     while (colony.queue.length > 0 && guard++ < 10) {
       const active = colony.queue[0]!.item;
       if (active === 'housing' || active === 'trade_goods') break; // never "complete"
-      const cost = buildableById.get(active)?.cost ?? 0;
+      const cost = itemCost(state, colony.owner, active);
+      if (cost === null) {
+        colony.queue.shift(); // design was obsoleted/removed; drop the entry
+        continue;
+      }
       if (colony.storedProd < cost) break;
       colony.storedProd -= cost;
       colony.queue.shift();
@@ -259,6 +264,22 @@ function completeItem(state: GameState, colony: Colony, item: string, events: Tu
     events.push({ visibleTo: colony.owner, kind: 'freighters_built', payload: { colonyId: colony.id } });
     return;
   }
+  const designId = parseDesignItem(item);
+  if (designId !== null) {
+    state.ships.push({
+      id: state.nextId++,
+      owner: colony.owner,
+      shipKind: 'design',
+      designId,
+      location: { kind: 'star', starId: planet.starId },
+      cargoPopUnits: 0,
+      cargoRace: colony.owner,
+      dmgStructure: 0,
+      dmgArmor: 0,
+    });
+    events.push({ visibleTo: colony.owner, kind: 'ship_built', payload: { colonyId: colony.id, item } });
+    return;
+  }
   if (item === 'colony_ship' || item === 'outpost_ship' || item === 'transport') {
     state.ships.push({
       id: state.nextId++,
@@ -268,6 +289,8 @@ function completeItem(state: GameState, colony: Colony, item: string, events: Tu
       location: { kind: 'star', starId: planet.starId },
       cargoPopUnits: 0,
       cargoRace: colony.owner,
+      dmgStructure: 0,
+      dmgArmor: 0,
     });
     events.push({
       visibleTo: colony.owner,

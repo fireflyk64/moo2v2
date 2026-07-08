@@ -5,6 +5,7 @@
 import { ALWAYS_KNOWN_ITEMS, applicationById, buildableById } from './data/index';
 import type { Colony, Empire, GameState, Planet } from './types';
 import { planetOf } from './economy';
+import { designStats } from './shipdesign';
 
 /** Ship-like buildables that spawn units instead of colony structures. */
 export const SHIP_BUILDABLES = new Set([
@@ -63,23 +64,45 @@ function climateAllows(itemId: string, planet: Planet): boolean {
   return true;
 }
 
-export function itemCost(itemId: string): number {
-  const b = buildableById.get(itemId);
-  if (b) return b.cost;
-  throw new Error(`unknown buildable: ${itemId}`);
+/** 'design:<id>' queue items build warships from the empire's designs. */
+export function parseDesignItem(itemId: string): number | null {
+  if (!itemId.startsWith('design:')) return null;
+  const n = Number(itemId.slice(7));
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+export function itemCost(state: GameState, ownerId: number, itemId: string): number | null {
+  const designId = parseDesignItem(itemId);
+  if (designId !== null) {
+    const empire = state.empires.find((e) => e.id === ownerId);
+    const design = empire?.designs.find((d) => d.id === designId);
+    if (!empire || !design) return null;
+    const stats = designStats(state, empire, design);
+    return typeof stats === 'string' ? null : stats.cost;
+  }
+  return buildableById.get(itemId)?.cost ?? null;
 }
 
 /** Can this item be appended to the colony's queue right now? */
 export function canQueue(state: GameState, colony: Colony, itemId: string): string | null {
+  if (colony.outpost) return 'outposts cannot build';
+  const empire = state.empires.find((e) => e.id === colony.owner);
+  if (!empire) return 'no empire';
+
+  const designId = parseDesignItem(itemId);
+  if (designId !== null) {
+    const design = empire.designs.find((d) => d.id === designId);
+    if (!design) return `no design ${designId}`;
+    if (design.obsolete) return `${design.name} is obsolete`;
+    return null;
+  }
+
   const b = buildableById.get(itemId);
   if (!b) return `unknown item ${itemId}`;
   if (DEFERRED.has(itemId)) return `${itemId} not available yet`;
-  const empire = state.empires.find((e) => e.id === colony.owner);
-  if (!empire) return 'no empire';
   if (!empireKnowsItem(empire, itemId)) return `${itemId} not researched`;
   const planet = planetOf(state, colony);
   if (!climateAllows(itemId, planet)) return `${itemId} cannot operate on ${planet.climate}`;
-  if (colony.outpost) return 'outposts cannot build';
   const isShip = SHIP_BUILDABLES.has(itemId);
   const isProject = PROJECT_BUILDABLES.has(itemId);
   if (!isShip && !isProject) {
@@ -95,8 +118,25 @@ export function buildableItems(state: GameState, colony: Colony): string[] {
   for (const id of buildableById.keys()) {
     if (canQueue(state, colony, id) === null) out.push(id);
   }
-  // projects/ships are useful even when already queued; buildings filtered above
-  return out.sort();
+  out.sort();
+  const empire = state.empires.find((e) => e.id === colony.owner);
+  if (empire && !colony.outpost) {
+    for (const d of empire.designs) {
+      if (!d.obsolete) out.push(`design:${d.id}`);
+    }
+  }
+  return out;
+}
+
+/** Display label for any queue item. */
+export function itemLabel(state: GameState, ownerId: number, itemId: string): string {
+  const designId = parseDesignItem(itemId);
+  if (designId !== null) {
+    const empire = state.empires.find((e) => e.id === ownerId);
+    const design = empire?.designs.find((d) => d.id === designId);
+    return design ? `⚔ ${design.name}` : itemId;
+  }
+  return itemId;
 }
 
 /** True when the application exists (guards against typo'd ids in commands). */

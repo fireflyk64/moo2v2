@@ -3,11 +3,14 @@
 // resolution (pipeline.ts). Validation runs both client-side (optimistic UX)
 // and host-side (authoritative).
 
-import { applicationById, buildableById, fieldById, fieldByNum, applicationsOfField } from './data/index';
-import { buyCost, colonyOutput, colonyPopUnits, empireOf, traitsOf } from './economy';
-import { canQueue } from './items';
+import { applicationById, fieldById, fieldByNum, applicationsOfField } from './data/index';
+import { areAtWar, relationKey, setRelation } from './battles';
+import { buyCost, empireOf, traitsOf } from './economy';
+import { canQueue, itemCost } from './items';
 import { inRange, shipStar, travelTurns } from './movement';
 import { availableFields } from './research';
+import { designStats } from './shipdesign';
+import type { BattleOrders, Stance, TargetPriority } from './combat';
 import type { Colony, GameState, PopGroup, Ship } from './types';
 
 export interface EngineCommand {
@@ -138,7 +141,8 @@ const validateBuy: Validator = (state, cmd) => {
   if (!active) return 'nothing being built';
   if (active === 'housing' || active === 'trade_goods') return `cannot buy ${active}`;
   if (c.boughtThisTurn) return 'already bought this turn';
-  const cost = buildableById.get(active)?.cost ?? 0;
+  const cost = itemCost(state, c.owner, active);
+  if (cost === null) return `unknown item ${active}`;
   if (c.storedProd >= cost) return 'already complete';
   const price = buyCost(cost, c.storedProd);
   const empire = empireOf(state, cmd.playerId);
@@ -150,7 +154,7 @@ const applyBuy: Applier = (state, cmd) => {
   const p = cmd.payload as BuyPayload;
   const c = colony(state, p.colonyId)!;
   const active = c.queue[0]!.item;
-  const cost = buildableById.get(active)?.cost ?? 0;
+  const cost = itemCost(state, c.owner, active) ?? 0;
   const price = buyCost(cost, c.storedProd);
   const empire = empireOf(state, cmd.playerId);
   empire.bc -= price;
@@ -359,6 +363,131 @@ const applyScrap: Applier = (state, cmd) => {
   state.ships = state.ships.filter((s) => s.id !== p.shipId);
 };
 
+// ---------- ship designs ----------
+
+interface SaveDesignPayload {
+  name: string;
+  hull: string;
+  computer: number;
+  shield: number;
+  specials: string[];
+  weapons: Array<{ weapon: string; count: number; mods: string[] }>;
+}
+
+const validateSaveDesign: Validator = (state, cmd) => {
+  const p = cmd.payload as SaveDesignPayload;
+  const empire = empireOf(state, cmd.playerId);
+  if (typeof p?.name !== 'string' || !p.name.trim() || p.name.length > 30) return 'bad design name';
+  if (empire.designs.filter((d) => !d.obsolete).length >= 12) return 'design limit reached (obsolete one first)';
+  const stats = designStats(state, empire, {
+    name: p.name,
+    hull: p.hull,
+    computer: p.computer,
+    shield: p.shield,
+    specials: p.specials ?? [],
+    weapons: p.weapons ?? [],
+  });
+  return typeof stats === 'string' ? stats : null;
+};
+
+const applySaveDesign: Applier = (state, cmd) => {
+  const p = cmd.payload as SaveDesignPayload;
+  const empire = empireOf(state, cmd.playerId);
+  empire.designs.push({
+    id: state.nextId++,
+    name: p.name.trim(),
+    hull: p.hull,
+    computer: p.computer,
+    shield: p.shield,
+    specials: [...(p.specials ?? [])].sort(),
+    weapons: (p.weapons ?? []).map((w) => ({ weapon: w.weapon, count: w.count, mods: [...w.mods].sort() })),
+    obsolete: false,
+  });
+};
+
+const validateObsoleteDesign: Validator = (state, cmd) => {
+  const p = cmd.payload as { designId: number };
+  const empire = empireOf(state, cmd.playerId);
+  return empire.designs.some((d) => d.id === p?.designId) ? null : `no design ${p?.designId}`;
+};
+
+const applyObsoleteDesign: Applier = (state, cmd) => {
+  const p = cmd.payload as { designId: number };
+  const empire = empireOf(state, cmd.playerId);
+  const d = empire.designs.find((x) => x.id === p.designId)!;
+  d.obsolete = true;
+  // drop it from any build queues
+  for (const c of state.colonies) {
+    if (c.owner !== cmd.playerId) continue;
+    c.queue = c.queue.filter((q) => q.item !== `design:${p.designId}`);
+  }
+};
+
+// ---------- diplomacy (minimal war/peace; full diplomacy in Phase 6) ----------
+
+const validateDeclareWar: Validator = (state, cmd) => {
+  const p = cmd.payload as { target: number };
+  if (!state.empires.some((e) => e.id === p?.target)) return `no empire ${p?.target}`;
+  if (p.target === cmd.playerId) return 'cannot declare war on yourself';
+  if (areAtWar(state, cmd.playerId, p.target)) return 'already at war';
+  return null;
+};
+
+const applyDeclareWar: Applier = (state, cmd) => {
+  const p = cmd.payload as { target: number };
+  setRelation(state, cmd.playerId, p.target, 'war');
+};
+
+const validateOfferPeace: Validator = (state, cmd) => {
+  const p = cmd.payload as { target: number };
+  if (!state.empires.some((e) => e.id === p?.target)) return `no empire ${p?.target}`;
+  if (!areAtWar(state, cmd.playerId, p.target)) return 'not at war';
+  return null;
+};
+
+const applyOfferPeace: Applier = (state, cmd) => {
+  const p = cmd.payload as { target: number };
+  const [x, y] = relationKey(cmd.playerId, p.target);
+  const rel = state.relations.find((r) => r.a === x && r.b === y)!;
+  if (!rel.peaceOfferedBy.includes(cmd.playerId)) {
+    rel.peaceOfferedBy.push(cmd.playerId);
+    rel.peaceOfferedBy.sort((a, b) => a - b);
+  }
+};
+
+// ---------- battle orders (battle_orders sub-phase) ----------
+
+const STANCES: Stance[] = ['charge', 'hold_range', 'standoff', 'evade_retreat'];
+const PRIORITIES: TargetPriority[] = ['nearest', 'biggest', 'smallest', 'warships', 'bases'];
+
+const validateBattleOrders: Validator = (state, cmd) => {
+  if (state.phase !== 'battle_orders') return 'no battle awaiting orders';
+  const p = cmd.payload as { battleId: string; orders: BattleOrders };
+  const battle = state.pendingBattles.find((b) => b.id === p?.battleId);
+  if (!battle) return `no pending battle ${p?.battleId}`;
+  if (battle.attacker !== cmd.playerId && battle.defender !== cmd.playerId) return 'not your battle';
+  const o = p.orders;
+  if (!o || !STANCES.includes(o.stance) || !PRIORITIES.includes(o.priority)) return 'bad orders';
+  if (!Number.isSafeInteger(o.retreatThresholdPct) || o.retreatThresholdPct < 0 || o.retreatThresholdPct > 90) {
+    return 'bad retreat threshold';
+  }
+  if (typeof o.bombard !== 'boolean') return 'bad bombard flag';
+  return null;
+};
+
+const applyBattleOrders: Applier = (state, cmd) => {
+  const p = cmd.payload as { battleId: string; orders: BattleOrders };
+  const battle = state.pendingBattles.find((b) => b.id === p.battleId)!;
+  const orders: BattleOrders = {
+    stance: p.orders.stance,
+    priority: p.orders.priority,
+    retreatThresholdPct: p.orders.retreatThresholdPct,
+    bombard: cmd.playerId === battle.attacker ? p.orders.bombard : false,
+  };
+  if (cmd.playerId === battle.attacker) battle.ordersA = orders;
+  else battle.ordersD = orders;
+};
+
 // ---------- debug commands (settings-gated, still deterministic + logged) ----------
 
 const validateDebug: Validator = (state) =>
@@ -384,6 +513,23 @@ const applyDebugSetPop: Applier = (state, cmd) => {
   if (c && c.groups[0]) {
     c.groups[0].popK = p.popK;
     normalizeJobsForGroup(c.groups[0]);
+  }
+};
+
+const applyDebugSpawnShips: Applier = (state, cmd) => {
+  const p = cmd.payload as { starId: number; designId: number; count: number };
+  for (let i = 0; i < Math.min(p.count, 20); i++) {
+    state.ships.push({
+      id: state.nextId++,
+      owner: cmd.playerId,
+      shipKind: 'design',
+      designId: p.designId,
+      location: { kind: 'star', starId: p.starId },
+      cargoPopUnits: 0,
+      cargoRace: cmd.playerId,
+      dmgStructure: 0,
+      dmgArmor: 0,
+    });
   }
 };
 
@@ -420,9 +566,15 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
     apply: applyOutpost,
   },
   scrap_ship: { validate: validateScrap, apply: applyScrap },
+  save_design: { validate: validateSaveDesign, apply: applySaveDesign },
+  obsolete_design: { validate: validateObsoleteDesign, apply: applyObsoleteDesign },
+  declare_war: { validate: validateDeclareWar, apply: applyDeclareWar },
+  offer_peace: { validate: validateOfferPeace, apply: applyOfferPeace },
+  battle_orders: { validate: validateBattleOrders, apply: applyBattleOrders },
   debug_grant_app: { validate: validateDebug, apply: applyDebugGrantApp },
   debug_add_bc: { validate: validateDebug, apply: applyDebugAddBc },
   debug_set_pop: { validate: validateDebug, apply: applyDebugSetPop },
+  debug_spawn_ships: { validate: validateDebug, apply: applyDebugSpawnShips },
 };
 
 export function validateCommand(state: GameState, cmd: EngineCommand): string | null {
@@ -431,6 +583,9 @@ export function validateCommand(state: GameState, cmd: EngineCommand): string | 
     if (!empire) return `no empire for player ${cmd.playerId}`;
     if (empire.eliminated) return 'empire eliminated';
     if (cmd.turn !== state.turn) return `command for turn ${cmd.turn}, current ${state.turn}`;
+    if (state.phase === 'battle_orders' && cmd.kind !== 'battle_orders') {
+      return 'battles are being resolved; only battle orders are accepted';
+    }
   }
   const def = COMMANDS[cmd.kind];
   if (!def) return `unknown command ${cmd.kind}`;
