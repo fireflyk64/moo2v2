@@ -259,6 +259,7 @@ export function generateGalaxy(
         gravity: rollGravity(rng, body === 'planet' ? sizeClass : 3),
         special: null,
         homeworldOf: null,
+        terraformSteps: 0,
       });
     }
   }
@@ -302,6 +303,7 @@ export function generateGalaxy(
       gravity: traits.gravityPref, // homeworld always matches the race
       special: traits.artifactsHomeworld ? 'ancient_artifacts' : null,
       homeworldOf: e,
+      terraformSteps: 0,
     };
     if (existingIdx >= 0) planets[existingIdx] = hw;
     else planets.push(hw);

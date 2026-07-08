@@ -307,7 +307,7 @@ const applyColonize: Applier = (state, cmd) => {
     planetId: planet.id,
     owner: cmd.playerId,
     name: `${star.name} ${romans[planet.orbit - 1] ?? planet.orbit}`,
-    groups: [{ race: cmd.playerId, popK: 1000, farmers: 1, workers: 0, scientists: 0 }],
+    groups: [{ race: cmd.playerId, popK: 1000, farmers: 1, workers: 0, scientists: 0, unrest: false }],
     buildings: [],
     queue: [],
     storedProd: 0,
@@ -436,6 +436,11 @@ const validateDeclareWar: Validator = (state, cmd) => {
 const applyDeclareWar: Applier = (state, cmd) => {
   const p = cmd.payload as { target: number };
   setRelation(state, cmd.playerId, p.target, 'war');
+  breakTreaties(state, cmd.playerId, p.target);
+  // war also voids open proposals between the two
+  state.proposals = state.proposals.filter(
+    (x) => !((x.from === cmd.playerId && x.to === p.target) || (x.from === p.target && x.to === cmd.playerId)),
+  );
 };
 
 const validateOfferPeace: Validator = (state, cmd) => {
@@ -486,6 +491,169 @@ const applyBattleOrders: Applier = (state, cmd) => {
   };
   if (cmd.playerId === battle.attacker) battle.ordersA = orders;
   else battle.ordersD = orders;
+};
+
+// ---------- transports (invasion logistics) ----------
+
+const validateLoadTransports: Validator = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; shipId: number };
+  const c = ownColony(state, cmd, p?.colonyId);
+  if (typeof c === 'string') return c;
+  const ships = ownShips(state, cmd, [p?.shipId]);
+  if (typeof ships === 'string') return ships;
+  const ship = ships[0]!;
+  if (ship.shipKind !== 'transport') return 'not a transport';
+  if (ship.cargoPopUnits > 0) return 'transport already loaded';
+  if (ship.location.kind !== 'star') return 'transport in transit';
+  const planet = state.planets.find((x) => x.id === c.planetId)!;
+  if (ship.location.starId !== planet.starId) return 'transport is not at that colony';
+  const own = c.groups.find((g) => g.race === cmd.playerId && !g.unrest);
+  if (!own || Math.floor(own.popK / 1000) <= 2) return 'colony needs more than 2 of your own colonists';
+  return null;
+};
+
+const applyLoadTransports: Applier = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; shipId: number };
+  const c = colony(state, p.colonyId)!;
+  const ship = state.ships.find((s) => s.id === p.shipId)!;
+  const own = c.groups.find((g) => g.race === cmd.playerId && !g.unrest)!;
+  own.popK -= 2000;
+  normalizeJobsForGroup(own);
+  ship.cargoPopUnits = 2;
+  ship.cargoRace = cmd.playerId;
+};
+
+const validateUnloadTransports: Validator = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; shipId: number };
+  const c = ownColony(state, cmd, p?.colonyId);
+  if (typeof c === 'string') return c;
+  const ships = ownShips(state, cmd, [p?.shipId]);
+  if (typeof ships === 'string') return ships;
+  const ship = ships[0]!;
+  if (ship.shipKind !== 'transport' || ship.cargoPopUnits <= 0) return 'no loaded transport';
+  if (ship.location.kind !== 'star') return 'transport in transit';
+  const planet = state.planets.find((x) => x.id === c.planetId)!;
+  return ship.location.starId === planet.starId ? null : 'transport is not at that colony';
+};
+
+const applyUnloadTransports: Applier = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; shipId: number };
+  const c = colony(state, p.colonyId)!;
+  const ship = state.ships.find((s) => s.id === p.shipId)!;
+  const grp = c.groups.find((g) => g.race === ship.cargoRace);
+  if (grp) {
+    grp.popK += ship.cargoPopUnits * 1000;
+    normalizeJobsForGroup(grp);
+  } else {
+    c.groups.push({
+      race: ship.cargoRace,
+      popK: ship.cargoPopUnits * 1000,
+      farmers: 0,
+      workers: ship.cargoPopUnits,
+      scientists: 0,
+      unrest: false,
+    });
+    c.groups.sort((a, b) => a.race - b.race);
+  }
+  ship.cargoPopUnits = 0;
+};
+
+// ---------- espionage ----------
+
+const validateSpyOrders: Validator = (state, cmd) => {
+  const p = cmd.payload as { target: number | null; mode: 'steal' | 'sabotage' };
+  if (p.target !== null) {
+    if (p.target === cmd.playerId) return 'cannot spy on yourself';
+    if (!state.empires.some((e) => e.id === p.target && !e.eliminated)) return `no empire ${p.target}`;
+  }
+  if (p.mode !== 'steal' && p.mode !== 'sabotage') return 'bad mode';
+  return null;
+};
+
+const applySpyOrders: Applier = (state, cmd) => {
+  const p = cmd.payload as { target: number | null; mode: 'steal' | 'sabotage' };
+  const empire = empireOf(state, cmd.playerId);
+  empire.spies.target = p.target;
+  empire.spies.mode = p.mode;
+};
+
+// ---------- diplomacy proposals ----------
+
+import { acceptProposal, breakTreaties, relationOf } from './diplomacy';
+import type { ProposalKind } from './types';
+
+const PROPOSAL_KINDS: ProposalKind[] = ['peace', 'non_aggression', 'alliance', 'trade', 'research', 'gift_bc', 'tech_exchange'];
+
+const validatePropose: Validator = (state, cmd) => {
+  const p = cmd.payload as { to: number; kind: ProposalKind; giveBc?: number; giveApp?: string; wantApp?: string };
+  if (!state.empires.some((e) => e.id === p?.to && !e.eliminated)) return `no empire ${p?.to}`;
+  if (p.to === cmd.playerId) return 'cannot propose to yourself';
+  if (!PROPOSAL_KINDS.includes(p.kind)) return 'bad proposal kind';
+  const rel = relationOf(state, cmd.playerId, p.to);
+  if (p.kind === 'peace' && rel.status !== 'war') return 'not at war';
+  if (['non_aggression', 'alliance', 'trade', 'research'].includes(p.kind) && rel.status === 'war') {
+    return 'make peace first';
+  }
+  if (p.kind === 'gift_bc') {
+    if (!Number.isSafeInteger(p.giveBc) || (p.giveBc ?? 0) <= 0) return 'bad gift amount';
+    const me = empireOf(state, cmd.playerId);
+    if (me.bc < (p.giveBc ?? 0)) return 'not enough BC';
+  }
+  if (p.kind === 'tech_exchange') {
+    const me = empireOf(state, cmd.playerId);
+    const them = empireOf(state, p.to);
+    if (!p.giveApp || !me.knownApps.includes(p.giveApp)) return 'offered tech unknown to you';
+    if (!p.wantApp || !them.knownApps.includes(p.wantApp)) return 'requested tech unknown to them';
+  }
+  if (state.proposals.filter((x) => x.from === cmd.playerId).length >= 5) return 'too many open proposals';
+  return null;
+};
+
+const applyPropose: Applier = (state, cmd) => {
+  const p = cmd.payload as { to: number; kind: ProposalKind; giveBc?: number; giveApp?: string; wantApp?: string };
+  state.proposals.push({
+    id: state.nextId++,
+    from: cmd.playerId,
+    to: p.to,
+    kind: p.kind,
+    giveBc: p.giveBc ?? 0,
+    giveApp: p.giveApp ?? null,
+    wantApp: p.wantApp ?? null,
+    expiresTurn: state.turn + 5,
+  });
+};
+
+const validateRespond: Validator = (state, cmd) => {
+  const p = cmd.payload as { proposalId: number; accept: boolean };
+  const prop = state.proposals.find((x) => x.id === p?.proposalId);
+  if (!prop) return `no proposal ${p?.proposalId}`;
+  if (prop.to !== cmd.playerId) return 'not addressed to you';
+  return null;
+};
+
+const applyRespond: Applier = (state, cmd) => {
+  const p = cmd.payload as { proposalId: number; accept: boolean };
+  const prop = state.proposals.find((x) => x.id === p.proposalId)!;
+  state.proposals = state.proposals.filter((x) => x.id !== p.proposalId);
+  if (p.accept) {
+    acceptProposal(state, prop, []);
+  }
+};
+
+// ---------- council votes ----------
+
+const validateVote: Validator = (state, cmd) => {
+  const p = cmd.payload as { candidate: number };
+  if (!state.council.pending) return 'no vote in progress';
+  if (p.candidate !== -1 && !state.council.pending.candidates.includes(p.candidate)) {
+    return 'not a candidate';
+  }
+  return null;
+};
+
+const applyVote: Applier = (state, cmd) => {
+  const p = cmd.payload as { candidate: number };
+  state.council.pending!.votes[String(cmd.playerId)] = p.candidate;
 };
 
 // ---------- debug commands (settings-gated, still deterministic + logged) ----------
@@ -571,6 +739,12 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   declare_war: { validate: validateDeclareWar, apply: applyDeclareWar },
   offer_peace: { validate: validateOfferPeace, apply: applyOfferPeace },
   battle_orders: { validate: validateBattleOrders, apply: applyBattleOrders },
+  load_transports: { validate: validateLoadTransports, apply: applyLoadTransports },
+  unload_transports: { validate: validateUnloadTransports, apply: applyUnloadTransports },
+  set_spy_orders: { validate: validateSpyOrders, apply: applySpyOrders },
+  diplo_propose: { validate: validatePropose, apply: applyPropose },
+  diplo_respond: { validate: validateRespond, apply: applyRespond },
+  cast_vote: { validate: validateVote, apply: applyVote },
   debug_grant_app: { validate: validateDebug, apply: applyDebugGrantApp },
   debug_add_bc: { validate: validateDebug, apply: applyDebugAddBc },
   debug_set_pop: { validate: validateDebug, apply: applyDebugSetPop },

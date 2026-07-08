@@ -68,7 +68,10 @@ export function initGame(start: EngineGameStart): GameState {
     phase: 'planning',
     pendingBattles: [],
     relations: [],
+    proposals: [],
+    council: { nextVoteTurn: 25, pending: null },
     winner: null,
+    winType: null,
   };
 
   // starting knowledge: all applications of the start-mode fields + basics
@@ -103,6 +106,7 @@ export function initGame(start: EngineGameStart): GameState {
       completedFields: [...startFieldNums].sort((a, b) => a - b),
       exploredStars: [],
       designs: [],
+      spies: { count: 0, target: null, mode: 'steal' },
       eliminated: false,
     });
   }
@@ -143,6 +147,7 @@ export function initGame(start: EngineGameStart): GameState {
           farmers,
           workers: startPop - farmers - 2,
           scientists: 2,
+          unrest: false,
         },
       ],
       buildings: start.settings.startMode === 'average' ? ['marine_barracks', 'star_base'] : ['marine_barracks'],

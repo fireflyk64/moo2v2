@@ -6,7 +6,10 @@
 
 import { CP_SOURCES, CP_USAGE } from './data/index';
 import { detectBattles, resolveBattle } from './battles';
+import { diplomacyUpkeep } from './diplomacy';
 import { effectsOf, empireAccum } from './effects';
+import { resolveEspionage } from './espionage';
+import { assimilate, resolveInvasions } from './ground';
 import { itemCost, parseDesignItem } from './items';
 import { colonyMaxPop, colonyOutput, colonyPopUnits, groupGrowthK, traitsOf } from './economy';
 import { normalizeJobsForGroup } from './commands';
@@ -63,8 +66,12 @@ export function resolveCombat(state: GameState): AdvanceResult {
 }
 
 function finishTurn(state: GameState, events: TurnEvent[]): void {
+  resolveInvasions(state, events); // S10 ground operations
   s10_shipUpkeep(state, events);
-  s11_diplomacyUpkeep(state);
+  s11_diplomacyUpkeep(state); // peace handshakes
+  assimilate(state, events); // S11 conquered populations settle in
+  resolveEspionage(state, events); // S11 spies act
+  diplomacyUpkeep(state, events); // S11 treaties, proposals, council
   s12_victory(state, events);
   s13_endTurn(state);
 }

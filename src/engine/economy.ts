@@ -5,6 +5,7 @@
 
 import { buildableById } from './data/index';
 import { colonyAccum, type ColonyAccum } from './effects';
+import { isBlockaded } from './ground';
 import { ceilDiv, floorDiv, roundDiv } from './imath';
 import { isqrt } from './isqrt';
 import { gravitySteps, resolveTraits, type RaceTraits } from './race';
@@ -194,10 +195,12 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
   let foodNeedHalves = 0; // per-unit consumption in half-food units
   let prodNeedHalves = 0;
 
+  const blockaded = isBlockaded(state, colony);
   for (const g of colony.groups) {
     const gTraits = g.race === colony.owner ? ownerTraits : groupTraits(state, g.race, ownerTraits);
     const units = groupUnits(g);
-    const gravPen = planetHasGravityFix(colony) ? 0 : gravitySteps(gTraits.gravityPref, planet.gravity) * 25;
+    let gravPen = planetHasGravityFix(colony) ? 0 : gravitySteps(gTraits.gravityPref, planet.gravity) * 25;
+    if (g.unrest) gravPen += 25; // conquered colonists (SW-Calc penalty)
 
     const farmCoeff = Math.max(
       0,
@@ -218,6 +221,10 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
       farmPenalty += roundDiv(gFarm * gravPen, 100);
       prodPenalty += roundDiv(gProd * gravPen, 100);
       sciPenalty += roundDiv(gSci * gravPen, 100);
+    }
+    if (blockaded) {
+      farmPenalty += roundDiv(gFarm * 50, 100);
+      prodPenalty += roundDiv(gProd * 50, 100);
     }
 
     if (gTraits.lithovore) {
