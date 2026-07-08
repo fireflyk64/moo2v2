@@ -123,8 +123,7 @@ function s2_colonyOutput(state: GameState, events: TurnEvent[]): TurnOutputs {
     }
     for (const c of mine) {
       if (!deficits.some((d) => d.colony.id === c.id)) c.foodLackPrev = 0;
-      // cybernetic production shortage handling arrives with ship upkeep (Phase 4)
-      c.prodLackPrev = 0;
+      c.prodLackPrev = perColony.get(c.id)?.prodLack ?? 0;
     }
     // leftover surplus: fantastic traders turn it into BC (documented in racepicks)
     if (surplus > 0 && traitsOf(empire).fantasticTraders) {

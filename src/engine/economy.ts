@@ -173,7 +173,9 @@ export interface ColonyOutput {
   food: number;
   foodConsumed: number;
   foodNet: number;
-  prod: number; // net production after pollution (before trade goods/housing diversion)
+  prod: number; // net production after pollution + cybernetic upkeep
+  prodConsumed: number; // cybernetic races eat half a production point per unit
+  prodLack: number;
   pollution: number;
   research: number;
   bcIncome: number; // before empire-level costs, after building maintenance
@@ -290,7 +292,10 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
       pollution = Math.max(0, ceilDiv(Math.max(0, scaled - absorb), 2));
     }
   }
-  const prod = Math.max(0, prodWorker + buildingSum(colony, PROD_FLAT_BUILDINGS) - pollution);
+  const prodGross = Math.max(0, prodWorker + buildingSum(colony, PROD_FLAT_BUILDINGS) - pollution);
+  const prodConsumed = ceilDiv(prodNeedHalves, 2);
+  const prodLack = Math.max(0, prodConsumed - prodGross);
+  const prod = Math.max(0, prodGross - prodConsumed);
 
   // research
   const sciWorker = roundDiv(sciBase * (100 + cTotalPct('sci', ownerTraits, morale)), 100) - sciPenalty;
@@ -336,6 +341,8 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
     foodConsumed,
     foodNet: food - foodConsumed,
     prod,
+    prodConsumed,
+    prodLack,
     pollution,
     research,
     bcIncome: bcIncome + tradeBC,
