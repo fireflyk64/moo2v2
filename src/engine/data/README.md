@@ -62,6 +62,24 @@ Fields carry no subject column; subjects are derived by walking each subject's
 
 Entries land here as gap formulas (🔍 in PLAN.md) get sourced and implemented.
 
+All sources consulted for *functional rules only* (numbers/formulas re-expressed in our
+own words); no source prose is copied. SW-Calc = strategywiki.org MOO2 "Calculations"
+page (checked against game v1.31); SW-Feed = its "Feeding your people" page; Blog-MaxPop
+= masteroforion2.blogspot.com "Maximum Population"; Book-Mapgen = moo2mod.com/doc/game/mapgen.html.
+
 | # | Topic | Decision | Source | Locked by |
 |---|---|---|---|---|
-| (none yet) | | | | |
+| F1 | Population growth | per race-group: `inc_k = floor(sqrt(2000·c·free/cap))`, then `floor(inc_k·(100+race±50/100+medicine+housing)%)` + 100k if growth center, − food-lack penalty (50k/lack; cybernetic 25k food + 25k prod). Housing bonus % = `floor(PP·40/colonists)`. | SW-Calc | economy tests |
+| F2 | Colony output | `P = P_const + round(P_base + P_bonus)`; `P_base = Σ colonists·coeff` (coeff = planet + race + tech + buildings); `P_bonus = C_total%·P_base − colonist penalties − pollution`. C_total: morale (unification ignores, +50% farm/prod; democracy +50% research; feudal −50% research) + leader. Colonist penalties: conquered 25%, wrong gravity 25%/50%, blockade 50% farm/prod. | SW-Calc | economy tests |
+| F3 | Food/farmer by climate | non-aquatic: 0 = hostile/energized/barren; 1 = desert/arid/tundra; 2 = swamp/ocean/terran; 3 = gaia. Aquatic: tundra/swamp = 2, ocean/terran/gaia = 3. | SW-Feed | economy tests |
+| F4 | Production/worker by minerals | ultra_poor 1, poor 2, abundant 3, rich 5, ultra_rich 8. | SW-Calc + community consensus | economy tests |
+| F5 | Research/scientist | base 3. | community consensus | economy tests |
+| F6 | Max population | `size_mult(5/10/15/20/25 tiny→huge) × climate%`: hostile/energized/barren/desert/tundra/ocean 25%, swamp 40%, arid 60%, terran 80%, gaia 100%. Aquatic: ocean/terran→100%, tundra/swamp→80%. Tolerant: +25pp except terran/gaia (→100%). Subterranean: +2·sizeClass flat. Round half-up. | Blog-MaxPop | economy tests |
+| F7 | Money | `income = special + round(pop·(1+raceBC)) + Σ floor((special+popInc)·coeff)` for spaceport .5 / stock exchange 1 / currency exchange .5 / democracy .5, `+ round(popInc·morale%)` + leader − `round(maint·climateCoeff)` (hostile +50%, energized/desert +25%). **No tax slider exists** — resolves the "tax" gap. | SW-Calc | economy tests |
+| F8 | Pollution | `ceil((prodFromWorkers/divisor·leaderCoeff·tolerantFraction − sizeAbsorb)/2)`, divisor 1/2/4/8 (none/processor/renewer/both), sizeAbsorb 2·sizeClass (nano disassemblers double), flat building production exempt, core waste dump ⇒ 0, negatives ⇒ 0. Subtracted from production. | SW-Calc | economy tests |
+| F9 | Buy cost | remaining-based piecewise: done<10%: `4X−10Y`; 10–50%: `3.5X−5Y` (we use `floor((7X−10Y)/2)`); ≥50%: `2(X−Y)`. No buy same turn as completion-by-buy; disallow housing/trade goods. | SW-Calc | economy tests |
+| F10 | Morale | additive %: −20 feudal/dictatorship (and advanced forms) without marine/armor barracks; +20 holo simulator; +30 pleasure dome; +20 VR network (empire-wide); +10 civic insight (dict/imperium). Applied via C_total (F2) and money (F7). Unification immune. | SW-Feed + racepicks.md | economy tests |
+| F11 | Star counts | small 20, medium 36, large 54, huge 71. | Book-Mapgen | galaxy tests |
+| F12 | Trade goods / housing | trade goods: colony production converts to BC at 2 PP → 1 BC (fantastic traders 1:1). Housing: production feeds F1's housing bonus. | community consensus (marked tunable) | economy tests |
+| F13 | Star colors / planet rolls | weighted tables in `galaxy.ts` marked TUNABLE defaults (source page incomplete); structure supports swapping classic/fan-patch odds per mechanics §03. | Book-Mapgen (partial) | galaxy golden tests |
+| F14 | Gravity penalty | per-colonist −25% one step off race preference, −50% two steps (low-G race on high-G); high-G races never penalized; gravity generator clears it; applies to farm/prod/research per-colonist output. | SW-Calc (+ community) | economy tests |
