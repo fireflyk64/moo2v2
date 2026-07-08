@@ -103,6 +103,8 @@ export function runHeadlessGame(opts: {
   players: Array<{ id: number; name: string; raceJson: string | null; policy: BotPolicy }>;
   turns: number;
   settings?: Partial<GameState['settings']>;
+  /** keep resolving after a victory (soak tests) */
+  stopOnVictory?: boolean;
 }): DriverResult {
   const settings: GameState['settings'] = {
     galaxySize: 'small',
@@ -174,7 +176,7 @@ export function runHeadlessGame(opts: {
       log.push(resolve);
     }
     hashes.push(gameEngine.hash(state));
-    if (state.winner !== null) break;
+    if (state.winner !== null && (opts.stopOnVictory ?? true)) break;
   }
 
   return { state, log, hashes };

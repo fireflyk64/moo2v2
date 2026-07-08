@@ -30,6 +30,8 @@ export const app = $state({
   viewing: null as ReplayEntry | null,
   /** turn-event feed visible to this player (newest last) */
   reports: [] as ReportEntry[],
+  /** host peer connectivity (clients only; host is always true) */
+  hostConnected: true,
 });
 
 // Not reactive on purpose: session/transport are external objects.
@@ -43,7 +45,15 @@ export function bindActive(active: ActiveGame): void {
   activeGame = active;
   app.error = '';
   app.screen = active.session.isStarted() ? 'game' : 'lobby';
+  app.hostConnected = true;
   app.version++;
+  if (!active.host) {
+    active.transport.onEvent((ev) => {
+      if (ev.type === 'player-left' && ev.playerId === 0) app.hostConnected = false;
+      else if ((ev.type === 'player-rejoined' || ev.type === 'player-joined') && ev.playerId === 0) app.hostConnected = true;
+      app.version++;
+    });
+  }
   active.session.subscribe((ev) => {
     app.version++;
     if (ev.type === 'started') app.screen = 'game';

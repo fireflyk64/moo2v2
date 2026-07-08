@@ -119,6 +119,16 @@
       </span>
     {/if}
   </header>
+  {#if !app.hostConnected}
+    <div class="banner warn" data-testid="host-offline">
+      ⚠ Host offline — the game is paused. It resumes when the host returns (or load their save file to re-host).
+    </div>
+  {/if}
+  {#if !getActive()?.store}
+    <div class="banner warn" data-testid="no-persistence">
+      ⚠ Persistence unavailable (another tab holds this room's database?) — the game plays but cannot be saved from this tab.
+    </div>
+  {/if}
   {#if winner !== null}
     {@const winLabel = gs.winType === 'council' ? 'is elected supreme ruler of the council' : gs.winType === 'antaran' ? 'has conquered the Antaran home' : 'wins by conquest'}
     <div class="banner" data-testid="victory">Victory: {roster.find((p) => p.id === winner)?.name ?? winner} {winLabel}!</div>
@@ -257,6 +267,9 @@
     background: #2c5a2c;
     padding: 0.5rem 0.8rem;
     font-weight: 700;
+  }
+  .banner.warn {
+    background: #5a442c;
   }
   button.committed {
     background: #2c5a2c;
