@@ -246,6 +246,25 @@ room code (server field: local `http://127.0.0.1:8787` or default public server)
       stub — test fails on omissions; stub ledger printed as the remaining-work queue;
       no-op deferred buildings are unbuildable (DEFERRED list) so players cannot waste BC
 
+### Phase 6a — Host save/load game files (URGENT, inserted 2026-07-08) ✅ when: save downloads a binary file; loading it re-hosts the identical game (hash-verified); corruption/tamper/version mismatches are rejected with clear errors; e2e covers the full save→reload→load→client-rejoin cycle
+
+- [ ] `storage/savefile.ts`: binary format = magic `MOO2SAVE` + version byte + gzip(canonical
+      JSON SaveEnvelope: game row, players, full command log, latest snapshot). Plain-JSON
+      envelopes also accepted (debugging).
+- [ ] Robust load validation: magic/version check, gunzip + JSON errors surfaced clearly,
+      structural checks (gapless seq from 0, game_start first, seed format), engine/data
+      version equality, and **full deterministic replay verification** (fold the log, compare
+      the final hash to the snapshot hash) before any import.
+- [ ] Save UI (host only, game header): download `.moo2save`; secondary raw `.sqlite3`
+      download via sqlocal getDatabaseFile.
+- [ ] Load UI (Home screen): file dialog → decode/verify → import into the entered room's
+      store (room_code overridden = manual re-host) → resume path restores the game; joining
+      clients resync automatically.
+- [ ] Tests: unit round-trip + corrupted-magic/truncated/tampered-payload/version-mismatch
+      rejection; node integration (headless game → export → encode → decode → import →
+      host resume → hash equality); Playwright e2e (play turns → Save download → fresh room →
+      Load upload → re-host → second browser rejoins → hashes agree).
+
 ### Phase 6 — Full game systems ✅ when: headless 4-player 200-turn game exercises everything with stable hashes; each victory condition reachable in a scripted fixture
 
 - [ ] Leaders: hire/assign/level (🔍 skill magnitudes, costs, spawn frequency)

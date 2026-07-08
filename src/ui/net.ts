@@ -13,6 +13,7 @@ import { DEFAULT_SETTINGS, type LogCommand } from '@protocol/messages';
 import { createHostedGame, generateSeed, joinGame } from '@protocol/setup';
 import type { GameSession } from '@protocol/session';
 import { isOpfsLikelyAvailable, openBrowserStore } from '@storage/browser';
+import type { SQLocalKysely } from 'sqlocal/kysely';
 import type { GameStore } from '@storage/repo';
 
 export const DEFAULT_SERVER = 'https://pqrstuvw.xyz/lobbylink';
@@ -31,6 +32,7 @@ export interface ActiveGame {
   session: GameSession<GameState>;
   host: HostCore<GameState> | null;
   store: GameStore | null;
+  sqlocal: SQLocalKysely | null;
   params: RoomParams;
   startGame: () => void;
 }
@@ -76,9 +78,12 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
   });
 
   let store: GameStore | null = null;
+  let sqlocal: SQLocalKysely | null = null;
   if (isOpfsLikelyAvailable()) {
     try {
-      store = (await openBrowserStore(`moo2v2-room-${params.code}.sqlite3`)).store;
+      const opened = await openBrowserStore(`moo2v2-room-${params.code}.sqlite3`);
+      store = opened.store;
+      sqlocal = opened.sqlocal;
     } catch (e) {
       console.warn('[net] persistence unavailable (another tab in this room?):', e);
     }
@@ -108,6 +113,7 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
       session: hosted.session,
       host: hosted.host,
       store,
+      sqlocal,
       params,
       startGame: () => hosted.host.startGame(generateSeed()),
     };
@@ -131,6 +137,7 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
     session,
     host: null,
     store,
+    sqlocal,
     params,
     startGame: () => {
       throw new Error('only the host can start');

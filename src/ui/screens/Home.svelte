@@ -1,5 +1,6 @@
 <script lang="ts">
   import { DEFAULT_SERVER, enterRoom } from '../net';
+  import { describeSaveError, importSaveIntoRoom } from '../saveload';
   import { app, bindActive } from '../state.svelte';
 
   const q = new URLSearchParams(location.search);
@@ -7,6 +8,8 @@
   let code = $state(q.get('room') ?? '');
   let name = $state(q.get('name') ?? '');
   let playerCount = $state(Number(q.get('players') ?? '2'));
+  let loadNote = $state('');
+  let fileInput: HTMLInputElement;
 
   async function go() {
     if (!code || !name) {
@@ -22,6 +25,27 @@
       app.error = e instanceof Error ? e.message : String(e);
     } finally {
       app.connecting = false;
+    }
+  }
+
+  async function onLoadFile(ev: Event) {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (!code || !name) {
+      app.error = 'enter your name and a room code before loading a save';
+      return;
+    }
+    app.error = '';
+    loadNote = 'verifying save…';
+    try {
+      const res = await importSaveIntoRoom(new Uint8Array(await file.arrayBuffer()), code, server);
+      loadNote = `loaded turn ${res.turn} (${res.commandCount} commands, players: ${res.players.join(', ')}) — connecting as host…`;
+      await go();
+    } catch (e) {
+      loadNote = '';
+      app.error = describeSaveError(e);
     }
   }
 
@@ -46,6 +70,18 @@
   <button data-testid="enter" onclick={go} disabled={app.connecting}>
     {app.connecting ? 'Connecting…' : 'Create / Join'}
   </button>
+  <button data-testid="load-save" onclick={() => fileInput.click()} disabled={app.connecting}>
+    Load saved game…
+  </button>
+  <input
+    bind:this={fileInput}
+    data-testid="load-file"
+    type="file"
+    accept=".moo2save,.json,application/octet-stream"
+    style="display:none"
+    onchange={onLoadFile}
+  />
+  {#if loadNote}<p class="dim" data-testid="load-note">{loadNote}</p>{/if}
   {#if app.error}<p class="error" data-testid="error">{app.error}</p>{/if}
 </div>
 

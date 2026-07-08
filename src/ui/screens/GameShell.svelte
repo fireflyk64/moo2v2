@@ -1,6 +1,7 @@
 <script lang="ts">
   import { selectors, gameEngine } from '@engine/index';
   import { app, getActive } from '../state.svelte';
+  import { describeSaveError, downloadRawDatabase, downloadSave } from '../saveload';
   import Spreadsheet from './Spreadsheet.svelte';
   import MapView from './MapView.svelte';
   import Research from './Research.svelte';
@@ -61,6 +62,24 @@
     if (chatText.trim()) session().sendChat(chatText.trim());
     chatText = '';
   }
+
+  let saveNote = $state('');
+  async function saveGame() {
+    try {
+      const name = await downloadSave(getActive()!);
+      saveNote = `saved ${name}`;
+    } catch (e) {
+      saveNote = describeSaveError(e);
+    }
+  }
+  async function saveDb() {
+    try {
+      await downloadRawDatabase(getActive()!);
+      saveNote = 'database downloaded';
+    } catch (e) {
+      saveNote = describeSaveError(e);
+    }
+  }
 </script>
 
 {#if gs && summary}
@@ -79,6 +98,17 @@
       class:committed={iCommitted}
       onclick={toggleCommit}
     >{iCommitted ? 'Committed ✓' : 'Commit turn'} ({committed.length}/{roster.length})</button>
+    {#if session().playerId === 0}
+      <span class="saves">
+        <button data-testid="save-game" disabled={!getActive()?.store} onclick={saveGame}
+          title={getActive()?.store ? 'Download the full game as a save file' : 'persistence unavailable'}>
+          💾 Save
+        </button>
+        <button data-testid="save-db" disabled={!getActive()?.sqlocal} onclick={saveDb}
+          title="Download the raw sqlite database">DB</button>
+        {#if saveNote}<span class="dim" data-testid="save-note">{saveNote}</span>{/if}
+      </span>
+    {/if}
   </header>
   {#if winner !== null}
     <div class="banner" data-testid="victory">Victory: {roster.find((p) => p.id === winner)?.name ?? winner} wins by conquest!</div>
