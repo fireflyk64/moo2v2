@@ -12,6 +12,7 @@ import {
 } from './data/index';
 import { applyCommand, validateCommand, type EngineCommand } from './commands';
 import { generateGalaxy } from './galaxy';
+import { seedMonsters } from './npc';
 import { advanceTurn, resolveCombat } from './pipeline';
 import { resolveTraits } from './race';
 import type { Colony, GameState, GameStateSettings, PendingBattle, TurnEvent } from './types';
@@ -71,6 +72,8 @@ export function initGame(start: EngineGameStart): GameState {
     proposals: [],
     council: { nextVoteTurn: 25, pending: null },
     leaderOffers: [],
+    monsters: [],
+    antarans: { nextRaidTurn: 25, assaultBy: null },
     winner: null,
     winType: null,
   };
@@ -190,6 +193,8 @@ export function initGame(start: EngineGameStart): GameState {
   }
   state.colonies.sort((a, b) => a.id - b.id);
   state.ships.sort((a, b) => a.id - b.id);
+
+  seedMonsters(state); // guarded systems + the Guardian's prize system (M1)
 
   return state;
 }

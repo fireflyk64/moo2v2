@@ -230,6 +230,33 @@ export interface Proposal {
   expiresTurn: number;
 }
 
+/** Monsters and Antaran raiders (npc.ts). */
+export interface MonsterUnit {
+  id: number;
+  kind:
+    | 'amoeba'
+    | 'hydra'
+    | 'eel'
+    | 'crystal'
+    | 'dragon'
+    | 'guardian'
+    | 'antaran_raider'
+    | 'antaran_marauder'
+    | 'antaran_intruder'
+    | 'antaran_fortress';
+  starId: number;
+  dmgStructure: number;
+  /** Antaran raid bookkeeping: where + when the party attacked */
+  raidStar?: number;
+  raidTurn?: number;
+}
+
+export interface AntaranState {
+  nextRaidTurn: number;
+  /** empire currently assaulting the Antaran home (via dimensional portal) */
+  assaultBy: number | null;
+}
+
 export interface CouncilState {
   nextVoteTurn: number;
   pending: {
@@ -256,8 +283,10 @@ export interface GameState {
   proposals: Proposal[];
   council: CouncilState;
   leaderOffers: LeaderOffer[];
+  monsters: MonsterUnit[];
+  antarans: AntaranState;
   winner: number | null;
-  winType: 'conquest' | 'council' | null;
+  winType: 'conquest' | 'council' | 'antaran' | null;
 }
 
 /** Deterministic turn event emitted during resolution (not part of hashed state). */
