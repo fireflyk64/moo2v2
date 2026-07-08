@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MOO2v2</title>
+    <script>
+      // Static hosts can't send COOP/COEP headers; a service worker adds them
+      // so OPFS persistence works. One reload brings the page under its scope.
+      if (!crossOriginIsolated && 'serviceWorker' in navigator && location.protocol === 'https:') {
+        navigator.serviceWorker.register('./coi-sw.js').then(() => {
+          if (!sessionStorage.getItem('coi-reloaded')) {
+            sessionStorage.setItem('coi-reloaded', '1');
+            navigator.serviceWorker.ready.then(() => location.reload());
+          }
+        }).catch(() => {});
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
