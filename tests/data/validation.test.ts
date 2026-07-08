@@ -138,6 +138,8 @@ describe('referential integrity', () => {
     }
     expect(techById.get('battleoids')!.techId).toBe(224); // documented fix-up
     expect(techById.get('battle_scanner')!.techId).toBe(24);
+    expect(techById.get('anti_matter_bomb')!.techId).toBe(225); // documented fix-up
+    expect(techById.get('android_scientists')!.techId).toBe(10);
   });
 
   it('starting fields resolve', () => {

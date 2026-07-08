@@ -1586,7 +1586,7 @@ export const TECH_ROWS: readonly TechRow[] = [
   },
   {
     "id": "anti_matter_bomb",
-    "techId": 10,
+    "techId": 225,
     "fieldNum": 46,
     "aiGroup": 7,
     "strategic": true
@@ -5405,7 +5405,7 @@ export const APPLICATION_ROWS: readonly ApplicationRow[] = [
     "name": "Anti-Matter Bomb",
     "subject": "power",
     "fieldId": "anti_matter_fission",
-    "techId": 10,
+    "techId": 225,
     "effectSummaryLen": 144
   },
   {

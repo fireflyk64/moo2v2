@@ -144,6 +144,9 @@ let techs = techTable.rows.map(([id, techId, fieldNum, aiGroup, strategic]) => (
 // FIX(data): the source table assigns tech_id 24 to BOTH battle_scanner and
 // battleoids. battle_scanner keeps 24; battleoids gets synthetic id 224.
 techs = techs.map((t) => (t.id === 'battleoids' ? { ...t, techId: 224 } : t));
+// FIX(data): tech_id 10 is assigned to BOTH android_scientists (part of the
+// consecutive 9/10/11 android trio) and anti_matter_bomb; the bomb moves to 225.
+techs = techs.map((t) => (t.id === 'anti_matter_bomb' ? { ...t, techId: 225 } : t));
 // FIX(data): rows with tech_id 0 (spacetime_surfing + monster weapons) are
 // placeholders in the source; keep 0 and treat as "no public number".
 

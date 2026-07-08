@@ -24,6 +24,9 @@ layer: types, lookups, stock-race presets, exclusivity rules, and `DATA_VERSION`
 
 - **tech_id 24 duplicate**: the source assigns 24 to both `battle_scanner` and
   `battleoids`. `battle_scanner` keeps 24; `battleoids` is reassigned synthetic 224.
+- **tech_id 10 duplicate**: assigned to both `android_scientists` (part of the
+  consecutive 9/10/11 android trio) and `anti_matter_bomb`; the bomb moves to
+  synthetic 225.
 - **tech_id 0 placeholders** (`spacetime_surfing`, monster weapons): kept as 0,
   meaning "no public number".
 - **Numeric id conflicts kept as-is** (string ids are canonical anyway):

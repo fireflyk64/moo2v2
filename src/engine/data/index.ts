@@ -153,12 +153,14 @@ export function validatePicks(pickIds: readonly string[]): PickValidationResult 
       errors.push(`picks are mutually exclusive: ${chosen.join(', ')}`);
     }
   }
-  const positives = pickIds.reduce((s, id) => s + Math.max(0, pickById.get(id)?.cost ?? 0), 0);
-  if (positives > MAX_POSITIVE_PICKS) {
-    errors.push(`positive picks ${positives} exceed budget ${MAX_POSITIVE_PICKS}`);
+  // Negative picks ADD budget: net cost must stay within [-10, +10] and at most
+  // 10 points of disadvantages may be taken (stock presets like the telepathic
+  // feudal race spend 14 gross positives against 4 refunded points, legally).
+  const negatives = pickIds.reduce((s, id) => s + Math.min(0, pickById.get(id)?.cost ?? 0), 0);
+  if (negatives < MAX_NEGATIVE_PICKS) {
+    errors.push(`negative picks ${negatives} exceed allowance ${MAX_NEGATIVE_PICKS}`);
   }
   if (cost > MAX_POSITIVE_PICKS) errors.push(`net cost ${cost} exceeds ${MAX_POSITIVE_PICKS}`);
-  if (cost < MAX_NEGATIVE_PICKS) errors.push(`net cost ${cost} below ${MAX_NEGATIVE_PICKS}`);
   return { ok: errors.length === 0, cost, errors };
 }
 
