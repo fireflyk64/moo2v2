@@ -6,6 +6,7 @@ import { ALWAYS_KNOWN_ITEMS, applicationById, buildableById } from './data/index
 import type { Colony, Empire, GameState, Planet } from './types';
 import { planetOf } from './economy';
 import { designStats } from './shipdesign';
+import { canTerraform, terraformCost, unsettledPlanetsInSystem } from './terraform';
 
 /** Ship-like buildables that spawn units instead of colony structures. */
 export const SHIP_BUILDABLES = new Set([
@@ -16,32 +17,30 @@ export const SHIP_BUILDABLES = new Set([
 ]);
 
 /** Repeatable non-building projects. */
-export const PROJECT_BUILDABLES = new Set(['housing', 'trade_goods', 'spy']);
+export const PROJECT_BUILDABLES = new Set([
+  'housing',
+  'trade_goods',
+  'spy',
+  'terraforming',
+  'gaia_transformation',
+  'colony_base',
+]);
 
 /** Buildables intentionally unavailable until later phases (documented). Their
  * effect entries in effectsMap carry matching stub notes. */
 const DEFERRED = new Set([
-  'spy', // espionage arrives in Phase 6
-  'colony_base',
   'artificial_planet',
-  'flux_shield', // colony shields land with bombardment defenses (Phase 6)
+  'missile_base', // colony defense batteries land with the combat-specials batch
+  'ground_batteries',
+  'fighter_garrison',
+  'dimensional_portal', // Antaran assault (later in Phase 6)
+  'flux_shield', // superseded shield tiers stay data-only (planetary shield covers defense)
   'planetary_flux_shield',
   'planetary_barrier_shield',
   'planetary_stellar_safety_shield',
-  'stellar_safety_shield',
-  'nanite_factory', // effect values unverified (Phase 6)
-  'missile_base', // colony defense batteries (Phase 6)
-  'ground_batteries',
-  'fighter_garrison',
   'artemis_system_net',
-  'dimensional_portal',
   'warp_interdictor',
-  'food_replicators',
-  'recyclotron',
-  'capitol',
-  'alien_management_center',
-  'space_academy',
-  'habitat_dome_terraforming',
+  'habitat_dome_terraforming', // data artifacts: covered by the terraforming project
   'soil_enrichment_terraforming',
   'super_swarm',
   'spacetime_surfing',
@@ -89,7 +88,7 @@ export function parseDesignItem(itemId: string): number | null {
   return Number.isSafeInteger(n) ? n : null;
 }
 
-export function itemCost(state: GameState, ownerId: number, itemId: string): number | null {
+export function itemCost(state: GameState, ownerId: number, itemId: string, colony?: Colony): number | null {
   const designId = parseDesignItem(itemId);
   if (designId !== null) {
     const empire = state.empires.find((e) => e.id === ownerId);
@@ -97,6 +96,10 @@ export function itemCost(state: GameState, ownerId: number, itemId: string): num
     if (!empire || !design) return null;
     const stats = designStats(state, empire, design);
     return typeof stats === 'string' ? null : stats.cost;
+  }
+  if (itemId === 'terraforming' && colony) {
+    const planet = state.planets.find((p) => p.id === colony.planetId);
+    if (planet) return terraformCost(planet);
   }
   return buildableById.get(itemId)?.cost ?? null;
 }
@@ -121,6 +124,20 @@ export function canQueue(state: GameState, colony: Colony, itemId: string): stri
   if (!empireKnowsItem(empire, itemId)) return `${itemId} not researched`;
   const planet = planetOf(state, colony);
   if (!climateAllows(itemId, planet)) return `${itemId} cannot operate on ${planet.climate}`;
+  if (itemId === 'terraforming') {
+    const blocked = canTerraform(planet);
+    if (blocked) return blocked;
+  }
+  if (itemId === 'gaia_transformation' && planet.climate !== 'terran') {
+    return 'habitat transformation requires a terran world';
+  }
+  if (itemId === 'colony_base' && unsettledPlanetsInSystem(state, planet.starId).length === 0) {
+    return 'no unsettled planet in this system';
+  }
+  if (itemId === 'spy') {
+    const queued = colony.queue.filter((q) => q.item === 'spy').length;
+    if (empire.spies.count + queued >= 10) return 'agent roster is full (10)';
+  }
   const isShip = SHIP_BUILDABLES.has(itemId);
   const isProject = PROJECT_BUILDABLES.has(itemId);
   if (!isShip && !isProject) {

@@ -12,6 +12,7 @@ import { resolveEspionage } from './espionage';
 import { assimilate, resolveInvasions } from './ground';
 import { leaderEmpireBonuses, leadersUpkeep } from './leaders';
 import { itemCost, parseDesignItem } from './items';
+import { applyTerraformStep, unsettledPlanetsInSystem } from './terraform';
 import { colonyMaxPop, colonyOutput, colonyPopUnits, groupGrowthK, traitsOf } from './economy';
 import { normalizeJobsForGroup } from './commands';
 import { rngFor } from './rng';
@@ -255,7 +256,7 @@ function s3_buildAdvance(state: GameState, outputs: TurnOutputs, events: TurnEve
     while (colony.queue.length > 0 && guard++ < 10) {
       const active = colony.queue[0]!.item;
       if (active === 'housing' || active === 'trade_goods') break; // never "complete"
-      const cost = itemCost(state, colony.owner, active);
+      const cost = itemCost(state, colony.owner, active, colony);
       if (cost === null) {
         colony.queue.shift(); // design was obsoleted/removed; drop the entry
         continue;
@@ -273,6 +274,50 @@ function completeItem(state: GameState, colony: Colony, item: string, events: Tu
   const planet = state.planets.find((p) => p.id === colony.planetId)!;
   const empire = state.empires.find((e) => e.id === colony.owner)!;
 
+  if (item === 'spy') {
+    empire.spies.count = Math.min(10, empire.spies.count + 1);
+    events.push({ visibleTo: colony.owner, kind: 'spy_trained', payload: { colonyId: colony.id, count: empire.spies.count } });
+    return;
+  }
+  if (item === 'terraforming') {
+    const next = applyTerraformStep(planet);
+    events.push({ visibleTo: colony.owner, kind: 'terraformed', payload: { colonyId: colony.id, climate: next } });
+    return;
+  }
+  if (item === 'gaia_transformation') {
+    if (planet.climate === 'terran') {
+      planet.climate = 'gaia';
+      events.push({ visibleTo: colony.owner, kind: 'terraformed', payload: { colonyId: colony.id, climate: 'gaia' } });
+    }
+    return;
+  }
+  if (item === 'colony_base') {
+    const open = unsettledPlanetsInSystem(state, planet.starId);
+    const target = open[0];
+    if (target) {
+      const star = state.stars.find((st) => st.id === planet.starId)!;
+      const romans = ['I', 'II', 'III', 'IV', 'V'];
+      state.colonies.push({
+        id: state.nextId++,
+        planetId: target.id,
+        owner: colony.owner,
+        name: `${star.name} ${romans[target.orbit - 1] ?? target.orbit}`,
+        groups: [{ race: colony.owner, popK: 1000, farmers: 1, workers: 0, scientists: 0, unrest: false }],
+        buildings: [],
+        queue: [],
+        storedProd: 0,
+        stickyInvested: {},
+        boughtThisTurn: false,
+        foodLackPrev: 0,
+        prodLackPrev: 0,
+        housingPPPrev: 0,
+        outpost: false,
+      });
+      state.colonies.sort((a, b) => a.id - b.id);
+      events.push({ visibleTo: colony.owner, kind: 'colony_founded', payload: { planetId: target.id, viaBase: true } });
+    }
+    return;
+  }
   if (item === 'freighter_fleet') {
     empire.freighters += 5;
     events.push({ visibleTo: colony.owner, kind: 'freighters_built', payload: { colonyId: colony.id } });

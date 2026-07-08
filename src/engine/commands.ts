@@ -141,7 +141,7 @@ const validateBuy: Validator = (state, cmd) => {
   if (!active) return 'nothing being built';
   if (active === 'housing' || active === 'trade_goods') return `cannot buy ${active}`;
   if (c.boughtThisTurn) return 'already bought this turn';
-  const cost = itemCost(state, c.owner, active);
+  const cost = itemCost(state, c.owner, active, c);
   if (cost === null) return `unknown item ${active}`;
   if (c.storedProd >= cost) return 'already complete';
   const price = buyCost(cost, c.storedProd);
@@ -154,7 +154,7 @@ const applyBuy: Applier = (state, cmd) => {
   const p = cmd.payload as BuyPayload;
   const c = colony(state, p.colonyId)!;
   const active = c.queue[0]!.item;
-  const cost = itemCost(state, c.owner, active) ?? 0;
+  const cost = itemCost(state, c.owner, active, c) ?? 0;
   const price = buyCost(cost, c.storedProd);
   const empire = empireOf(state, cmd.playerId);
   empire.bc -= price;

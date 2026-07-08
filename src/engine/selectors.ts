@@ -51,7 +51,7 @@ export function colonyRow(state: GameState, colony: Colony): ColonyRow {
     ? emptyOutput()
     : colonyOutput(state, colony);
   const active = colony.queue[0]?.item ?? null;
-  const activeCost = active ? (itemCost(state, colony.owner, active) ?? 0) : 0;
+  const activeCost = active ? (itemCost(state, colony.owner, active, colony) ?? 0) : 0;
   const isProject = active === 'housing' || active === 'trade_goods';
   const turnsLeft =
     active && !isProject
