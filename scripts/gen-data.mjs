@@ -258,6 +258,8 @@ const APP_ALIASES = {
   alien_control_center: 'alien_management_center',
   planetary_supercomputer: 'supercomputer',
   core_waste_dumps: 'core_waste_dump', // matches buildable id
+  planetary_stock_exchange: 'stock_exchange', // matches tech row 173 + buildable id
+  habitat_transformation: 'gaia_transformation', // terran->gaia project; tech row 211
 };
 
 const fieldById = new Map(fields.map((f) => [f.id, f]));

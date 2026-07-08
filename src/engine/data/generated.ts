@@ -4169,11 +4169,11 @@ export const APPLICATION_ROWS: readonly ApplicationRow[] = [
     "effectSummaryLen": 143
   },
   {
-    "id": "habitat_transformation",
+    "id": "gaia_transformation",
     "name": "Habitat Transformation",
     "subject": "ecology",
     "fieldId": "trans_adaptation",
-    "techId": null,
+    "techId": 211,
     "effectSummaryLen": 131
   },
   {
@@ -5521,11 +5521,11 @@ export const APPLICATION_ROWS: readonly ApplicationRow[] = [
     "effectSummaryLen": 151
   },
   {
-    "id": "planetary_stock_exchange",
+    "id": "stock_exchange",
     "name": "Planetary Stock-Exchange",
     "subject": "sociology",
     "fieldId": "macro_economics",
-    "techId": null,
+    "techId": 173,
     "effectSummaryLen": 51
   },
   {
