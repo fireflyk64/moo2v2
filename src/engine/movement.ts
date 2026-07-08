@@ -4,6 +4,7 @@
 
 import { ceilDiv } from './imath';
 import { starDistance } from './galaxy';
+import { leaderEmpireBonuses } from './leaders';
 import type { Empire, GameState, Ship, Star } from './types';
 
 /** best known drive speed in parsecs/turn */
@@ -16,6 +17,7 @@ export function driveSpeed(empire: Empire): number {
   if (k('hyper_drive')) speed = 6;
   if (k('interphased_drive')) speed = 7;
   if (empire.picks.includes('trans_dimensional')) speed += 2;
+  speed += leaderEmpireBonuses(empire).navigatorSpeed;
   return speed;
 }
 

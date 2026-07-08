@@ -87,6 +87,7 @@ function fixtureState(picks: string[], overrides?: Partial<{ climate: string; mi
         exploredStars: [1],
         designs: [],
         spies: { count: 0, target: null, mode: 'steal' },
+        leaders: [],
         eliminated: false,
       },
     ],
@@ -97,6 +98,7 @@ function fixtureState(picks: string[], overrides?: Partial<{ climate: string; mi
     relations: [],
     proposals: [],
     council: { nextVoteTurn: 25, pending: null },
+    leaderOffers: [],
     winner: null,
     winType: null,
   } as unknown as GameState;

@@ -36,14 +36,19 @@ function govSpyDefense(gov: string): number {
 }
 
 function offenseOf(state: GameState, empire: Empire): number {
-  return traitsOf(empire).spyingPct + empireAccum(state, empire).spyOffense;
+  return traitsOf(empire).spyingPct + empireAccum(state, empire).spyOffense + leaderEmpireBonuses(empire).spyOffense;
 }
 
 function defenseOf(state: GameState, empire: Empire): number {
+  // alien management centers harden the whole empire (non-cumulative)
+  const amc = state.colonies.some((c) => c.owner === empire.id && c.buildings.includes('alien_management_center'))
+    ? 10
+    : 0;
   return (
     floorDiv(traitsOf(empire).spyingPct, 2) +
     empireAccum(state, empire).spyDefense +
-    govSpyDefense(traitsOf(empire).government)
+    govSpyDefense(traitsOf(empire).government) +
+    amc
   );
 }
 
@@ -59,6 +64,15 @@ export function resolveEspionage(state: GameState, events: TurnEvent[]): void {
     const defendingSpies = target.spies.target === null ? target.spies.count : 0;
     const chance = clamp(15 + offenseOf(state, empire) - defenseOf(state, target) - 4 * defendingSpies, 2, 60);
     const rng = rngFor(state.seed, state.turn, 'spy', empire.id);
+
+    // assassin leaders on the defending side pick off an incoming agent first
+    const assassin = leaderEmpireBonuses(target).assassinPct;
+    if (assassin > 0 && empire.spies.count > 0 && rng.chancePct(assassin)) {
+      empire.spies.count--;
+      events.push({ visibleTo: empire.id, kind: 'spy_lost', payload: { target: target.id, assassinated: true } });
+      events.push({ visibleTo: target.id, kind: 'spy_assassinated', payload: { from: empire.id } });
+      if (empire.spies.count <= 0) continue;
+    }
 
     for (let i = 0; i < empire.spies.count; i++) {
       if (rng.chancePct(chance)) {

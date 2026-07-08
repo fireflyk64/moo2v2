@@ -14,6 +14,7 @@
 import { rngFor } from './rng';
 import { ceilDiv } from './imath';
 import { colonyPopUnits, empireOf, traitsOf } from './economy';
+import { leaderEmpireBonuses } from './leaders';
 import { areAtWar } from './battles';
 import { normalizeJobsForGroup } from './commands';
 import type { Colony, GameState, Ship, TurnEvent } from './types';
@@ -23,7 +24,11 @@ export const TROOPS_PER_TRANSPORT = 2;
 function groundStrength(state: GameState, empireId: number, defending: boolean, colony?: Colony): number {
   const empire = state.empires.find((e) => e.id === empireId);
   let str = 20;
-  if (empire) str += traitsOf(empire).groundPct;
+  if (empire) {
+    str += traitsOf(empire).groundPct;
+    const lb = leaderEmpireBonuses(empire); // commando / security leaders
+    str += defending ? lb.groundDefense : lb.groundAttack;
+  }
   if (defending && colony) {
     if (colony.buildings.includes('marine_barracks')) str += 5;
     if (colony.buildings.includes('armor_barracks')) str += 5;
@@ -154,7 +159,10 @@ export function assimilate(state: GameState, events: TurnEvent[]): void {
     const empire = state.empires.find((e) => e.id === colony.owner);
     if (!empire) continue;
     const gov = traitsOf(empire).government;
-    const n = gov === 'democracy' ? 4 : gov === 'unification' ? 20 : 8;
+    let n = gov === 'democracy' ? 4 : gov === 'unification' ? 20 : 8;
+    // telepath leaders and the alien management center halve resistance
+    if (leaderEmpireBonuses(empire).telepathAssimilate) n = Math.max(2, ceilDiv(n, 2));
+    if (colony.buildings.includes('alien_management_center')) n = Math.max(2, ceilDiv(n, 2));
     for (const g of colony.groups) {
       if (!g.unrest) continue;
       const rng = rngFor(state.seed, state.turn, 'assimilate', colony.id, g.race);

@@ -6,6 +6,7 @@
 import { relationKey, setRelation } from './battles';
 import { colonyPopUnits } from './economy';
 import { floorDiv } from './imath';
+import { leaderEmpireBonuses } from './leaders';
 import { grantApp } from './research';
 import type { Empire, GameState, Proposal, RelationEntry, TurnEvent } from './types';
 
@@ -103,8 +104,9 @@ export function diplomacyUpkeep(state: GameState, events: TurnEvent[]): void {
     const bond = Math.min(empirePop(state, rel.a), empirePop(state, rel.b));
     if (rel.treaties.trade) {
       const bc = floorDiv(bond, 4);
-      a.bc += bc;
-      b.bc += bc;
+      // trader leaders boost their own side's share
+      a.bc += bc + floorDiv(bc * leaderEmpireBonuses(a).tradeTreatyPct, 100);
+      b.bc += bc + floorDiv(bc * leaderEmpireBonuses(b).tradeTreatyPct, 100);
     }
     if (rel.treaties.research) {
       const rp = floorDiv(bond, 4);
@@ -146,7 +148,8 @@ function tallyCouncil(state: GameState, events: TurnEvent[]): void {
   let totalWeight = 0;
   for (const e of state.empires) {
     if (e.eliminated) continue;
-    const w = Math.max(1, floorDiv(empirePop(state, e.id), 5));
+    let w = Math.max(1, floorDiv(empirePop(state, e.id), 5));
+    w += floorDiv(w * leaderEmpireBonuses(e).councilWeightPct, 100); // diplomat leaders
     weights.set(e.id, w);
     totalWeight += w;
   }

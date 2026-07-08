@@ -242,9 +242,9 @@ export const EFFECTS: Record<string, EffectSpec> = {
   hyper_x_capacitors: { kind: 'ship_special', stub: 'beams fire twice (Phase 6 combat specials)' },
 
   // ---------------- sociology ----------------
-  space_academy: { kind: 'building', stub: 'crew experience (Phase 6 leaders)' },
+  space_academy: { kind: 'building', handler: 'leaders' }, // +1 leader XP/turn empire-wide (leaders.ts)
   xeno_psychology: { kind: 'empire_tech', stub: 'diplomacy bonus (Phase 6)' },
-  alien_management_center: { kind: 'building', stub: 'assimilation + spy defense (Phase 6)' },
+  alien_management_center: { kind: 'building', handler: 'ground' }, // faster assimilation (ground.ts) + spy defense (espionage.ts)
   stock_exchange: { kind: 'building', modifiers: [col('money_coeff_halves', 2)] },
   astro_university: {
     kind: 'building',
@@ -296,12 +296,12 @@ export const PICK_STATUS: Record<string, { handler?: string; stub?: string }> = 
   attack1: { handler: 'shipdesign' },
   attack2: { handler: 'shipdesign' },
   attack3: { handler: 'shipdesign' },
-  ground1: { stub: 'ground combat (Phase 6)' },
-  ground2: { stub: 'ground combat (Phase 6)' },
-  ground3: { stub: 'ground combat (Phase 6)' },
-  spying1: { stub: 'espionage (Phase 6)' },
-  spying2: { stub: 'espionage (Phase 6)' },
-  spying3: { stub: 'espionage (Phase 6)' },
+  ground1: { handler: 'ground' },
+  ground2: { handler: 'ground' },
+  ground3: { handler: 'ground' },
+  spying1: { handler: 'espionage' },
+  spying2: { handler: 'espionage' },
+  spying3: { handler: 'espionage' },
   feudal: { handler: 'economy' },
   dictatorship: { handler: 'economy' },
   democracy: { handler: 'economy' },
@@ -317,7 +317,7 @@ export const PICK_STATUS: Record<string, { handler?: string; stub?: string }> = 
   cybernetic: { handler: 'economy' },
   lithovore: { handler: 'economy' },
   repulsive: { stub: 'diplomacy limits (Phase 6)' },
-  charismatic: { stub: 'diplomacy/leaders (Phase 6)' },
+  charismatic: { handler: 'leaders' }, // +offer chance, -25% hire cost (leaders.ts)
   uncreative: { handler: 'research' },
   creative: { handler: 'research' },
   tolerant: { handler: 'economy' },

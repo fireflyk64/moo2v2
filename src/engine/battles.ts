@@ -4,6 +4,8 @@
 import { DEFAULT_ORDERS, runBattle, type BattleInput, type BattleOrders, type BattleResult, type CombatShipInit, type BattleTickFrame } from './combat';
 import { hullById, weaponById } from './data/index';
 import { colonyPopUnits } from './economy';
+import { leaderCombatBonuses } from './leaders';
+import { floorDiv } from './imath';
 import { rngFor } from './rng';
 import { baseDesign, designStats, HULLS_BUILDABLE, BASE_HULLS, type ShipDesign } from './shipdesign';
 import type { Colony, Empire, GameState, PendingBattle, Ship, TurnEvent } from './types';
@@ -199,6 +201,23 @@ export function buildBattleInput(state: GameState, battle: PendingBattle): Built
     if (base) {
       ships.push(base);
       baseColonyId = defColony.id;
+    }
+  }
+  // ship officers: fleet-wide bonuses per side (L2)
+  for (const side of [0, 1] as const) {
+    const empire = side === 0 ? attacker : defender;
+    const lb = leaderCombatBonuses(empire);
+    if (lb.beamAttack === 0 && lb.beamDefense === 0 && lb.dmgMaxPct === 0 && lb.speedPct === 0) continue;
+    for (const cs of ships) {
+      if (cs.side !== side) continue;
+      cs.beamAttack += lb.beamAttack;
+      cs.beamDefense += lb.beamDefense;
+      if (lb.speedPct > 0) cs.speed += floorDiv(cs.speed * lb.speedPct, 100);
+      if (lb.dmgMaxPct > 0) {
+        for (const w of cs.weapons) {
+          w.dmgMax += floorDiv(w.dmgMax * lb.dmgMaxPct, 100);
+        }
+      }
     }
   }
   return {
