@@ -419,6 +419,7 @@ function s12_victory(state: GameState, events: TurnEvent[]): void {
   const alive = state.empires.filter((e) => !e.eliminated);
   if (alive.length === 1 && state.empires.length > 1 && state.winner === null) {
     state.winner = alive[0]!.id;
+    state.winType = 'conquest';
     events.push({ visibleTo: -1, kind: 'victory', payload: { empireId: state.winner, type: 'conquest' } });
   }
 }

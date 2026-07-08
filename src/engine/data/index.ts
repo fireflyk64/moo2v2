@@ -64,7 +64,19 @@ function byId<T extends { id: string }>(rows: readonly T[], what: string): Reado
 export const pickById: ReadonlyMap<string, PickRow> = byId(PICK_ROWS, 'pick');
 export const fieldById: ReadonlyMap<string, FieldRow> = byId(FIELD_ROWS, 'field');
 export const techById: ReadonlyMap<string, TechRow> = byId(TECH_ROWS, 'tech');
-export const buildableById: ReadonlyMap<string, BuildableRow> = byId(BUILDABLE_ROWS, 'buildable');
+
+/** Curated buildable projects the source tables list only as applications.
+ * Terraform costs are OUR tunables (T1, data/README.md); the terraforming
+ * project's cost is dynamic (rises per completed step — items.ts). */
+export const CURATED_BUILDABLES: BuildableRow[] = [
+  { id: 'terraforming', techId: 184, cost: 250, maintenance: 0, group: 'special' },
+  { id: 'gaia_transformation', techId: 211, cost: 500, maintenance: 0, group: 'special' },
+];
+
+export const buildableById: ReadonlyMap<string, BuildableRow> = byId(
+  [...BUILDABLE_ROWS, ...CURATED_BUILDABLES],
+  'buildable',
+);
 export const hullById: ReadonlyMap<string, HullRow> = byId(HULL_ROWS, 'hull');
 export const weaponById: ReadonlyMap<string, WeaponRow> = byId(WEAPON_ROWS, 'weapon');
 export const weaponModById: ReadonlyMap<string, WeaponModRow> = byId(WEAPON_MOD_ROWS, 'weaponMod');
