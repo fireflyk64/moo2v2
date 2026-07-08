@@ -145,6 +145,34 @@ export function runHeadlessGame(opts: {
     state = gameEngine.apply(state, adv);
     gameEngine.takeEvents();
     log.push(adv);
+    // battle-orders sub-phase: every human side files default orders, then the
+    // host emits resolve_combat — the same sequence HostCore performs
+    if (state.phase === 'battle_orders') {
+      for (const battle of state.pendingBattles) {
+        for (const side of [battle.attacker, battle.defender]) {
+          if (side < 0) continue; // NPC orders are prefilled
+          const filled = side === battle.attacker ? battle.ordersA : battle.ordersD;
+          if (filled) continue;
+          const cmd: EngineCommand = {
+            turn: state.turn,
+            playerId: side,
+            kind: 'battle_orders',
+            payload: {
+              battleId: battle.id,
+              orders: { stance: side === battle.attacker ? 'charge' : 'hold_range', priority: 'nearest', retreatThresholdPct: 25, bombard: false },
+            },
+          };
+          if (validateCommand(state, cmd) === null) {
+            state = gameEngine.apply(state, cmd);
+            log.push(cmd);
+          }
+        }
+      }
+      const resolve: EngineCommand = { turn: state.turn, playerId: -1, kind: 'resolve_combat', payload: {} };
+      state = gameEngine.apply(state, resolve);
+      gameEngine.takeEvents();
+      log.push(resolve);
+    }
     hashes.push(gameEngine.hash(state));
     if (state.winner !== null) break;
   }

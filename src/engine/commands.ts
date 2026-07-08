@@ -705,6 +705,22 @@ const applyAssignLeader: Applier = (state, cmd) => {
   empire.leaders.find((l) => l.leaderId === p.leaderId)!.colonyId = p.colonyId;
 };
 
+// ---------- resign (concession) ----------
+
+const validateResign: Validator = () => null; // any live empire may concede
+
+const applyResign: Applier = (state, cmd) => {
+  const empire = empireOf(state, cmd.playerId);
+  empire.eliminated = true;
+  empire.leaders = [];
+  empire.spies = { count: 0, target: null, mode: 'steal' };
+  // the realm dissolves: fleets scatter, colonies fall silent, planets free up
+  state.ships = state.ships.filter((s) => s.owner !== cmd.playerId);
+  state.colonies = state.colonies.filter((c) => c.owner !== cmd.playerId);
+  state.proposals = state.proposals.filter((p) => p.from !== cmd.playerId && p.to !== cmd.playerId);
+  state.leaderOffers = state.leaderOffers.filter((o) => o.empireId !== cmd.playerId);
+};
+
 // ---------- Antaran assault (dimensional portal) ----------
 
 import { MONSTER_SPECS, hostileMonsterAt } from './npc';
@@ -844,6 +860,7 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   diplo_propose: { validate: validatePropose, apply: applyPropose },
   diplo_respond: { validate: validateRespond, apply: applyRespond },
   attack_antarans: { validate: validateAttackAntarans, apply: applyAttackAntarans },
+  resign: { validate: validateResign, apply: applyResign },
   cast_vote: { validate: validateVote, apply: applyVote },
   debug_grant_app: { validate: validateDebug, apply: applyDebugGrantApp },
   debug_add_bc: { validate: validateDebug, apply: applyDebugAddBc },
