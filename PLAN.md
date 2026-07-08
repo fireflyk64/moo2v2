@@ -272,13 +272,27 @@ room code (server field: local `http://127.0.0.1:8787` or default public server)
 
 ### Phase 6 — Full game systems ✅ when: headless 4-player 200-turn game exercises everything with stable hashes; each victory condition reachable in a scripted fixture
 
-- [ ] Leaders: hire/assign/level (🔍 skill magnitudes, costs, spawn frequency)
-- [ ] Espionage (🔍 success/detection formula), sabotage/steal outcomes as turn events
-- [ ] Diplomacy: proposals/treaties/trade/research pacts/tech exchange/surrender; human-to-human only
-- [ ] Galactic Council (🔍 vote timing/weights/thresholds) + diplomatic victory
-- [ ] Random events (option-gated); monsters roaming + guarded systems; Orion + Guardian
-- [ ] Antarans (🔍 attack cadence/scaling) + Antaran-conquest victory path
-- [ ] Victory/loss: conquest, council, Antaran, concession, optional score/time; endscreen
+- [x] Leaders: 46-leader pool from mechanics/leaders.md; hire/dismiss/assign commands;
+      offers/salaries/XP at S11; skill effects across economy/combat/espionage/diplomacy/
+      movement (magnitudes = our L1-L4 decisions, documented in data/README.md)
+- [x] Espionage: spy buildable (+1 agent, cap 10), E1 success formula (documented decision),
+      steal/sabotage as turn events, assassin/spy-master leaders, alien management center
+- [x] Diplomacy: proposals (peace/NAP/alliance/trade/research/gift/tech-exchange/surrender);
+      surrender transfers the whole realm; trader/diplomat leader bonuses
+- [x] Galactic Council: every 25 turns, two largest by population stand, votes weighted
+      pop/5, 2/3 threshold wins (fixture-tested). Deviation: no accept/reject "final war"
+      step — the tally is binding (documented simplification)
+- [x] Random events (option-gated, E1: 8 kinds, lucky-immune); monsters guard ~12% of
+      systems (M1 rescaled stat blocks); Orion = farthest star, Guardian + prize worlds,
+      bounty = death ray + Loknar offer. Deviation: monsters guard but do not roam (M1)
+- [x] Antarans (A1): raids from turn ~25 every 25-40 turns, scaling parties, raze on win;
+      dimensional portal + attack_antarans → home-garrison battle → Antaran victory
+- [x] Victory/loss: conquest, council, Antaran, concession (resign dissolves the realm);
+      endscreen banner per win type (full endscreen polish in Phase 7). Score/time victory
+      NOT implemented (optional; skipped — documented)
+- [x] Gate: tests/determinism/soak.test.ts — 4 players, 200 turns, all modes on, replay==live
+      hash + identical rerun trail (~3 s); combat specials batch (19 designable specials,
+      colony defense batteries) landed en route
 
 ### Phase 7 — UI completion + modes polish ✅ when: full game start→victory by 2 humans, spreadsheet-first; auction e2e passes; all screens keyboard-navigable
 

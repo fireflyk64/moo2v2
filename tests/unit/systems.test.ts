@@ -140,6 +140,33 @@ describe('surrender', () => {
   });
 });
 
+describe('council victory', () => {
+  it('two-thirds of population-weighted votes elects a ruler', () => {
+    let state = newGame();
+    // make empire 0 dominant so its own vote carries 2/3 of the weight
+    const c0 = state.colonies.find((c) => c.owner === 0)!;
+    c0.groups[0]!.popK = 40_000;
+    state.council.pending = { candidates: [0, 1], votes: {} };
+    state = gameEngine.apply(state, { turn: state.turn, playerId: 0, kind: 'cast_vote', payload: { candidate: 0 } });
+    state = gameEngine.apply(state, { turn: state.turn, playerId: 1, kind: 'cast_vote', payload: { candidate: -1 } });
+    state = advance(state);
+    expect(state.winner).toBe(0);
+    expect(state.winType).toBe('council');
+  });
+});
+
+describe('concession', () => {
+  it('resigning dissolves the realm and hands the last empire the game', () => {
+    let state = newGame();
+    state = gameEngine.apply(state, { turn: state.turn, playerId: 1, kind: 'resign', payload: {} });
+    expect(state.empires[1]!.eliminated).toBe(true);
+    expect(state.colonies.some((c) => c.owner === 1)).toBe(false);
+    expect(state.ships.some((s) => s.owner === 1)).toBe(false);
+    state = advance(state);
+    expect(state.winner).toBe(0);
+  });
+});
+
 describe('blockade', () => {
   it('blockaded colonies get no freighter food', () => {
     let state = newGame();
