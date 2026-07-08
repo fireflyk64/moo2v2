@@ -69,6 +69,8 @@ export interface CombatShipInit {
   /** structure carried over from previous battles (<= structureHp) */
   startingStructure: number;
   startingArmor: number;
+  /** design specials with in-battle behavior (ecm, damper_field, ...) */
+  specials?: string[];
 }
 
 export interface BattleInput {
@@ -134,6 +136,9 @@ interface Sim {
   ammo: number[];
   stance: Stance;
   priority: TargetPriority;
+  specials: Set<string>;
+  missileEvasion: number; // % chance an arriving missile/torpedo misses
+  repairAcc: number; // automated repair unit accumulator
 }
 
 interface Projectile {
@@ -184,7 +189,25 @@ export function runBattle(
     ammo: init.weapons.map((w) => (w.ammo < 0 ? -1 : w.ammo * w.count)),
     stance: init.side === 0 ? input.ordersA.stance : input.ordersD.stance,
     priority: init.side === 0 ? input.ordersA.priority : input.ordersD.priority,
+    specials: new Set(init.specials ?? []),
+    missileEvasion: 0,
+    repairAcc: 0,
   }));
+  // ECM: personal jammers, plus fleet-wide wide-area jammers
+  const fleetJam = [false, false];
+  for (const s of sims) if (s.specials.has('wide_area_jammer')) fleetJam[s.init.side] = true;
+  for (const s of sims) {
+    let ev = 0;
+    if (s.specials.has('ecm_jammer')) ev = 40;
+    if (s.specials.has('multi_wave_ecm_jammer')) ev = 70;
+    if (fleetJam[s.init.side]) ev = Math.max(ev, 40);
+    s.missileEvasion = ev;
+  }
+  // warp dissipater pins the OTHER side on the field
+  const noRetreat = [false, false];
+  for (const s of sims) {
+    if (s.specials.has('warp_dissipater')) noRetreat[1 - s.init.side] = true;
+  }
 
   // deployment: attackers along left edge, defenders along right
   let ai = 0;
@@ -279,8 +302,8 @@ export function runBattle(
       }
       s.x += dx;
       s.y = clamp(s.y + dy, 8 * FP, FIELD_H - 8 * FP);
-      // edges
-      if (s.stance === 'evade_retreat') {
+      // edges (warp dissipaters pin the enemy on the field)
+      if (s.stance === 'evade_retreat' && !noRetreat[s.init.side]) {
         if ((s.init.side === 0 && s.x <= 4 * FP) || (s.init.side === 1 && s.x >= FIELD_W - 4 * FP)) {
           s.retreated = true;
         }
@@ -305,9 +328,18 @@ export function runBattle(
       const d = idist(Math.abs(ddx), Math.abs(ddy));
       const step = p.speed * FP;
       if (d <= step) {
-        // impact
-        const dmg = applyDamage(t, p.dmg, ['guided'], frameShots, tick, p.from, p.targetIdx, p.weaponId, p.classId, frameDeaths, sims);
-        void dmg;
+        // impact: lightning field, then ECM evasion, then damage
+        if (t.specials.has('lightning_field') && rng.chancePct(50)) {
+          frameShots.push({ tick, from: p.from, to: t.init.shipId, weaponId: p.weaponId, classId: p.classId, hit: false, dmg: 0 });
+          p.hp = 0;
+          continue;
+        }
+        if (t.missileEvasion > 0 && rng.chancePct(t.missileEvasion)) {
+          frameShots.push({ tick, from: p.from, to: t.init.shipId, weaponId: p.weaponId, classId: p.classId, hit: false, dmg: 0 });
+          p.hp = 0;
+          continue;
+        }
+        applyDamage(t, p.dmg, ['guided'], frameShots, tick, p.from, p.targetIdx, p.weaponId, p.classId, frameDeaths, sims);
         p.hp = 0;
       } else {
         p.x += roundDiv(ddx * step, d);
@@ -340,7 +372,7 @@ export function runBattle(
             const hit = rng.chancePct(70);
             frameShots.push({ tick, from: s.init.shipId, to: -1, weaponId: w.weaponId, classId: 0, hit, dmg: 0 });
             if (hit) incoming.hp = 0;
-            s.cds[wi] = cooldownOf(w, crippled);
+            s.cds[wi] = cooldownOf(w, crippled, s.specials);
             continue;
           }
         }
@@ -348,7 +380,9 @@ export function runBattle(
         const t = s.targetIdx >= 0 ? sims[s.targetIdx] : undefined;
         if (!t || !active(t)) continue;
         const dist = idist(Math.abs(t.x - s.x), Math.abs(t.y - s.y));
-        const band = bandOf(dist);
+        // rangemaster treats the band one step closer
+        let band = bandOf(dist);
+        if (band > 0 && s.specials.has('rangemaster_target_unit')) band = (band - 1) as 0 | 1 | 2;
 
         if (w.classId === 0) {
           const maxBand = isPd ? BAND_SHORT : w.mods.includes('hv') ? BAND_HV : BAND_LONG;
@@ -356,12 +390,13 @@ export function runBattle(
           const shots = w.mods.includes('af') ? 3 : 1;
           for (let burst = 0; burst < shots; burst++) {
             for (let n = 0; n < w.count; n++) {
-              const hitPct = clamp(
+              let hitPct = clamp(
                 50 + s.init.beamAttack - t.init.beamDefense + BAND_HIT[band]! +
                   (w.mods.includes('co') ? 25 : 0) + (w.mods.includes('af') ? -20 : 0),
                 5,
                 95,
               );
+              if (t.specials.has('displacement_device')) hitPct = Math.floor((hitPct * 67) / 100);
               const hit = rng.chancePct(hitPct);
               if (!hit) {
                 frameShots.push({ tick, from: s.init.shipId, to: t.init.shipId, weaponId: w.weaponId, classId: 0, hit: false, dmg: 0 });
@@ -372,10 +407,13 @@ export function runBattle(
               dmg = Math.max(1, roundDiv(dmg * dmgPct, 100));
               if (w.mods.includes('hv')) dmg = roundDiv(dmg * 150, 100);
               if (isPd) dmg = Math.max(1, roundDiv(dmg * 50, 100));
-              applyDamage(t, dmg, w.mods, frameShots, tick, s.init.shipId, s.targetIdx, w.weaponId, 0, frameDeaths, sims);
+              if (s.specials.has('high_energy_focus')) dmg = roundDiv(dmg * 150, 100);
+              if (s.specials.has('structural_analyzer')) dmg *= 2;
+              const mods = s.specials.has('achilles_targeting_unit') ? [...w.mods, 'achilles'] : w.mods;
+              applyDamage(t, dmg, mods, frameShots, tick, s.init.shipId, s.targetIdx, w.weaponId, 0, frameDeaths, sims);
             }
           }
-          s.cds[wi] = cooldownOf(w, crippled);
+          s.cds[wi] = cooldownOf(w, crippled, s.specials);
         } else if (w.classId === 1 || w.classId === 2) {
           const launchRange = w.classId === 1 ? 600 * FP : 500 * FP;
           if (dist > launchRange) continue;
@@ -394,19 +432,28 @@ export function runBattle(
             });
           }
           if (s.ammo[wi]! > 0) s.ammo[wi] = Math.max(0, s.ammo[wi]! - volley);
-          s.cds[wi] = cooldownOf(w, crippled);
+          s.cds[wi] = cooldownOf(w, crippled, s.specials);
         }
       }
     }
 
-    // --- shield regen (3%/tick via fractional accumulator) ---
+    // --- shield regen (3%/tick; 5% with a capacitor) + automated repair ---
     for (const s of sims) {
       if (s.alive && s.init.shieldPool > 0 && s.shield < s.init.shieldPool) {
-        s.shieldRegenAcc += s.init.shieldPool * 3;
+        const rate = s.specials.has('shield_capacitor') ? 5 : 3;
+        s.shieldRegenAcc += s.init.shieldPool * rate;
         if (s.shieldRegenAcc >= 100) {
           const whole = Math.floor(s.shieldRegenAcc / 100);
           s.shieldRegenAcc -= whole * 100;
           s.shield = Math.min(s.init.shieldPool, s.shield + whole);
+        }
+      }
+      if (s.alive && s.specials.has('automated_repair_unit') && s.structure < s.init.structureHp) {
+        s.repairAcc += s.init.structureHp; // 0.5%/tick => x200 accumulator
+        if (s.repairAcc >= 200) {
+          const whole = Math.floor(s.repairAcc / 200);
+          s.repairAcc -= whole * 200;
+          s.structure = Math.min(s.init.structureHp, s.structure + whole);
         }
       }
     }
@@ -465,9 +512,13 @@ export function runBattle(
   };
 }
 
-function cooldownOf(w: CombatWeapon, crippled: boolean): number {
+function cooldownOf(w: CombatWeapon, crippled: boolean, specials?: Set<string>): number {
   let base = w.classId === 0 ? 12 : w.classId === 1 ? 25 : 30;
   if (w.mods.includes('af')) base = roundDiv(base * 60, 100);
+  if (specials) {
+    if (w.classId === 0 && specials.has('hyper_x_capacitors')) base = Math.max(1, roundDiv(base, 2));
+    if ((w.classId === 1 || w.classId === 2) && specials.has('fast_missile_racks')) base = Math.max(1, roundDiv(base, 2));
+  }
   base = roundDiv(base * 100, COMBAT_PACE);
   return crippled ? base * 2 : base;
 }
@@ -509,7 +560,12 @@ function applyDamage(
   sims: Sim[],
 ): number {
   let dmg = raw;
-  if (!mods.includes('sp')) {
+  // damper field (Antaran tech): incoming damage reduced by 3/4
+  if (t.specials.has('damper_field')) dmg = Math.max(1, Math.floor(dmg / 4));
+  // energy absorber (monster trait): quarter of the damage is drunk
+  if (t.specials.has('energy_absorber')) dmg = Math.max(1, Math.floor((dmg * 3) / 4));
+  const pierces = mods.includes('sp') && !t.specials.has('hard_shields');
+  if (!pierces) {
     // flat per-hit reduction then pool absorption
     if (!mods.includes('ap')) dmg = Math.max(0, dmg - t.init.shieldFlat);
     const absorbed = Math.min(t.shield, dmg);
@@ -517,7 +573,7 @@ function applyDamage(
     dmg -= absorbed;
   }
   if (dmg > 0) {
-    if (mods.includes('ap')) {
+    if (mods.includes('ap') || mods.includes('achilles')) {
       t.structure -= dmg;
     } else {
       const toArmor = Math.min(t.armor, dmg);

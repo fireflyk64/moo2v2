@@ -7,7 +7,7 @@ import { colonyPopUnits } from './economy';
 import { leaderCombatBonuses } from './leaders';
 import { floorDiv } from './imath';
 import { rngFor } from './rng';
-import { baseDesign, designStats, HULLS_BUILDABLE, BASE_HULLS, type ShipDesign } from './shipdesign';
+import { baseDesign, designStats, knownWeapons, HULLS_BUILDABLE, BASE_HULLS, type ShipDesign } from './shipdesign';
 import type { Colony, Empire, GameState, PendingBattle, Ship, TurnEvent } from './types';
 
 export function relationKey(a: number, b: number): [number, number] {
@@ -133,6 +133,7 @@ function shipToCombat(state: GameState, empire: Empire, ship: Ship, side: 0 | 1)
     })),
     startingStructure: Math.max(1, stats.structureHp - ship.dmgStructure),
     startingArmor: Math.max(0, stats.armorHp - ship.dmgArmor),
+    specials: design.specials,
   };
 }
 
@@ -140,9 +141,23 @@ function baseToCombat(state: GameState, empire: Empire, colony: Colony, syntheti
   const baseBuilding = (['star_fortress', 'battlestation', 'star_base'] as const).find((b) =>
     colony.buildings.includes(b === 'battlestation' ? 'battle_station' : b),
   );
-  if (!baseBuilding) return null;
-  const hullId = baseBuilding === 'battlestation' ? 'battlestation' : baseBuilding;
+  const hasBatteries = colony.buildings.includes('missile_base') || colony.buildings.includes('ground_batteries');
+  if (!baseBuilding && !hasBatteries) return null;
+  // ground batteries alone still put up a fight, on star-base-grade emplacements
+  const hullId = baseBuilding ? (baseBuilding === 'battlestation' ? 'battlestation' : baseBuilding) : 'star_base';
   const design = baseDesign(state, empire, hullId);
+  if (!baseBuilding) design.weapons = []; // no orbital platform of its own
+  // colony defense buildings bolt extra mounts onto the defense
+  const arsenal = knownWeapons(empire);
+  if (colony.buildings.includes('missile_base')) {
+    const missile = arsenal.filter((w) => w.classId === 1).sort((a, b) => b.tacticalDamage.max - a.tacticalDamage.max)[0];
+    if (missile) design.weapons.push({ weapon: missile.id, count: 4, mods: [] });
+  }
+  if (colony.buildings.includes('ground_batteries')) {
+    const beam = arsenal.filter((w) => w.classId === 0 && w.techId !== 0 && w.availableMods.includes('hv')).sort((a, b) => b.tacticalDamage.max - a.tacticalDamage.max)[0];
+    if (beam) design.weapons.push({ weapon: beam.id, count: 6, mods: ['hv'] });
+  }
+  if (design.weapons.length === 0) return null;
   const stats = designStats(state, empire, { ...design, weapons: design.weapons });
   if (typeof stats === 'string') return null;
   return {
@@ -251,12 +266,12 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
   const destroyedIds = new Set<number>();
   for (const o of result.outcomes) {
     if (o.shipId >= 1_000_000) {
-      // defense base
+      // defense base + ground batteries fall together
       if (o.destroyed && built.baseColonyId !== null) {
         const colony = state.colonies.find((c) => c.id === built.baseColonyId);
         if (colony) {
           colony.buildings = colony.buildings.filter(
-            (b) => !['star_base', 'battle_station', 'star_fortress'].includes(b),
+            (b) => !['star_base', 'battle_station', 'star_fortress', 'missile_base', 'ground_batteries'].includes(b),
           );
         }
       }
@@ -267,9 +282,15 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
     if (o.destroyed) {
       destroyedIds.add(o.shipId);
     } else {
-      ship.dmgStructure = Math.max(0, o.structureMax - o.structureLeft);
       const cs = built.input.ships.find((c) => c.shipId === o.shipId);
-      ship.dmgArmor = cs ? Math.max(0, cs.armorHp - o.armorLeft) : 0;
+      if (cs?.specials?.includes('advanced_damage_control')) {
+        // damage control crews patch everything after the pass
+        ship.dmgStructure = 0;
+        ship.dmgArmor = 0;
+      } else {
+        ship.dmgStructure = Math.max(0, o.structureMax - o.structureLeft);
+        ship.dmgArmor = cs ? Math.max(0, cs.armorHp - o.armorLeft) : 0;
+      }
       if (o.retreated) {
         // retreat toward nearest own colony star (or stay if none)
         const empire = state.empires.find((e) => e.id === ship.owner)!;

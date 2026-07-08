@@ -56,13 +56,33 @@ const ARMOR_APPS = ['titanium_armor', 'tritanium_armor', 'zortrium_armor', 'neut
 const DRIVE_APPS = ['nuclear_drive', 'fusion_drive', 'ion_drive', 'anti_matter_drive', 'hyper_drive', 'interphased_drive'];
 const ARMOR_MULT = [1, 2, 5, 6, 8, 10];
 
-/** Phase 4 supported specials: id -> space% of hull. More arrive in Phase 5. */
+/** Designable specials: id -> space% of hull. Effects: designStats (static
+ * stats) or combat.ts (in-battle behavior, keyed off CombatShipInit.specials). */
 export const SPECIALS: Record<string, number> = {
   battle_pods: 0, // grants +50% space instead of using it
   reinforced_hull: 5,
   battle_scanner: 5,
   inertial_stabilizer: 5,
-  shield_capacitor: 5,
+  shield_capacitor: 5, // shield regen 3% -> 5%/tick
+  ecm_jammer: 5, // 40% missile evasion
+  multi_wave_ecm_jammer: 8, // 70% missile evasion
+  wide_area_jammer: 10, // 40% missile evasion for the whole fleet
+  hard_shields: 5, // +3 flat reduction, immune to shield-piercing
+  multi_phased_shields: 8, // +50% shield pool
+  automated_repair_unit: 8, // repairs ~0.5% structure/tick in combat
+  advanced_damage_control: 8, // full repair after every battle
+  high_energy_focus: 8, // +50% beam damage
+  hyper_x_capacitors: 10, // beams cycle twice as fast
+  fast_missile_racks: 5, // missiles cycle twice as fast
+  heavy_armor: 10, // armor HP x3
+  augmented_engines: 8, // +5 combat speed
+  inertia_nullifier: 8, // +4 combat speed (agility)
+  achilles_targeting_unit: 8, // beams bypass armor (shields still apply)
+  structural_analyzer: 8, // beam damage x2
+  rangemaster_target_unit: 5, // range band treated one step closer
+  warp_dissipater: 10, // enemy ships cannot retreat off the field
+  displacement_device: 10, // 33% of incoming direct fire misses
+  lightning_field: 8, // 50% of incoming missiles/torpedoes destroyed
 };
 
 function bestTier(empire: Empire, apps: string[], alwaysFirst = false): number {
@@ -247,8 +267,11 @@ export function designStats(state: GameState, empire: Empire, design: Omit<ShipD
   const armorTier = bestArmor(empire);
   const driveTier = bestDrive(empire);
   const armorMult = ARMOR_MULT[armorTier - 1] ?? 1;
-  const combatSpeed = hull.driveHp === 0 ? 0 : 3 + driveTier + (traits.transDimensional ? 4 : 0);
+  let combatSpeed = hull.driveHp === 0 ? 0 : 3 + driveTier + (traits.transDimensional ? 4 : 0);
+  if (combatSpeed > 0 && design.specials.includes('augmented_engines')) combatSpeed += 5;
+  if (combatSpeed > 0 && design.specials.includes('inertia_nullifier')) combatSpeed += 4;
   const structMult = design.specials.includes('reinforced_hull') ? 3 : 1;
+  const armorSpecialMult = design.specials.includes('heavy_armor') ? 3 : 1;
 
   const beamAttack =
     design.computer * 25 + (design.specials.includes('battle_scanner') ? 50 : 0) + traits.shipAttackPct;
@@ -261,6 +284,10 @@ export function designStats(state: GameState, empire: Empire, design: Omit<ShipD
 
   const SHIELD_POOL = [0, 5, 15, 25, 35, 50];
   const SHIELD_FLAT = [0, 1, 3, 5, 7, 10];
+  let shieldPool = SHIELD_POOL[design.shield]! * Math.max(1, hullIdx);
+  if (design.specials.includes('multi_phased_shields')) shieldPool = roundDiv(shieldPool * 150, 100);
+  let shieldFlat = SHIELD_FLAT[design.shield]!;
+  if (design.specials.includes('hard_shields')) shieldFlat += 3;
 
   return {
     hull,
@@ -271,10 +298,10 @@ export function designStats(state: GameState, empire: Empire, design: Omit<ShipD
     beamAttack,
     beamDefense,
     combatSpeed,
-    armorHp: hull.armorHp * armorMult,
+    armorHp: hull.armorHp * armorMult * armorSpecialMult,
     structureHp: hull.structureHp * armorMult * structMult,
-    shieldPool: SHIELD_POOL[design.shield]! * Math.max(1, hullIdx),
-    shieldFlat: SHIELD_FLAT[design.shield]!,
+    shieldPool,
+    shieldFlat,
     weapons,
   };
 }
