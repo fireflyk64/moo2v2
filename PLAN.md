@@ -340,11 +340,18 @@ room code (server field: local `http://127.0.0.1:8787` or default public server)
 
 ### Phase 9 — Deploy + handoff ✅ when: playable at public URL between two machines via pqrstuvw.xyz/lobbylink; a fresh dev/VM can resume from the repo alone
 
-- [ ] Static production build (base path config); coi-serviceworker (or equivalent) for OPFS cross-origin isolation on static hosts
-- [ ] Default server pqrstuvw.xyz/lobbylink + custom-server field
-- [ ] README: setup, local lobby server, test suites, architecture map
-- [ ] `src/engine/data/README.md`: formula decisions + remaining 🔍 log
-- [ ] Final PLAN.md status sync
+- [x] Static production build (`npm run build`, relative base `./`); original COI service
+      worker (`public/coi-sw.js`, registered from index.html when not isolated) supplies
+      COOP/COEP on static hosts; verified via `vite preview`
+- [x] Default server `https://pqrstuvw.xyz/lobbylink` (DEFAULT_SERVER) + custom-server
+      field on the Home screen (both since Phase 2)
+- [x] README: setup, local lobby server, test suites, architecture map, multiplayer
+      model, optional modes
+- [x] `src/engine/data/README.md`: complete decision table (F1-F14, C, L1-L4, T1-T2,
+      M1, A1, E1) — the 🔍 gaps of the original plan are all resolved-and-documented
+- [x] Final PLAN.md status sync (this file). NOTE: publishing dist/ to a public URL and
+      the cross-machine playtest is an operator step — the build is static-host ready
+      and the public signaling allowlist already covers danielrh.github.io
 
 ## Verification
 
