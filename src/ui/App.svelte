@@ -1,6 +1,9 @@
 <script lang="ts">
-  import { ENGINE_VERSION } from '@engine/index';
   import StorageSmoke from './dev/StorageSmoke.svelte';
+  import Home from './screens/Home.svelte';
+  import Lobby from './screens/Lobby.svelte';
+  import StubGame from './screens/StubGame.svelte';
+  import { app } from './state.svelte';
 
   let route = $state(location.hash);
   window.addEventListener('hashchange', () => (route = location.hash));
@@ -9,9 +12,12 @@
 <main>
   {#if route === '#storage-smoke'}
     <StorageSmoke />
+  {:else if app.screen === 'home'}
+    <Home />
+  {:else if app.screen === 'lobby'}
+    <Lobby />
   {:else}
-    <h1>MOO2v2</h1>
-    <p data-testid="engine-version">engine v{ENGINE_VERSION}</p>
+    <StubGame />
   {/if}
 </main>
 

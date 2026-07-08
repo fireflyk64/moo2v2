@@ -173,6 +173,12 @@ export class HostCore<S> {
         reason: `data version mismatch (host ${this.dataVersion}, you ${msg.dataVersion})`,
       });
     }
+    if (this.started && !this.seats.has(from)) {
+      return this.sendTo(from, {
+        t: 'version_reject',
+        reason: 'game already started; seat not part of this game',
+      });
+    }
     const seat: Seat = this.seats.get(from) ?? {
       name: msg.name,
       ready: false,
@@ -239,6 +245,7 @@ export class HostCore<S> {
     if (cmd.kind === 'game_start') {
       const start = cmd.payload as GameStartPayload;
       this.state = this.engine.init(start);
+      this.settings = start.settings;
       // Seat roster is part of game_start so a resumed host (fresh HostCore
       // folding the persisted log) still broadcasts to every player.
       for (const p of start.players) {

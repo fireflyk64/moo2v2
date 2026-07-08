@@ -1,12 +1,13 @@
 import { defineConfig } from '@playwright/test';
 
 // Uses the system Chrome (channel) to avoid a browser download; --no-sandbox and
-// --disable-dev-shm-usage are required inside this dev sandbox.
+// --disable-dev-shm-usage are required inside this dev sandbox. The second web
+// server is the local lobbylink signaling server (Go) for real-WebRTC tests.
 export default defineConfig({
   testDir: 'e2e',
   workers: 1,
   fullyParallel: false,
-  timeout: 90_000,
+  timeout: 120_000,
   retries: 0,
   reporter: [['list']],
   use: {
@@ -17,10 +18,18 @@ export default defineConfig({
     },
     baseURL: 'http://localhost:5173',
   },
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: true,
-    timeout: 30_000,
-  },
+  webServer: [
+    {
+      command: 'npm run dev',
+      url: 'http://localhost:5173',
+      reuseExistingServer: true,
+      timeout: 30_000,
+    },
+    {
+      command: 'bash scripts/run-lobby-server.sh',
+      url: 'http://127.0.0.1:8787/healthz',
+      reuseExistingServer: true,
+      timeout: 180_000, // first run downloads the Go toolchain
+    },
+  ],
 });
