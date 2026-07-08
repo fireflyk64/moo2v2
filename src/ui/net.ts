@@ -4,7 +4,8 @@
 
 import { ENGINE_VERSION } from '@engine/index';
 import { DATA_VERSION } from '@engine/data/index';
-import { stubEngine, type StubState } from '@protocol/engineAdapter';
+import { gameEngine } from '@engine/adapter';
+import type { GameState } from '@engine/types';
 import type { EngineAdapter } from '@protocol/engineAdapter';
 import type { HostCore } from '@protocol/host';
 import { LobbylinkTransport } from '@protocol/lobbylinkTransport';
@@ -25,8 +26,8 @@ export interface RoomParams {
 
 export interface ActiveGame {
   transport: LobbylinkTransport;
-  session: GameSession<StubState>;
-  host: HostCore<StubState> | null;
+  session: GameSession<GameState>;
+  host: HostCore<GameState> | null;
   store: GameStore | null;
   params: RoomParams;
   startGame: () => void;
@@ -35,20 +36,20 @@ export interface ActiveGame {
 interface ResumeInfo {
   gameId: string;
   lastSeq: number;
-  state: StubState | null;
+  state: GameState | null;
   log: LogCommand[];
 }
 
 async function loadResume(
   store: GameStore,
   roomCode: string,
-  engine: EngineAdapter<StubState>,
+  engine: EngineAdapter<GameState>,
 ): Promise<ResumeInfo | null> {
   const games = await store.listGames();
   const g = games.find((x) => x.room_code === roomCode && x.status === 'active');
   if (!g) return null;
   const snap = await store.latestSnapshot(g.game_id);
-  let state: StubState | null = snap ? engine.deserialize(snap.stateJson) : null;
+  let state: GameState | null = snap ? engine.deserialize(snap.stateJson) : null;
   let lastSeq = snap?.seq ?? -1;
   const tail = await store.readCommands(g.game_id, lastSeq + 1);
   for (const c of tail) {
@@ -89,12 +90,12 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
     lobbyServer: params.server,
   };
 
-  const resume = store ? await loadResume(store, params.code, stubEngine) : null;
+  const resume = store ? await loadResume(store, params.code, gameEngine as unknown as EngineAdapter<GameState>) : null;
 
   if (transport.selfId === 0) {
-    const hosted = createHostedGame<StubState>({
+    const hosted = createHostedGame<GameState>({
       transport,
-      engine: stubEngine,
+      engine: gameEngine as unknown as EngineAdapter<GameState>,
       store,
       settings: { ...DEFAULT_SETTINGS, playerCount: params.playerCount },
       identity,
@@ -110,9 +111,9 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
     };
   }
 
-  const session = joinGame<StubState>({
+  const session = joinGame<GameState>({
     transport,
-    engine: stubEngine,
+    engine: gameEngine as unknown as EngineAdapter<GameState>,
     store,
     identity,
     ...(resume ? { resume: { gameId: resume.gameId, lastSeq: resume.lastSeq, state: resume.state } } : {}),

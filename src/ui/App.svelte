@@ -2,7 +2,7 @@
   import StorageSmoke from './dev/StorageSmoke.svelte';
   import Home from './screens/Home.svelte';
   import Lobby from './screens/Lobby.svelte';
-  import StubGame from './screens/StubGame.svelte';
+  import GameShell from './screens/GameShell.svelte';
   import { app } from './state.svelte';
 
   let route = $state(location.hash);
@@ -17,7 +17,7 @@
   {:else if app.screen === 'lobby'}
     <Lobby />
   {:else}
-    <StubGame />
+    <GameShell />
   {/if}
 </main>
 
