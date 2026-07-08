@@ -99,6 +99,16 @@ export class MemoryHub {
     return ep;
   }
 
+  /** Re-occupy a vacated slot with a fresh endpoint (host/page restart). */
+  rejoinSlot(id: number): MemoryEndpoint {
+    if (this.endpoints.has(id)) throw new Error(`slot ${id} still occupied`);
+    const ep = new MemoryEndpoint(this, id);
+    this.endpoints.set(id, ep);
+    this.connected.set(id, true);
+    this.emitAllExcept(id, { type: 'player-rejoined', playerId: id });
+    return ep;
+  }
+
   leave(id: number): void {
     if (!this.endpoints.delete(id)) return;
     this.connected.delete(id);

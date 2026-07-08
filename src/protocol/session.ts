@@ -33,18 +33,24 @@ export interface SessionOptions<S> {
   link: HostLink;
   engine: EngineAdapter<S>;
   store: GameStore | null;
-  gameId: string;
   playerId: number;
   name: string;
   engineVersion: string;
   dataVersion: string;
+  roomCode: string;
+  lobbyServer: string;
   /** Resume state: highest seq already folded from local storage. */
-  resume?: { lastSeq: number; state: S | null };
+  resume?: { gameId: string; lastSeq: number; state: S | null };
+}
+
+/** All peers derive the same game id from the shared seed. */
+export function gameIdFromSeed(seed: string): string {
+  return `g-${seed.slice(0, 16)}`;
 }
 
 export class GameSession<S> {
   readonly playerId: number;
-  readonly gameId: string;
+  gameId: string | null = null;
 
   private link: HostLink;
   private readonly engine: EngineAdapter<S>;
@@ -52,6 +58,8 @@ export class GameSession<S> {
   private readonly name: string;
   private readonly engineVersion: string;
   private readonly dataVersion: string;
+  private readonly roomCode: string;
+  private readonly lobbyServer: string;
 
   private authState: S | null = null;
   private lastSeq = -1;
@@ -72,12 +80,14 @@ export class GameSession<S> {
     this.link = opts.link;
     this.engine = opts.engine;
     this.store = opts.store;
-    this.gameId = opts.gameId;
     this.playerId = opts.playerId;
     this.name = opts.name;
     this.engineVersion = opts.engineVersion;
     this.dataVersion = opts.dataVersion;
+    this.roomCode = opts.roomCode;
+    this.lobbyServer = opts.lobbyServer;
     if (opts.resume) {
+      this.gameId = opts.resume.gameId;
       this.lastSeq = opts.resume.lastSeq;
       this.authState = opts.resume.state;
       this.startedFlag = opts.resume.state !== null;
@@ -202,9 +212,10 @@ export class GameSession<S> {
         return;
       }
       case 'chat_deliver': {
-        if (this.store) {
+        if (this.store && this.gameId) {
+          const gameId = this.gameId;
           this.persist(() =>
-            this.store!.appendChat(this.gameId, {
+            this.store!.appendChat(gameId, {
               id: msg.id,
               turn: msg.turn,
               from: msg.from,
@@ -230,8 +241,11 @@ export class GameSession<S> {
       return;
     }
     if (cmd.kind === 'game_start') {
-      this.authState = this.engine.init(cmd.payload as GameStartPayload);
+      const start = cmd.payload as GameStartPayload;
+      this.authState = this.engine.init(start);
       this.startedFlag = true;
+      this.gameId = gameIdFromSeed(start.seed);
+      if (this.store) this.persist(() => this.ensureGameRow(start));
     } else if (this.authState) {
       this.authState = this.engine.apply(this.authState, cmd);
     }
@@ -243,7 +257,8 @@ export class GameSession<S> {
     this.pending = this.pending.filter((p) => p.turn >= turn);
     this.plannedDirty = true;
 
-    if (this.store) {
+    if (this.store && this.gameId) {
+      const gameId = this.gameId;
       const record = {
         seq: cmd.seq,
         turn: cmd.turn,
@@ -251,7 +266,7 @@ export class GameSession<S> {
         kind: cmd.kind,
         payload: cmd.payload,
       };
-      this.persist(() => this.store!.appendCommands(this.gameId, [record]));
+      this.persist(() => this.store!.appendCommands(gameId, [record]));
     }
 
     if (cmd.kind === 'game_start') {
@@ -260,16 +275,41 @@ export class GameSession<S> {
       const newTurn = this.engine.turnOf(this.authState);
       const hash = this.engine.hash(this.authState);
       this.link.send({ t: 'hash_report', turn: newTurn - 1, hash });
-      if (this.store) {
-        this.persist(() => this.store!.saveTurnHash(this.gameId, newTurn - 1, hash));
+      if (this.store && this.gameId) {
+        const gameId = this.gameId;
+        this.persist(() => this.store!.saveTurnHash(gameId, newTurn - 1, hash));
         if ((newTurn - 1) % SNAPSHOT_EVERY_TURNS === 0) {
           const json = this.engine.serialize(this.authState);
-          this.persist(() => this.store!.saveSnapshot(this.gameId, newTurn - 1, cmd.seq, json, hash));
+          this.persist(() => this.store!.saveSnapshot(gameId, newTurn - 1, cmd.seq, json, hash));
         }
       }
       if (!quiet) this.bump({ type: 'turn-advanced', turn: newTurn });
     }
     if (!quiet) this.bump({ type: 'state' });
+  }
+
+  private async ensureGameRow(start: GameStartPayload): Promise<void> {
+    if (!this.store || !this.gameId) return;
+    const existing = await this.store.getGame(this.gameId);
+    if (existing) {
+      if (existing.seed === start.seed) return; // resume of the same game
+      await this.store.deleteGame(this.gameId);
+    }
+    await this.store.createGame(
+      {
+        gameId: this.gameId,
+        engineVersion: this.engineVersion,
+        dataVersion: this.dataVersion,
+        protocolVersion: PROTOCOL_VERSION,
+        settings: start.settings as unknown,
+        seed: start.seed,
+        localPlayerId: this.playerId,
+        lobbyServer: this.lobbyServer,
+        roomCode: this.roomCode,
+      },
+      start.players.map((p) => ({ id: p.id, name: p.name })),
+    );
+    await this.store.setGameStatus(this.gameId, 'active');
   }
 
   private persist(fn: () => Promise<unknown>): void {
