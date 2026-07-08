@@ -303,6 +303,12 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
     ...(bombReport ? { bombardment: bombReport } : {}),
   };
   events.push({ visibleTo: -1, kind: 'battle_resolved', payload: summary });
+  // full input + seed label: the viewer re-runs the identical sim as playback
+  events.push({
+    visibleTo: -1,
+    kind: 'battle_replay',
+    payload: { battleId: battle.id, seed: state.seed, input: built.input as unknown as Record<string, unknown>, summary },
+  });
   return { battle, result, summary };
 }
 

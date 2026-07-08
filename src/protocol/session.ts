@@ -295,6 +295,13 @@ export class GameSession<S> {
           if (events.length) {
             const rows = events.map((e, idx) => ({ idx, visibleTo: e.visibleTo, kind: e.kind, payload: e.payload }));
             this.persist(() => this.store!.appendTurnEvents(gameId, newTurn - 1, rows));
+            for (const e of events) {
+              if (e.kind === 'battle_replay') {
+                const p = e.payload as { battleId: string; summary: unknown };
+                const json = JSON.stringify(e.payload);
+                this.persist(() => this.store!.saveBattleReplay(gameId, p.battleId, newTurn - 1, json, p.summary));
+              }
+            }
           }
           this.persist(() => this.store!.saveTurnHash(gameId, newTurn - 1, hash));
           if ((newTurn - 1) % SNAPSHOT_EVERY_TURNS === 0) {

@@ -4,12 +4,24 @@
 
 import type { ActiveGame } from './net';
 
+export interface ReplayEntry {
+  battleId: string;
+  seed: string;
+  input: unknown;
+  summary: Record<string, unknown>;
+  turn: number;
+  watched: boolean;
+}
+
 export const app = $state({
   screen: 'home' as 'home' | 'lobby' | 'game',
   error: '',
   connecting: false,
   version: 0,
   chat: [] as Array<{ id: number; from: number; text: string }>,
+  replays: [] as ReplayEntry[],
+  /** replay currently open in the battle viewer */
+  viewing: null as ReplayEntry | null,
 });
 
 // Not reactive on purpose: session/transport are external objects.

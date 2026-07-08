@@ -40,4 +40,5 @@ export interface SessionStore {
     turn: number,
     events: Array<{ idx: number; visibleTo: number; kind: string; payload: unknown }>,
   ): Promise<void>;
+  saveBattleReplay(gameId: string, battleId: string, turn: number, replayJson: string, summary: unknown): Promise<void>;
 }
