@@ -24,7 +24,13 @@ export function setRelation(state: GameState, a: number, b: number, status: 'pea
     existing.status = status;
     existing.peaceOfferedBy = [];
   } else {
-    state.relations.push({ a: x, b: y, status, peaceOfferedBy: [] });
+    state.relations.push({
+      a: x,
+      b: y,
+      status,
+      peaceOfferedBy: [],
+      treaties: { nap: false, alliance: false, trade: false, research: false },
+    });
     state.relations.sort((r1, r2) => r1.a - r2.a || r1.b - r2.b);
   }
 }

@@ -33,7 +33,7 @@ function fixtureState(picks: string[], overrides?: Partial<{ climate: string; mi
     planetId: 10,
     owner: 0,
     name: 'Test',
-    groups: [{ race: 0, popK: o.pop * 1000, farmers: o.farmers, workers: o.workers, scientists: o.scientists }],
+    groups: [{ race: 0, popK: o.pop * 1000, farmers: o.farmers, workers: o.workers, scientists: o.scientists, unrest: false }],
     buildings: [...o.buildings].sort(),
     queue: o.queue.map((item) => ({ item })),
     storedProd: 0,
@@ -69,6 +69,7 @@ function fixtureState(picks: string[], overrides?: Partial<{ climate: string; mi
         gravity: o.gravity,
         special: null,
         homeworldOf: 0,
+        terraformSteps: 0,
       },
     ],
     empires: [
@@ -84,12 +85,20 @@ function fixtureState(picks: string[], overrides?: Partial<{ climate: string; mi
         knownApps: [],
         completedFields: [],
         exploredStars: [1],
+        designs: [],
+        spies: { count: 0, target: null, mode: 'steal' },
         eliminated: false,
       },
     ],
     colonies: [] as Colony[],
     ships: [],
+    phase: 'planning',
+    pendingBattles: [],
+    relations: [],
+    proposals: [],
+    council: { nextVoteTurn: 25, pending: null },
     winner: null,
+    winType: null,
   } as unknown as GameState;
   state.colonies.push(colony);
   return { state, colony };
