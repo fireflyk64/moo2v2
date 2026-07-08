@@ -6,8 +6,9 @@
 
 import { CP_SOURCES, CP_USAGE } from './data/index';
 import { detectBattles, resolveBattle } from './battles';
+import { effectsOf, empireAccum } from './effects';
 import { itemCost, parseDesignItem } from './items';
-import { colonyOutput, colonyPopUnits, groupGrowthK, maxPopulation, traitsOf } from './economy';
+import { colonyMaxPop, colonyOutput, colonyPopUnits, groupGrowthK, traitsOf } from './economy';
 import { normalizeJobsForGroup } from './commands';
 import { rngFor } from './rng';
 import { applyResearch } from './research';
@@ -87,13 +88,15 @@ function s10_shipUpkeep(state: GameState, events: TurnEvent[]): void {
   // command points: overage costs 10 BC per point (documented combat-redesign rule)
   for (const empire of state.empires) {
     if (empire.eliminated) continue;
-    let sources = 0;
+    let sources = empireAccum(state, empire).cpFlat; // tachyon communications etc.
     for (const colony of state.colonies) {
       if (colony.owner !== empire.id) continue;
       if (!colony.outpost) sources += CP_SOURCES['colony'] ?? 1;
-      if (colony.buildings.includes('star_base')) sources += CP_SOURCES['star_base'] ?? 2;
-      if (colony.buildings.includes('battle_station')) sources += CP_SOURCES['battlestation'] ?? 4;
-      if (colony.buildings.includes('star_fortress')) sources += CP_SOURCES['star_fortress'] ?? 6;
+      for (const b of colony.buildings) {
+        for (const m of effectsOf(b)?.modifiers ?? []) {
+          if (m.target === 'cp_flat' && m.scope === 'colony') sources += m.amount;
+        }
+      }
     }
     if (empire.picks.includes('warlord')) sources += CP_SOURCES['warlord_pick_bonus'] ?? 2;
     let usage = 0;
@@ -126,9 +129,7 @@ function s11_diplomacyUpkeep(state: GameState): void {
 function s1_population(state: GameState, events: TurnEvent[]): void {
   for (const colony of state.colonies) {
     if (colony.outpost || colony.groups.length === 0) continue;
-    const planet = state.planets.find((p) => p.id === colony.planetId)!;
-    const empire = state.empires.find((e) => e.id === colony.owner)!;
-    const maxPop = maxPopulation(planet, traitsOf(empire), colony);
+    const maxPop = colonyMaxPop(state, colony);
     const totalUnits = colonyPopUnits(colony);
     const capK = maxPop * 1000;
 

@@ -183,14 +183,31 @@ export interface DesignStats {
   weapons: FittedWeapon[];
 }
 
+/** Hull availability (C7): frigate/destroyer always; cruiser needs capsule
+ * construction (field 21); battleship astro construction (field 19); titan and
+ * doomstar need their construction applications. */
+export function availableHulls(empire: Empire): string[] {
+  const out = ['frigate', 'destroyer'];
+  if (empire.completedFields.includes(21)) out.push('cruiser');
+  if (empire.completedFields.includes(19)) out.push('battleship');
+  if (empire.knownApps.includes('titan_construction')) out.push('titan');
+  if (empire.knownApps.includes('doom_star_construction')) out.push('doomstar');
+  return out;
+}
+
 export function designStats(state: GameState, empire: Empire, design: Omit<ShipDesign, 'id' | 'obsolete'>): DesignStats | string {
   const hull = hullById.get(design.hull);
   if (!hull) return `unknown hull ${design.hull}`;
   const hullIdx = HULLS_BUILDABLE.indexOf(design.hull as never) + 1 || BASE_HULLS.indexOf(design.hull as never) + 4;
   const traits = resolveTraits(empire.picks);
+  const isBaseHull = (BASE_HULLS as readonly string[]).includes(design.hull);
+  if (!isBaseHull && !availableHulls(empire).includes(design.hull)) {
+    return `${design.hull} hull not yet available`;
+  }
 
   let spaceTotal = hull.space;
   if (design.specials.includes('battle_pods')) spaceTotal = roundDiv(spaceTotal * 150, 100);
+  if (empire.knownApps.includes('megafluxers')) spaceTotal = roundDiv(spaceTotal * 125, 100);
 
   let spaceUsed = 0;
   let cost = hull.cost;

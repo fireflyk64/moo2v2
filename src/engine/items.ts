@@ -23,6 +23,25 @@ const DEFERRED = new Set([
   'spy', // espionage arrives in Phase 6
   'colony_base',
   'artificial_planet',
+  'flux_shield', // colony shields land with bombardment defenses (Phase 6)
+  'planetary_flux_shield',
+  'planetary_barrier_shield',
+  'planetary_stellar_safety_shield',
+  'stellar_safety_shield',
+  'nanite_factory', // effect values unverified (Phase 6)
+  'missile_base', // colony defense batteries (Phase 6)
+  'ground_batteries',
+  'fighter_garrison',
+  'artemis_system_net',
+  'dimensional_portal',
+  'warp_interdictor',
+  'food_replicators',
+  'recyclotron',
+  'capitol',
+  'alien_management_center',
+  'space_academy',
+  'virtual_reality_network', // wait — implemented! remove below
+].filter((x) => x !== 'virtual_reality_network'));
   'habitat_dome_terraforming',
   'soil_enrichment_terraforming',
   'super_swarm',

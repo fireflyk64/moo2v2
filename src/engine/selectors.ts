@@ -2,9 +2,9 @@
 // UIs must not compute game math themselves — anything shown on screen comes
 // from here so alternate front ends and headless bots agree exactly.
 
-import { buildableById, fieldByNum, applicationsOfField, FIELD_SUBJECTS, type FieldRow } from './data/index';
-import { buyCost, colonyOutput, colonyPopUnits, maxPopulation, traitsOf, type ColonyOutput } from './economy';
-import { buildableItems } from './items';
+import { fieldByNum, applicationsOfField, FIELD_SUBJECTS, type FieldRow } from './data/index';
+import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, type ColonyOutput } from './economy';
+import { buildableItems, itemCost } from './items';
 import { driveSpeed, fuelRangeCp, inRange, supportStars } from './movement';
 import { availableFields, fieldCost } from './research';
 import { starDistance } from './galaxy';
@@ -51,7 +51,7 @@ export function colonyRow(state: GameState, colony: Colony): ColonyRow {
     ? emptyOutput()
     : colonyOutput(state, colony);
   const active = colony.queue[0]?.item ?? null;
-  const activeCost = active ? (buildableById.get(active)?.cost ?? 0) : 0;
+  const activeCost = active ? (itemCost(state, colony.owner, active) ?? 0) : 0;
   const isProject = active === 'housing' || active === 'trade_goods';
   const turnsLeft =
     active && !isProject
@@ -76,7 +76,7 @@ export function colonyRow(state: GameState, colony: Colony): ColonyRow {
     planet,
     popUnits: colonyPopUnits(colony),
     popK,
-    maxPop: colony.outpost ? 0 : maxPopulation(planet, traitsOf(empire), colony),
+    maxPop: colony.outpost ? 0 : colonyMaxPop(state, colony),
     jobs,
     output,
     activeItem: active,
