@@ -3,11 +3,11 @@
   import { app, getActive } from '../state.svelte';
 
   const session = () => getActive()!.session;
-  const state = $derived.by(() => {
+  const gs = $derived.by(() => {
     void app.version;
     return session().getPlanned();
   });
-  const fleets = $derived.by(() => (state ? selectors.fleetRows(state, session().playerId) : []));
+  const fleets = $derived.by(() => (gs ? selectors.fleetRows(gs, session().playerId) : []));
 
   function move(shipId: number, destStarId: number) {
     if (destStarId >= 0) session().submit('move_ships', { shipIds: [shipId], destStarId });
@@ -34,10 +34,10 @@
         <td>{f.kind}</td>
         <td>{f.location}</td>
         <td class="actions">
-          {#if f.atStarId !== null && state}
+          {#if f.atStarId !== null && gs}
             <select value={-1} onchange={(e) => move(f.ship.id, Number((e.target as HTMLSelectElement).value))}>
               <option value={-1}>move to…</option>
-              {#each selectors.moveOptions(state, session().playerId, f.atStarId).filter((o) => o.reachable) as o (o.starId)}
+              {#each selectors.moveOptions(gs, session().playerId, f.atStarId).filter((o) => o.reachable) as o (o.starId)}
                 <option value={o.starId}>{o.name} ({o.turns}t)</option>
               {/each}
             </select>

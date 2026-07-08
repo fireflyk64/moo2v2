@@ -3,17 +3,17 @@
   import { app, getActive } from '../state.svelte';
 
   const session = () => getActive()!.session;
-  const state = $derived.by(() => {
+  const gs = $derived.by(() => {
     void app.version;
     return session().getPlanned();
   });
   const summary = $derived.by(() =>
-    state ? selectors.empireSummary(state, session().playerId) : null,
+    gs ? selectors.empireSummary(gs, session().playerId) : null,
   );
   const choices = $derived.by(() =>
-    state ? selectors.researchChoices(state, session().playerId) : [],
+    gs ? selectors.researchChoices(gs, session().playerId) : [],
   );
-  const empire = $derived(state?.empires.find((e) => e.id === session().playerId) ?? null);
+  const empire = $derived(gs?.empires.find((e) => e.id === session().playerId) ?? null);
 
   const bySubject = $derived.by(() => {
     const map = new Map<string, typeof choices>();

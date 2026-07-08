@@ -6,19 +6,19 @@
   import { app, getActive } from '../state.svelte';
 
   const session = () => getActive()!.session;
-  const state = $derived.by(() => {
+  const gs = $derived.by(() => {
     void app.version;
     return session().getPlanned();
   });
-  const view = $derived.by(() => (state ? selectors.galaxyView(state, session().playerId) : []));
-  const fleets = $derived.by(() => (state ? selectors.fleetRows(state, session().playerId) : []));
+  const view = $derived.by(() => (gs ? selectors.galaxyView(gs, session().playerId) : []));
+  const fleets = $derived.by(() => (gs ? selectors.fleetRows(gs, session().playerId) : []));
 
   let selectedStarId = $state<number | null>(null);
   let selectedShipIds = $state<number[]>([]);
 
   const selected = $derived(view.find((v) => v.star.id === selectedStarId) ?? null);
   const shipsHere = $derived(fleets.filter((f) => f.atStarId === selectedStarId));
-  const mapDims = $derived(state ? MAP_SIZE[state.settings.galaxySize] : { w: 2000, h: 1500 });
+  const mapDims = $derived(gs ? MAP_SIZE[gs.settings.galaxySize] : { w: 2000, h: 1500 });
 
   function clickStar(starId: number) {
     if (selectedShipIds.length > 0 && selectedStarId !== starId) {
@@ -97,7 +97,7 @@
         {#each selected.planets as p (p.id)}
           <li data-testid="planet-{p.id}">
             orbit {p.orbit}: {p.body === 'planet' ? `${p.climate} s${p.sizeClass} ${p.minerals} ${p.gravity}-g` : p.body}
-            {#each selected.colonies.filter((c) => state?.colonies.find((x) => x.id === c.id)?.planetId === p.id) as c (c.id)}
+            {#each selected.colonies.filter((c) => gs?.colonies.find((x) => x.id === c.id)?.planetId === p.id) as c (c.id)}
               <b style="color:{playerColor(c.owner)}"> — {c.name}</b>
             {/each}
             {#each shipsHere as f (f.ship.id)}

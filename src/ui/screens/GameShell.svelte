@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { selectors } from '@engine/index';
+  import { selectors, gameEngine } from '@engine/index';
   import { app, getActive } from '../state.svelte';
   import Spreadsheet from './Spreadsheet.svelte';
   import MapView from './MapView.svelte';
@@ -10,7 +10,7 @@
   let chatText = $state('');
 
   const session = () => getActive()!.session;
-  const state = $derived.by(() => {
+  const gs = $derived.by(() => {
     void app.version;
     return session().getPlanned();
   });
@@ -28,7 +28,12 @@
     return session().getRoster();
   });
   const iCommitted = $derived(committed.includes(session().playerId));
-  const winner = $derived(state?.winner ?? null);
+  const winner = $derived(gs?.winner ?? null);
+  const authHash = $derived.by(() => {
+    void app.version;
+    const auth = session().getState();
+    return auth ? gameEngine.hash(auth) : '';
+  });
 
   function toggleCommit() {
     if (iCommitted) session().uncommitTurn();
@@ -40,10 +45,10 @@
   }
 </script>
 
-{#if state && summary}
+{#if gs && summary}
   <header>
     <span class="title">MOO2v2</span>
-    <span data-testid="turn">Turn {state.turn}</span>
+    <span data-testid="turn">Turn {gs.turn}</span>
     <span data-testid="bc">{summary.bc} BC ({summary.bcDelta >= 0 ? '+' : ''}{summary.bcDelta})</span>
     <span data-testid="food">🌾 {summary.foodNet >= 0 ? '+' : ''}{summary.foodNet}</span>
     <span data-testid="rp">🔬 {summary.researchPerTurn}</span>
@@ -85,6 +90,7 @@
         <span>#{m.from}: {m.text}</span>
       {/each}
     </span>
+    <span class="hash" data-testid="state-hash">{authHash}</span>
   </footer>
 {:else}
   <p>waiting for game state…</p>
@@ -130,6 +136,12 @@
     gap: 1rem;
     opacity: 0.8;
     font-size: 0.85rem;
+  }
+  .hash {
+    margin-left: auto;
+    opacity: 0.35;
+    font-family: monospace;
+    font-size: 0.75rem;
   }
   .banner {
     background: #2c5a2c;
