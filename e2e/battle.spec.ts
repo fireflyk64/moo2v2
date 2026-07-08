@@ -18,7 +18,7 @@ interface SpawnInfo {
 async function submitCmd(page: Page, kind: string, payload: unknown): Promise<void> {
   await page.evaluate(
     ([k, p]) => {
-      const hook = (window as unknown as Record<string, { session: { submit: (kind: string, payload: unknown) => { error?: string } } }>)['__moo2'];
+      const hook = (window as unknown as Record<string, { session: { submit: (kind: string, payload: unknown) => { error?: string } } }>)['__moo2']!;
       const res = hook.session.submit(k as string, p);
       if (res.error) throw new Error(`submit ${k}: ${res.error}`);
     },
@@ -49,7 +49,7 @@ test('war, battle orders dialog, deterministic resolve, replay viewer', async ({
 
   // gather spawn info from A's authoritative state
   const info = await a.evaluate((): { a: SpawnInfo; b: SpawnInfo } => {
-    const hook = (window as unknown as Record<string, { session: { getState: () => never } }>)['__moo2'];
+    const hook = (window as unknown as Record<string, { session: { getState: () => never } }>)['__moo2']!;
     const gs = hook.session.getState() as {
       colonies: Array<{ owner: number; planetId: number }>;
       planets: Array<{ id: number; starId: number }>;

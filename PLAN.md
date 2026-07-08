@@ -198,18 +198,33 @@ room code (server field: local `http://127.0.0.1:8787` or default public server)
 
 ### Phase 4 — Combat (prompt item 4) ✅ when: battle fixtures golden-locked; 20–40% equal-tech damage envelope passes; e2e battle renders and skips in 2 browsers; multi-turn sieges work headless
 
-- [ ] 🔍 Miniaturization curve + any remaining component data for the designer
-- [ ] Design → combat stats via effects registry (combatShipInit)
-- [ ] Tick sim: stance movement, bands, to-hit/damage pipeline (§07 order), shields
-      absorb/regen, armor, structure, crippled (<⅓ structure), missiles/torpedoes/fighters as
-      targetable projectiles, point defense, retreat, one-pass termination, outcome application
-- [ ] S7 encounter detection (pairwise ordering; 3+ empires queue across turns)
-- [ ] S8 battle-orders protocol (orders dialog, 60 s host timeout → default orders, battle_orders_final, resolve_combat)
-- [ ] S9 outcomes + replay persistence; S10 bombardment/invasion/ground combat/blockades
-- [ ] Ship designer UI; fleets sheet; pre-battle orders dialog
-- [ ] Pixi battle viewer: interpolation, beams/missiles/explosions VFX, band rings, controls (play/2×/4×/skip)
-- [ ] Procedural sprite generation (hull silhouettes by size class, empire colors)
-- [ ] Balance harness (archetype fleets × tech tiers × stances × seeds → damage envelope CSV) + COMBAT_PACE tuning
+- [x] Component model + miniaturization as documented combat-redesign C-rules (shipdesign.ts
+      header: C1 auto armor/drive, C2 computer 5% space, C3 shields 15%, C4 combat speed,
+      C5 miniaturization -10% per deeper completed field (floor 50%), C6 to-hit window).
+      Combat is exempt from classic fidelity per prompt.md.
+- [x] Design -> combat-stat derivation (`designStats`; effect-registry integration lands Phase 5)
+- [x] Tick sim (10/s, cap 400): stances charge/hold/standoff/evade with no-overshoot brawling,
+      3 range bands (dmg 100/70/40%, hit +10/0/-20), to-hit clamp 5-95, shields flat+pool with
+      3%/tick accumulator regen, armor->structure, ap/sp/hv/pd/af/co/nr mods, crippled <1/3
+      structure, missiles/torpedoes as targetable projectiles + point defense, retreat
+      thresholds, one-pass termination, survivors carry damage (repair at own colonies)
+- [x] S7 pairwise encounters (colony owner defends; one battle per star per turn, rest queue);
+      war/peace relations + declare_war/offer_peace handshake (full diplomacy Phase 6)
+- [x] S8 battle-orders sub-phase: engine pauses in phase='battle_orders'; only battle_orders
+      accepted; host auto-emits resolve_combat when all sides ordered or on timeout (defaults);
+      protocol tests cover both paths
+- [x] S9 outcomes + battle_replay events persisted to battle_replays via session; S10-lite:
+      bombardment (20 dmg/pop unit, 60/40 pop/building split, never below 1 pop) + CP overage
+      (10 BC/point) + colony-star repair. Invasion/ground combat + blockades -> Phase 6.
+- [x] Ship designer UI (live designStats, mods, obsolete); spreadsheet queues designs;
+      pre-battle orders dialog; Empires tab (relations, replay list)
+- [x] Pixi battle viewer re-runs the deterministic sim for frames; procedural sprites (original
+      shapes in player colors), beam/missile/death VFX, structure bars, shield rings,
+      play/pause/1-2-4x/skip
+- [x] Balance harness (3 archetypes x 3 stance pairs x 12 seeds + tier-advantage): COMBAT_PACE
+      tuned to 250 -> 32.4% average fleet damage (target 20-40); tier advantage decisive >=80%
+- [x] E2E: war -> fleets -> commit -> orders dialogs in both browsers -> deterministic resolve
+      (hash agreement) -> replay viewer renders, skips, summarizes (~11 s)
 
 ### Phase 5 — Pluggable subsystems (prompt item 5) ✅ when: coverage test shows every tech application implemented or explicitly stubbed; earlier goldens unchanged except intended diffs
 
