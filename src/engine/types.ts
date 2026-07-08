@@ -43,6 +43,8 @@ export interface Planet {
   gravity: Gravity;
   special: string | null; // planet_specials id
   homeworldOf: number | null; // empireId
+  /** completed terraforming steps (raises the next step's cost) */
+  terraformSteps: number;
 }
 
 export type Job = 'farmers' | 'workers' | 'scientists';
@@ -56,6 +58,8 @@ export interface PopGroup {
   farmers: number;
   workers: number;
   scientists: number;
+  /** recently conquered: 25% output penalty until assimilated (S11) */
+  unrest: boolean;
 }
 
 export interface QueueItem {
@@ -119,6 +123,12 @@ export interface Empire {
   completedFields: number[]; // sorted field nums
   exploredStars: number[]; // sorted starIds
   designs: EmpireDesign[];
+  spies: {
+    count: number;
+    /** null = all defensive; else offensive against this empire */
+    target: number | null;
+    mode: 'steal' | 'sabotage';
+  };
   eliminated: boolean;
 }
 
@@ -147,6 +157,12 @@ export interface RelationEntry {
   b: number;
   status: 'peace' | 'war';
   peaceOfferedBy: number[]; // sorted; both present -> peace restored at S11
+  treaties: {
+    nap: boolean; // non-aggression pact
+    alliance: boolean;
+    trade: boolean; // BC per turn for both sides
+    research: boolean; // RP per turn for both sides
+  };
 }
 
 export interface PendingBattle {
@@ -174,6 +190,37 @@ export interface GameStateSettings {
   debugCommands: boolean;
 }
 
+export type ProposalKind =
+  | 'peace'
+  | 'non_aggression'
+  | 'alliance'
+  | 'trade'
+  | 'research'
+  | 'gift_bc'
+  | 'tech_exchange';
+
+export interface Proposal {
+  id: number;
+  from: number;
+  to: number;
+  kind: ProposalKind;
+  /** gift_bc: amount; tech_exchange: offered app */
+  giveBc: number;
+  giveApp: string | null;
+  /** tech_exchange: requested app */
+  wantApp: string | null;
+  expiresTurn: number;
+}
+
+export interface CouncilState {
+  nextVoteTurn: number;
+  pending: {
+    candidates: number[]; // two largest empires by population
+    /** empireId -> candidate voted for (-1 = abstain) */
+    votes: Record<string, number>;
+  } | null;
+}
+
 export interface GameState {
   turn: number; // 1-based once started
   seed: MasterSeed;
@@ -188,7 +235,10 @@ export interface GameState {
   phase: 'planning' | 'battle_orders';
   pendingBattles: PendingBattle[];
   relations: RelationEntry[];
+  proposals: Proposal[];
+  council: CouncilState;
   winner: number | null;
+  winType: 'conquest' | 'council' | null;
 }
 
 /** Deterministic turn event emitted during resolution (not part of hashed state). */
