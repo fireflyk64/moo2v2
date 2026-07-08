@@ -27,6 +27,7 @@ function downloadBlob(name: string, blob: Blob): void {
 /** Host: download the full game record as a verified binary save file. */
 export async function downloadSave(active: ActiveGame): Promise<string> {
   if (!active.store || !active.session.gameId) throw new Error('no persistent game to save');
+  await active.session.flush(); // ensure every accepted command reached the database
   const envelope = await active.store.exportGame(active.session.gameId);
   verifySaveEnvelope(envelope); // never write a save we could not load back
   const bytes = await encodeSaveFile(envelope);
