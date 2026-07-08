@@ -5,8 +5,12 @@
   import MapView from './MapView.svelte';
   import Research from './Research.svelte';
   import Fleets from './Fleets.svelte';
+  import Designer from './Designer.svelte';
+  import Empires from './Empires.svelte';
+  import BattleOrdersDialog from '../battle/BattleOrdersDialog.svelte';
+  import BattleViewer from '../battle/BattleViewer.svelte';
 
-  let tab = $state<'colonies' | 'map' | 'research' | 'fleets'>('colonies');
+  let tab = $state<'colonies' | 'map' | 'research' | 'fleets' | 'designer' | 'empires'>('colonies');
   let chatText = $state('');
 
   const session = () => getActive()!.session;
@@ -33,6 +37,20 @@
     void app.version;
     const auth = session().getState();
     return auth ? gameEngine.hash(auth) : '';
+  });
+  /** the battle this player must currently order (dialog), if any */
+  const myBattle = $derived.by(() => {
+    void app.version;
+    const auth = session().getState();
+    if (!auth || auth.phase !== 'battle_orders') return null;
+    const me = session().playerId;
+    return auth.pendingBattles.find((b) => b.attacker === me || b.defender === me) ?? null;
+  });
+  const battlePhaseInfo = $derived.by(() => {
+    void app.version;
+    const auth = session().getState();
+    if (!auth || auth.phase !== 'battle_orders') return null;
+    return auth.pendingBattles.map((b) => b.id).join(', ');
   });
 
   function toggleCommit() {
@@ -70,7 +88,17 @@
     <button class:active={tab === 'map'} data-testid="tab-map" onclick={() => (tab = 'map')}>Map</button>
     <button class:active={tab === 'research'} data-testid="tab-research" onclick={() => (tab = 'research')}>Research</button>
     <button class:active={tab === 'fleets'} data-testid="tab-fleets" onclick={() => (tab = 'fleets')}>Fleets</button>
+    <button class:active={tab === 'designer'} data-testid="tab-designer" onclick={() => (tab = 'designer')}>Designer</button>
+    <button class:active={tab === 'empires'} data-testid="tab-empires" onclick={() => (tab = 'empires')}>Empires</button>
+    {#if app.replays.some((r) => !r.watched)}
+      <button class="replays" data-testid="new-replays" onclick={() => (tab = 'empires')}>
+        ⚔ {app.replays.filter((r) => !r.watched).length} new battle{app.replays.filter((r) => !r.watched).length > 1 ? 's' : ''}
+      </button>
+    {/if}
   </nav>
+  {#if battlePhaseInfo && !myBattle}
+    <div class="banner dim" data-testid="battle-spectate">Battles in progress elsewhere: {battlePhaseInfo}</div>
+  {/if}
   <section>
     {#if tab === 'colonies'}
       <Spreadsheet />
@@ -78,10 +106,20 @@
       <MapView />
     {:else if tab === 'research'}
       <Research />
-    {:else}
+    {:else if tab === 'fleets'}
       <Fleets />
+    {:else if tab === 'designer'}
+      <Designer />
+    {:else}
+      <Empires />
     {/if}
   </section>
+  {#if myBattle}
+    <BattleOrdersDialog battle={myBattle} />
+  {/if}
+  {#if app.viewing}
+    <BattleViewer replay={app.viewing} onclose={() => (app.viewing = null)} />
+  {/if}
   <footer>
     <input data-testid="chat-input" bind:value={chatText} placeholder="chat…" onkeydown={(e) => e.key === 'Enter' && sendChat()} />
     <button data-testid="chat-send" onclick={sendChat}>Send</button>

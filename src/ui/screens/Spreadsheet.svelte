@@ -1,7 +1,7 @@
 <script lang="ts">
   // The system-wide colonies spreadsheet: the primary way to run your empire.
   // Every edit is an optimistic command; dirty cells resolve on host accept.
-  import { selectors } from '@engine/index';
+  import { selectors, itemLabel } from '@engine/index';
   import { app, getActive } from '../state.svelte';
 
   const session = () => getActive()!.session;
@@ -10,6 +10,10 @@
     const s = session().getPlanned();
     return s ? selectors.colonyRows(s, session().playerId) : [];
   });
+  const label = (item: string) => {
+    const s = session().getPlanned();
+    return s ? itemLabel(s, session().playerId, item) : item;
+  };
 
   function adjustJob(row: selectors.ColonyRow, job: 'farmers' | 'workers' | 'scientists', delta: number) {
     const jobs = { ...row.jobs };
@@ -97,10 +101,10 @@
           >
             <option value="" disabled>— build —</option>
             {#if row.activeItem && !row.buildable.includes(row.activeItem)}
-              <option value={row.activeItem}>{row.activeItem}</option>
+              <option value={row.activeItem}>{label(row.activeItem)}</option>
             {/if}
             {#each row.buildable as item (item)}
-              <option value={item}>{item}</option>
+              <option value={item}>{label(item)}</option>
             {/each}
           </select>
         </td>
@@ -121,11 +125,11 @@
           {/if}
         </td>
         <td>
-          <span class="dim">{row.queue.slice(1).join(', ')}</span>
+          <span class="dim">{row.queue.slice(1).map(label).join(', ')}</span>
           <select data-testid="queue-add-{row.id}" value="" onchange={(e) => { appendBuild(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}>
             <option value="">+ queue</option>
             {#each row.buildable as item (item)}
-              <option value={item}>{item}</option>
+              <option value={item}>{label(item)}</option>
             {/each}
           </select>
         </td>

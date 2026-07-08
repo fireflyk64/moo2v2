@@ -45,8 +45,22 @@ export function bindActive(active: ActiveGame): void {
     } else if (ev.type === 'chat') {
       app.chat.push({ id: ev.id, from: ev.from, text: ev.text });
       if (app.chat.length > 100) app.chat.shift();
+    } else if (ev.type === 'turn-advanced') {
+      for (const e of active.session.lastTurnEvents) {
+        if (e.kind === 'battle_replay') {
+          const p = e.payload as { battleId: string; seed: string; input: unknown; summary: Record<string, unknown> };
+          if (!app.replays.some((r) => r.battleId === p.battleId)) {
+            app.replays.push({ ...p, turn: ev.turn - 1, watched: false });
+            if (app.replays.length > 20) app.replays.shift();
+          }
+        }
+      }
     }
   });
+  if (import.meta.env.DEV) {
+    // dev/e2e hook: drive the session from the console or page.evaluate
+    (window as unknown as Record<string, unknown>)['__moo2'] = { session: active.session };
+  }
 }
 
 export function leaveGame(): void {
