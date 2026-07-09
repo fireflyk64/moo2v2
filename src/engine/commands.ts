@@ -844,8 +844,8 @@ interface MoveColonistsPayload {
   count: number;
 }
 
-/** Colonists hop between planets of the SAME system on freighters — no
- * transport ship needed. Requires a freighter fleet (5), the source keeps at
+/** Colonists hop between planets of the SAME system — no transport ship and
+ * no freighters needed (MOO2's in-system exception). The source keeps at
  * least one unit, and the destination must have room. */
 const validateMoveColonists: Validator = (state, cmd) => {
   const p = cmd.payload as MoveColonistsPayload;
@@ -858,9 +858,7 @@ const validateMoveColonists: Validator = (state, cmd) => {
   if (from.id === to.id) return 'already there';
   const fromStar = state.planets.find((x) => x.id === from.planetId)!.starId;
   const toStar = state.planets.find((x) => x.id === to.planetId)!.starId;
-  if (fromStar !== toStar) return 'freighters only shuttle within a system — use a transport between stars';
-  const empire = empireOf(state, cmd.playerId);
-  if (empire.freighters < 5) return 'need a freighter fleet (5 freighters)';
+  if (fromStar !== toStar) return 'colonists shuttle freely only within a system — use a transport between stars';
   if (!Number.isSafeInteger(p.count) || p.count < 1) return 'bad count';
   const group = from.groups.find((g) => g.race === p.race);
   if (!group) return `no pop group for race ${p.race}`;

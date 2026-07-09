@@ -48,7 +48,6 @@ function withSecondColony(state: GameState): { home: Colony; second: Colony } {
   };
   state.colonies.push(second);
   state.colonies.sort((a, b) => a.id - b.id);
-  state.empires[0]!.freighters = 5;
   return { home, second };
 }
 
@@ -60,7 +59,7 @@ const cmd = (state: GameState, payload: unknown) => ({
 });
 
 describe('move_colonists (bug: no transports needed for in-system movement)', () => {
-  it('moves a colonist between same-system colonies using freighters', () => {
+  it('moves a colonist between same-system colonies', () => {
     const state = newGame();
     const { home, second } = withSecondColony(state);
     const before = Math.floor(home.groups[0]!.popK / 1000);
@@ -76,13 +75,11 @@ describe('move_colonists (bug: no transports needed for in-system movement)', ()
     expect(s.farmers + s.workers + s.scientists).toBe(3);
   });
 
-  it('requires a freighter fleet', () => {
+  it('needs no freighters for in-system moves (MOO2 exception)', () => {
     const state = newGame();
     const { home, second } = withSecondColony(state);
-    state.empires[0]!.freighters = 4;
-    expect(validateCommand(state, cmd(state, { fromColonyId: home.id, toColonyId: second.id, race: 0, count: 1 }))).toContain(
-      'freighter fleet',
-    );
+    state.empires[0]!.freighters = 0;
+    expect(validateCommand(state, cmd(state, { fromColonyId: home.id, toColonyId: second.id, race: 0, count: 1 }))).toBeNull();
   });
 
   it('rejects cross-system moves (transports do that)', () => {

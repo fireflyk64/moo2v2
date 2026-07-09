@@ -82,6 +82,7 @@
     void app.version;
     return getActive()?.memoryOnly ?? false;
   });
+  let memoryNoteDismissed = $state(false);
   const autoTurnUntil = $derived.by(() => {
     void app.version;
     return session().getSettings()?.autoTurnUntil ?? 0;
@@ -316,11 +317,10 @@
   {#if app.viewing}
     <BattleViewer replay={app.viewing} onclose={() => (app.viewing = null)} />
   {/if}
-  {#if memoryOnly}
+  {#if memoryOnly && !memoryNoteDismissed}
     <div class="banner warn" data-testid="memory-only">
-      ⚠ Another tab (or this browser) holds this room's database — this tab keeps the full game
-      <b>in memory</b> instead. 💾 Save works normally; it just won't auto-persist across a reload
-      of this tab. Close the other tab and reload to get automatic persistence back.
+      ⚠ Make sure to 💾 save every turn — the browser database is not accessible, so this tab won't survive a reload on its own.
+      <button class="x" data-testid="memory-only-dismiss" title="dismiss" onclick={() => (memoryNoteDismissed = true)}>✕</button>
     </div>
   {/if}
   <footer>

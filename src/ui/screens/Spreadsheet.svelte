@@ -138,11 +138,12 @@
   }
 
   type Job = 'farmers' | 'workers' | 'scientists';
-  function moveJob(row: selectors.ColonyRow, fromJob: Job, toJob: Job) {
-    if (fromJob === toJob || row.jobs[fromJob] <= 0) return;
+  function moveJob(row: selectors.ColonyRow, fromJob: Job, toJob: Job, count = 1) {
+    const n = Math.min(count, row.jobs[fromJob]);
+    if (fromJob === toJob || n <= 0) return;
     const jobs = { ...row.jobs };
-    jobs[fromJob]--;
-    jobs[toJob]++;
+    jobs[fromJob] -= n;
+    jobs[toJob] += n;
     session().submit('set_jobs', {
       colonyId: row.id,
       groups: [{ race: session().playerId, ...jobs }],
@@ -172,8 +173,25 @@
   }
 
   // ---- drag colonists: between job columns, or onto a same-system colony ----
+  // Clicking citizen i selects it AND everyone to its right in that cell; a
+  // drag then carries the whole selection (dragging without clicking first
+  // does the same from the grabbed icon).
   const JOB_ICONS: Record<Job, string> = { farmers: '🌾', workers: '🔨', scientists: '🧪' };
-  let drag = $state<{ colonyId: number; job: Job } | null>(null);
+  let picked = $state<{ colonyId: number; job: Job; from: number } | null>(null);
+  function pickFrom(row: selectors.ColonyRow, job: Job, i: number) {
+    if (picked && picked.colonyId === row.id && picked.job === job && picked.from === i) picked = null;
+    else picked = { colonyId: row.id, job, from: i };
+  }
+  const isPicked = (row: selectors.ColonyRow, job: Job, i: number): boolean =>
+    !!picked && picked.colonyId === row.id && picked.job === job && i >= picked.from;
+  /** how many citizens a drag starting at icon i carries */
+  function grabCount(row: selectors.ColonyRow, job: Job, i: number): number {
+    const from = picked && picked.colonyId === row.id && picked.job === job && picked.from <= i ? picked.from : i;
+    return row.jobs[job] - from;
+  }
+  /** overlap icons so big populations stay narrow (more citizens → tighter) */
+  const overlapPx = (count: number): number => (count <= 4 ? 1 : count <= 8 ? 5 : count <= 14 ? 8 : 10);
+  let drag = $state<{ colonyId: number; job: Job; count: number } | null>(null);
   let dragOver = $state<{ colonyId: number; job: Job } | null>(null);
   let dragOverColony = $state<number | null>(null);
   let moveNote = $state('');

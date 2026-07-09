@@ -36,8 +36,8 @@ export interface ActiveGame {
   host: HostCore<GameState> | null;
   store: GameStoreLike | null;
   sqlocal: SQLocalKysely | null;
-  /** persistence is RAM-only: another tab holds this room's database (saves
-   * still download fine, but nothing survives a reload of THIS tab) */
+  /** persistence is RAM-only: browser storage is unavailable to this tab
+   * (saves still download fine, but nothing survives a reload) */
   memoryOnly: boolean;
   params: RoomParams;
   startGame: () => void;
@@ -86,6 +86,32 @@ async function loadResume(
   return { gameId: g.game_id, lastSeq, state, log };
 }
 
+/** Open the room's OPFS database, detecting sqlocal's silent RAM fallback.
+ * The fallback swaps in a memory driver (storageType 'memory') — that is the
+ * signal that nothing will survive a reload. Note: the `persisted` flag is
+ * just navigator.storage.persisted(), a browser permission that is false for
+ * nearly everyone — it must NOT be used for this. */
+async function openRoomStore(
+  roomCode: string,
+): Promise<{ store: GameStoreLike; sqlocal: SQLocalKysely | null; memoryOnly: boolean }> {
+  if (isOpfsLikelyAvailable()) {
+    try {
+      const opened = await openBrowserStore(`moo2v2-room-${roomCode}.sqlite3`);
+      const info = await opened.sqlocal.getDatabaseInfo().catch(() => null);
+      if (info && (info.storageType === 'memory' || info.databasePath === ':memory:')) {
+        await opened.store.destroy().catch(() => undefined);
+      } else {
+        return { store: opened.store, sqlocal: opened.sqlocal, memoryOnly: false };
+      }
+    } catch (e) {
+      console.warn('[net] persistence unavailable:', e);
+    }
+  }
+  // safety net: keep the whole game record in memory so a verified save file
+  // can always be downloaded from this tab
+  return { store: new MemoryGameStore(), sqlocal: null, memoryOnly: true };
+}
+
 export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
   const transport = await LobbylinkTransport.connect({
     server: params.server,
@@ -93,34 +119,7 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
     maxPlayers: params.playerCount,
   });
 
-  let store: GameStoreLike | null = null;
-  let sqlocal: SQLocalKysely | null = null;
-  let memoryOnly = false;
-  if (isOpfsLikelyAvailable()) {
-    try {
-      const opened = await openBrowserStore(`moo2v2-room-${params.code}.sqlite3`);
-      // sqlocal silently falls back to a RAM database when another tab holds
-      // the OPFS handle — detect that so the UI can tell the truth about it
-      const info = await opened.sqlocal.getDatabaseInfo().catch(() => null);
-      if (info && info.persisted === false) {
-        await opened.store.destroy().catch(() => undefined);
-        memoryOnly = true;
-      } else {
-        store = opened.store;
-        sqlocal = opened.sqlocal;
-      }
-    } catch (e) {
-      console.warn('[net] persistence unavailable (another tab in this room?):', e);
-      memoryOnly = true;
-    }
-  } else {
-    memoryOnly = true;
-  }
-  if (!store) {
-    // multi-tab safety net: keep the whole game record in memory so a
-    // verified save file can always be downloaded from this tab
-    store = new MemoryGameStore();
-  }
+  const { store, sqlocal, memoryOnly } = await openRoomStore(params.code);
 
   const identity = {
     name: params.name,
@@ -191,28 +190,7 @@ export async function enterSoloGame(name: string): Promise<ActiveGame> {
   const hostTransport = hub.join();
   const botTransport = hub.join();
 
-  let store: GameStoreLike | null = null;
-  let sqlocal: SQLocalKysely | null = null;
-  let memoryOnly = false;
-  if (isOpfsLikelyAvailable()) {
-    try {
-      const opened = await openBrowserStore(`moo2v2-room-${params.code}.sqlite3`);
-      const info = await opened.sqlocal.getDatabaseInfo().catch(() => null);
-      if (info && info.persisted === false) {
-        await opened.store.destroy().catch(() => undefined);
-        memoryOnly = true;
-      } else {
-        store = opened.store;
-        sqlocal = opened.sqlocal;
-      }
-    } catch (e) {
-      console.warn('[net] solo persistence unavailable (another tab?):', e);
-      memoryOnly = true;
-    }
-  } else {
-    memoryOnly = true;
-  }
-  if (!store) store = new MemoryGameStore();
+  const { store, sqlocal, memoryOnly } = await openRoomStore(params.code);
 
   const identity = {
     name,
