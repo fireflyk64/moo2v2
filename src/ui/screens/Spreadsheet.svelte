@@ -171,9 +171,18 @@
     });
   }
 
-  // ---- drag colonists between job columns ----
-  let drag: { colonyId: number; job: Job } | null = null;
+  // ---- drag colonists: between job columns, or onto a same-system colony ----
+  const JOB_ICONS: Record<Job, string> = { farmers: '🌾', workers: '🔨', scientists: '🧪' };
+  let drag = $state<{ colonyId: number; job: Job } | null>(null);
   let dragOver = $state<{ colonyId: number; job: Job } | null>(null);
+  let dragOverColony = $state<number | null>(null);
+  let moveNote = $state('');
+  let moveNoteTimer: ReturnType<typeof setTimeout> | null = null;
+  function note(text: string) {
+    moveNote = text;
+    if (moveNoteTimer) clearTimeout(moveNoteTimer);
+    moveNoteTimer = setTimeout(() => (moveNote = ''), 5000);
+  }
   function onDragStart(row: selectors.ColonyRow, job: Job, ev: DragEvent) {
     drag = { colonyId: row.id, job };
     ev.dataTransfer?.setData('text/plain', `${row.id}:${job}`);
@@ -181,9 +190,34 @@
   }
   function onDrop(row: selectors.ColonyRow, job: Job) {
     if (drag && drag.colonyId === row.id) moveJob(row, drag.job, job);
+    else if (drag && drag.colonyId !== row.id) dropOnColony(row); // job cell of another colony works too
     drag = null;
     dragOver = null;
+    dragOverColony = null;
   }
+  /** a citizen dropped on a different colony: freighter lift within the system */
+  function dropOnColony(row: selectors.ColonyRow) {
+    if (!drag || drag.colonyId === row.id) return;
+    const src = allRows.find((r) => r.id === drag!.colonyId);
+    if (!src) return;
+    if (src.planet.starId !== row.planet.starId) {
+      note('⛔ freighters only shuttle within a system — use a transport between stars');
+    } else {
+      const res = session().submit('move_colonists', {
+        fromColonyId: src.id,
+        toColonyId: row.id,
+        race: session().playerId,
+        count: 1,
+      });
+      if (res.error) note(`⛔ ${res.error}`);
+      else note(`🚚 colonist shipped ${src.name} → ${row.name}`);
+    }
+  }
+  const canDropColony = (row: selectors.ColonyRow): boolean => {
+    if (!drag || drag.colonyId === row.id || row.outpost) return false;
+    const src = allRows.find((r) => r.id === drag!.colonyId);
+    return !!src && src.planet.starId === row.planet.starId;
+  };
 
   function setBuild(row: selectors.ColonyRow, item: string) {
     if (!item) return;
@@ -263,7 +297,10 @@
     </span>
     <button onclick={() => (selected = new Set())}>clear selection</button>
   {:else}
-    <span class="dim">tick colonies to bulk-set builds · click headers to sort · drag a job number onto another column to move a colonist</span>
+    <span class="dim">tick colonies to bulk-set builds · click headers to sort · drag a citizen onto another job — or onto a same-system colony to ship them by freighter</span>
+  {/if}
+  {#if moveNote}
+    <span class="movenote" data-testid="move-note">{moveNote}</span>
   {/if}
 </div>
 
@@ -295,7 +332,26 @@
       {@const ex = explain(row.id)}
       <tr data-testid="colony-row-{row.id}" class:outpost={row.outpost}>
         <td><input type="checkbox" checked={selected.has(row.id)} onchange={() => toggleSelect(row.id)} /></td>
-        <td class="name">
+        <td
+          class="name"
+          class:shipok={dragOverColony === row.id}
+          ondragover={(e) => {
+            if (canDropColony(row)) {
+              e.preventDefault();
+              dragOverColony = row.id;
+            }
+          }}
+          ondragleave={() => {
+            if (dragOverColony === row.id) dragOverColony = null;
+          }}
+          ondrop={(e) => {
+            e.preventDefault();
+            dropOnColony(row);
+            drag = null;
+            dragOver = null;
+            dragOverColony = null;
+          }}
+        >
           {#if renaming === row.id}
             <input
               class="rename"
@@ -353,7 +409,7 @@
             class="jobs"
             class:dropping={dragOver?.colonyId === row.id && dragOver?.job === job}
             ondragover={(e) => {
-              if (drag?.colonyId === row.id) {
+              if (drag?.colonyId === row.id || canDropColony(row)) {
                 e.preventDefault();
                 dragOver = { colonyId: row.id, job };
               }
@@ -368,13 +424,34 @@
           >
             <button class="mini" onclick={() => adjustJob(row, job, -1)}>-</button>
             <span
-              class="jobcount"
-              draggable={row.jobs[job] > 0}
-              role="button"
-              tabindex="-1"
-              title="drag onto another job column to move a colonist"
-              ondragstart={(e) => onDragStart(row, job, e)}
-              data-testid="{job}-{row.id}">{row.jobs[job]}</span>
+              class="citizens"
+              role="group"
+              data-testid="{job}-{row.id}"
+              data-count={row.jobs[job]}
+              title="{row.jobs[job]} {job} — drag a citizen onto another job, or onto a same-system colony to ship them (needs a freighter fleet)"
+            >
+              {#if row.jobs[job] === 0}
+                <span class="zero">0</span>
+              {/if}
+              {#each Array(Math.min(row.jobs[job], 6)) as _, i (i)}
+                <span
+                  class="citizen"
+                  draggable="true"
+                  role="button"
+                  tabindex="-1"
+                  ondragstart={(e) => onDragStart(row, job, e)}
+                >{JOB_ICONS[job]}</span>
+              {/each}
+              {#if row.jobs[job] > 6}
+                <span
+                  class="citizen more"
+                  draggable="true"
+                  role="button"
+                  tabindex="-1"
+                  ondragstart={(e) => onDragStart(row, job, e)}
+                >×{row.jobs[job]}</span>
+              {/if}
+            </span>
             <button class="mini" onclick={() => adjustJob(row, job, +1)}>+</button>
           </td>
         {/each}
@@ -525,16 +602,40 @@
     background: rgba(94, 224, 138, 0.18);
     outline: 1px dashed var(--good);
   }
-  .jobcount {
-    display: inline-block;
-    min-width: 1.1rem;
-    text-align: center;
-    cursor: grab;
-    border-radius: 4px;
-    padding: 0 0.15rem;
+  .citizens {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    min-width: 1.3rem;
+    justify-content: center;
   }
-  .jobcount:hover {
-    background: var(--panel-3);
+  .citizen {
+    cursor: grab;
+    font-size: 0.85rem;
+    line-height: 1;
+    margin: 0 -1px;
+  }
+  .citizen:hover {
+    transform: scale(1.25);
+  }
+  .citizen.more {
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    margin-left: 0.1rem;
+    color: var(--text-dim);
+  }
+  .zero {
+    color: var(--text-dim);
+    opacity: 0.5;
+    padding: 0 0.2rem;
+  }
+  .name.shipok {
+    background: rgba(110, 168, 255, 0.16);
+    outline: 1px dashed var(--accent);
+  }
+  .movenote {
+    font-size: 0.8rem;
+    color: var(--accent-soft);
   }
   .mini {
     padding: 0 0.35rem;
