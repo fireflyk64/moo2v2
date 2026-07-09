@@ -15,6 +15,13 @@
     gs ? selectors.researchChoices(gs, session().playerId) : [],
   );
   const empire = $derived(gs?.empires.find((e) => e.id === session().playerId) ?? null);
+  const idle = $derived(!!empire && empire.research.fieldNum === null && empire.research.extraQueue.length === 0);
+  const currentPct = $derived.by(() => {
+    if (!empire || empire.research.fieldNum === null) return 0;
+    const choice = choices.find((c) => c.field.num === empire.research.fieldNum);
+    if (!choice || choice.cost <= 0) return 0;
+    return Math.min(100, Math.floor((empire.research.accumRP * 100) / choice.cost));
+  });
 
   const bySubject = $derived.by(() => {
     const map = new Map<string, typeof choices>();
@@ -31,6 +38,8 @@
   function start(fieldNum: number, target: string | null) {
     session().submit('set_research', { fieldNum, targetApp: target });
   }
+
+  const pretty = (id: string) => id.replaceAll('_', ' ');
 
   // creative-variant: buy applications from completed fields, one at a time
   const creativeVariant = $derived(gs?.settings.modes.creativeVariant === true && !!empire && traitsOf(empire).creative);
@@ -53,11 +62,18 @@
 </script>
 
 {#if empire && summary}
-  <p data-testid="research-status">
-    Current: <b>{summary.researching ?? 'none'}</b>
+  {#if idle}
+    <div class="idlebanner" data-testid="research-idle">
+      ⚠ Your labs are idle! Pick a field below — research points are banking up unspent
+      ({empire.research.accumRP} RP banked, +{summary.researchPerTurn}/turn).
+    </div>
+  {/if}
+  <p data-testid="research-status" class="status">
+    Current: <b>{summary.researching ? pretty(summary.researching) : 'none'}</b>
     {#if empire.research.fieldNum !== null}
       — {empire.research.accumRP} RP accumulated, +{summary.researchPerTurn}/turn
-      {#if summary.researchTarget}(target: {summary.researchTarget}){/if}
+      {#if summary.researchTarget}(target: {pretty(summary.researchTarget)}){/if}
+      <span class="pbar"><span class="pfill" style="width:{currentPct}%"></span></span>
     {:else if empire.research.accumRP > 0}
       — {empire.research.accumRP} RP banked
     {/if}
@@ -86,7 +102,7 @@
       >
         <option value="">+ buy application…</option>
         {#each purchasable as p (p.id)}
-          <option value={p.id}>{p.name} ({p.cost} RP, {p.fieldId.replaceAll('_', ' ')})</option>
+          <option value={p.id}>{p.name} ({p.cost} RP, {pretty(p.fieldId)})</option>
         {/each}
       </select>
     </div>
@@ -97,30 +113,49 @@
       <div class="subject">
         <h3>{subject.replace('_', ' ')}</h3>
         {#each fields as choice (choice.field.num)}
-          <div class="field" class:current={empire.research.fieldNum === choice.field.num}>
+          {@const isCurrent = empire.research.fieldNum === choice.field.num}
+          <div class="field" class:current={isCurrent}>
             <div class="head">
-              <b>{choice.field.id.replaceAll('_', ' ')}</b>
+              <b>{pretty(choice.field.id)}</b>
               <span class="dim">{choice.cost} RP</span>
             </div>
-            {#each choice.apps as appRow (appRow.id)}
-              <label class:known={appRow.known}>
-                <input
-                  type="radio"
-                  name="target-{choice.field.num}"
-                  disabled={appRow.known}
-                  checked={pendingTarget[choice.field.num] === appRow.id ||
-                    (empire.research.fieldNum === choice.field.num && empire.research.targetApp === appRow.id)}
-                  onchange={() => (pendingTarget = { ...pendingTarget, [choice.field.num]: appRow.id })}
-                />
-                {appRow.name}{appRow.known ? ' ✓' : ''}
-              </label>
-            {/each}
+            {#if choice.grantsAll}
+              <p class="all" title="Basic fields deliver every application at once">✦ researches all applications</p>
+              <ul class="applist">
+                {#each choice.apps as appRow (appRow.id)}
+                  <li class:known={appRow.known}>{appRow.name}{appRow.known ? ' ✓' : ''}</li>
+                {/each}
+              </ul>
+            {:else}
+              {#each choice.apps as appRow (appRow.id)}
+                <label class:known={appRow.known}>
+                  <input
+                    type="radio"
+                    name="target-{choice.field.num}"
+                    disabled={appRow.known}
+                    checked={pendingTarget[choice.field.num] === appRow.id ||
+                      (isCurrent && empire.research.targetApp === appRow.id)}
+                    onchange={() => (pendingTarget = { ...pendingTarget, [choice.field.num]: appRow.id })}
+                  />
+                  {appRow.name}{appRow.known ? ' ✓' : ''}
+                </label>
+              {/each}
+            {/if}
+            {#if isCurrent}
+              <div class="fieldbar"><div class="fieldfill" style="width:{currentPct}%"></div></div>
+            {/if}
             <button
               data-testid="research-{choice.field.id}"
+              class:primary={!isCurrent}
               onclick={() =>
-                start(choice.field.num, pendingTarget[choice.field.num] ?? choice.apps.find((a) => !a.known)?.id ?? null)}
+                start(
+                  choice.field.num,
+                  choice.grantsAll
+                    ? null
+                    : (pendingTarget[choice.field.num] ?? choice.apps.find((a) => !a.known)?.id ?? null),
+                )}
             >
-              {empire.research.fieldNum === choice.field.num ? 'Change target' : 'Research this'}
+              {isCurrent ? (choice.grantsAll ? 'Researching…' : 'Change target') : 'Research this'}
             </button>
           </div>
         {/each}
@@ -130,6 +165,42 @@
 {/if}
 
 <style>
+  .idlebanner {
+    background: linear-gradient(180deg, #6a5424, #54431c);
+    border: 1px solid var(--gold);
+    color: #ffe9b8;
+    border-radius: 8px;
+    padding: 0.5rem 0.9rem;
+    margin-bottom: 0.6rem;
+    font-weight: 600;
+    animation: idlepulse 1.8s ease-in-out infinite;
+  }
+  @keyframes idlepulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(255, 212, 121, 0); }
+    50% { box-shadow: 0 0 16px rgba(255, 212, 121, 0.4); }
+  }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .pbar {
+    display: inline-block;
+    width: 10rem;
+    height: 0.5rem;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .pfill,
+  .fieldfill {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #2c7a4e, var(--good));
+    transition: width 0.4s ease;
+  }
   .subjects {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
@@ -138,20 +209,50 @@
   .subject h3 {
     margin: 0.2rem 0;
     text-transform: capitalize;
-    color: #8fb8ff;
+    color: var(--accent-soft);
   }
   .field {
-    border: 1px solid #26304f;
-    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(21, 29, 63, 0.6), rgba(15, 21, 48, 0.6));
+    padding: 0.5rem 0.7rem;
     margin-bottom: 0.5rem;
-    border-radius: 6px;
+    border-radius: 8px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field:hover {
+    border-color: var(--line-bright);
   }
   .field.current {
-    border-color: #5ee08a;
+    border-color: var(--good);
+    box-shadow: 0 0 14px rgba(94, 224, 138, 0.18);
+  }
+  .fieldbar {
+    height: 0.35rem;
+    background: var(--panel);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 0.35rem 0 0.1rem;
   }
   .head {
     display: flex;
     justify-content: space-between;
+  }
+  .head b {
+    text-transform: capitalize;
+  }
+  .all {
+    color: var(--gold);
+    font-size: 0.8rem;
+    margin: 0.25rem 0 0.1rem;
+    font-weight: 600;
+  }
+  .applist {
+    margin: 0.15rem 0 0.3rem;
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+  }
+  .applist li.known {
+    opacity: 0.5;
   }
   label {
     display: block;
@@ -166,5 +267,9 @@
   }
   button {
     margin-top: 0.3rem;
+  }
+  button.primary {
+    background: linear-gradient(180deg, #24418a, #1b2f66);
+    border-color: #4a6ab8;
   }
 </style>

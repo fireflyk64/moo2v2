@@ -1,7 +1,8 @@
 <script lang="ts">
-  // Galaxy map v2 (SVG): star selection, fleet movement, colonize, fuel-range
-  // shading, monster lairs, blockade badges.
-  import { selectors, inRange, isBlockaded } from '@engine/index';
+  // Galaxy map v3 (SVG): proper star glyphs with glow, explored/unexplored fog,
+  // fuel-range shading, in-flight fleet markers with travel progress, monster
+  // lairs vs Antaran raids, blockade badges, move ordering with re-routing.
+  import { selectors, inRange, isBlockaded, fuelRangeCp, supportStars, areAtWar } from '@engine/index';
   import { MAP_SIZE } from '@engine/galaxy';
   import { playerColor, STAR_COLORS } from '../colors';
   import { app, getActive } from '../state.svelte';
@@ -11,13 +12,14 @@
     void app.version;
     return session().getPlanned();
   });
-  const view = $derived.by(() => (gs ? selectors.galaxyView(gs, session().playerId) : []));
-  const fleets = $derived.by(() => (gs ? selectors.fleetRows(gs, session().playerId) : []));
+  const me = () => session().playerId;
+  const view = $derived.by(() => (gs ? selectors.galaxyView(gs, me()) : []));
+  const fleets = $derived.by(() => (gs ? selectors.fleetRows(gs, me()) : []));
   const reachable = $derived.by(() => {
     if (!gs) return new Set<number>();
     const out = new Set<number>();
     for (const star of gs.stars) {
-      if (inRange(gs, session().playerId, star)) out.add(star.id);
+      if (inRange(gs, me(), star)) out.add(star.id);
     }
     return out;
   });
@@ -29,17 +31,27 @@
     }
     return m;
   });
+  const isRaid = (kinds: string[] | undefined) => (kinds ?? []).some((k) => k.startsWith('antaran_'));
   const blockadedStars = $derived.by(() => {
     const out = new Set<number>();
     if (!gs) return out;
     for (const c of gs.colonies) {
-      if (c.owner !== session().playerId || c.outpost) continue;
+      if (c.owner !== me() || c.outpost) continue;
       if (isBlockaded(gs, c)) {
         const p = gs.planets.find((x) => x.id === c.planetId);
         if (p) out.add(p.starId);
       }
     }
     return out;
+  });
+  /** fuel-range envelope: circles around every colony/outpost star */
+  let showRange = $state(true);
+  const rangeCircles = $derived.by(() => {
+    if (!gs || !showRange) return [];
+    const empire = gs.empires.find((e) => e.id === me());
+    if (!empire) return [];
+    const r = Math.min(fuelRangeCp(empire), 4000);
+    return supportStars(gs, me()).map((s) => ({ x: s.x, y: s.y, r }));
   });
 
   let selectedStarId = $state<number | null>(null);
@@ -49,10 +61,64 @@
   const shipsHere = $derived(fleets.filter((f) => f.atStarId === selectedStarId));
   const mapDims = $derived(gs ? MAP_SIZE[gs.settings.galaxySize] : { w: 2000, h: 1500 });
 
+  /** own fleets in flight (or ordered this turn): marker at progress point */
+  const transits = $derived.by(() => {
+    if (!gs) return [];
+    const starAt = (id: number) => gs.stars.find((s) => s.id === id);
+    const out: Array<{
+      id: number;
+      name: string;
+      x: number;
+      y: number;
+      tx: number;
+      ty: number;
+      angle: number;
+      eta: number;
+      reroutable: boolean;
+    }> = [];
+    let lane = 0;
+    for (const f of fleets) {
+      if (!f.transit) continue;
+      const from = starAt(f.transit.fromStarId);
+      const to = starAt(f.transit.toStarId);
+      if (!from || !to) continue;
+      const total = Math.max(1, f.transit.arrivalTurn - f.transit.departedTurn);
+      const p = Math.max(0.06, Math.min(0.94, (gs.turn - f.transit.departedTurn) / total));
+      // spread overlapping fleets on the same lane a little
+      const off = (lane++ % 3) * 14 - 14;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const len = Math.max(1, Math.hypot(dx, dy));
+      const nx = -dy / len;
+      const ny = dx / len;
+      out.push({
+        id: f.ship.id,
+        name: f.name,
+        x: from.x + dx * p + nx * off,
+        y: from.y + dy * p + ny * off,
+        tx: to.x,
+        ty: to.y,
+        angle: (Math.atan2(dy, dx) * 180) / Math.PI,
+        eta: Math.max(1, f.transit.arrivalTurn - gs.turn),
+        reroutable: f.reroutable,
+      });
+    }
+    return out;
+  });
+
+  /** enemy empires with ships at the selected star that we are NOT at war with */
+  const peacefulForeigners = $derived.by(() => {
+    if (!gs || !selected) return [];
+    const owners = [...new Set(selected.ships.map((s) => s.owner))].filter((o) => o !== me() && o >= 0);
+    return owners
+      .filter((o) => !areAtWar(gs, me(), o))
+      .map((o) => gs.empires.find((e) => e.id === o)?.name ?? `#${o}`);
+  });
+
   function clickStar(starId: number) {
     if (selectedShipIds.length > 0 && selectedStarId !== starId) {
-      session().submit('move_ships', { shipIds: selectedShipIds, destStarId: starId });
-      selectedShipIds = [];
+      const res = session().submit('move_ships', { shipIds: selectedShipIds, destStarId: starId });
+      if (!res.error) selectedShipIds = [];
       return;
     }
     selectedStarId = starId;
@@ -70,80 +136,154 @@
   function outpost(shipId: number, planetId: number) {
     session().submit('build_outpost', { shipId, planetId });
   }
+
+  /** 5-point star polygon path centred on 0,0 */
+  function starPath(outer: number): string {
+    const inner = outer * 0.45;
+    const pts: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      pts.push(`${(Math.cos(a) * r).toFixed(1)},${(Math.sin(a) * r).toFixed(1)}`);
+    }
+    return pts.join(' ');
+  }
+  const prettify = (id: string) => id.replaceAll('_', ' ');
 </script>
 
 <div class="wrap">
-  <svg viewBox="0 0 {mapDims.w} {mapDims.h}" data-testid="galaxy-map">
-    {#each view as v (v.star.id)}
-      <g
-        class="star"
-        role="button"
-        tabindex="0"
-        onclick={() => clickStar(v.star.id)}
-        onkeydown={(e) => e.key === 'Enter' && clickStar(v.star.id)}
-        transform="translate({v.star.x},{v.star.y})"
-      >
-        {#if v.star.id === selectedStarId}
-          <circle r="34" fill="none" stroke="#8fb8ff" stroke-width="3" />
-        {/if}
-        {#if !reachable.has(v.star.id)}
-          <circle r="24" fill="none" stroke="#5a3030" stroke-width="2" stroke-dasharray="4 6" />
-        {/if}
-        <circle r="14" fill={STAR_COLORS[v.star.color]} opacity={v.explored ? 1 : 0.45} />
-        {#each v.colonies.filter((c) => !c.outpost) as c, i (c.id)}
-          <circle r={20 + i * 5} fill="none" stroke={playerColor(c.owner)} stroke-width="3" />
-        {/each}
-        {#each [...new Set(v.ships.map((s) => s.owner))] as owner, i (owner)}
-          <rect x={18} y={-16 + i * 12} width="10" height="8" fill={playerColor(owner)} />
-        {/each}
-        {#if v.explored && monstersByStar.has(v.star.id)}
-          <text y="-22" text-anchor="middle" class="monster">☠</text>
-        {/if}
-        {#if blockadedStars.has(v.star.id)}
-          <text x="-30" y="6" text-anchor="middle" class="blockade">⚓</text>
-        {/if}
-        <text y="34" text-anchor="middle">{v.star.name}</text>
-      </g>
-    {/each}
-    {#each fleets.filter((f) => f.ship.location.kind === 'transit') as f (f.ship.id)}
-      {@const from = view.find((v) => v.star.id === (f.ship.location as { from: number }).from)}
-      {@const to = view.find((v) => v.star.id === (f.ship.location as { to: number }).to)}
-      {#if from && to}
-        <line
-          x1={from.star.x}
-          y1={from.star.y}
-          x2={to.star.x}
-          y2={to.star.y}
-          stroke={playerColor(session().playerId)}
-          stroke-dasharray="8 8"
-          opacity="0.6"
-        />
-      {/if}
-    {/each}
-  </svg>
+  <div class="mapcol">
+    <svg viewBox="0 0 {mapDims.w} {mapDims.h}" data-testid="galaxy-map">
+      <defs>
+        <filter id="starglow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="6" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      {#each rangeCircles as rc, i (i)}
+        <circle cx={rc.x} cy={rc.y} r={rc.r} class="range" />
+      {/each}
+
+      {#each transits as t (t.id)}
+        <line x1={t.x} y1={t.y} x2={t.tx} y2={t.ty} class="route" />
+        <g transform="translate({t.x},{t.y}) rotate({t.angle})">
+          <polygon points="18,0 -12,-11 -6,0 -12,11" class="fleetmark" class:reroutable={t.reroutable} />
+        </g>
+        <text x={t.x} y={t.y - 18} text-anchor="middle" class="eta">{t.name} · {t.eta}t</text>
+      {/each}
+
+      {#each view as v (v.star.id)}
+        {@const kinds = monstersByStar.get(v.star.id)}
+        <g
+          class="star"
+          role="button"
+          tabindex="0"
+          onclick={() => clickStar(v.star.id)}
+          onkeydown={(e) => e.key === 'Enter' && clickStar(v.star.id)}
+          transform="translate({v.star.x},{v.star.y})"
+        >
+          <title>
+            {v.star.name}
+            {v.explored ? '' : ' — unexplored'}
+            {reachable.has(v.star.id) ? '' : ' — out of fuel range'}
+          </title>
+          {#if v.star.id === selectedStarId}
+            <circle r="36" class="selring" />
+          {/if}
+          {#if selectedShipIds.length > 0 && v.star.id !== selectedStarId && reachable.has(v.star.id)}
+            <circle r="30" class="target" />
+          {/if}
+          {#if !reachable.has(v.star.id)}
+            <circle r="26" class="norange" />
+          {/if}
+          {#if v.star.color === 'black_hole'}
+            <circle r="10" fill="#05070f" stroke="#8a76b5" stroke-width="3" opacity={v.explored ? 1 : 0.4} />
+            <circle r="16" fill="none" stroke="#5b4a75" stroke-width="2" opacity="0.6" />
+          {:else}
+            <polygon
+              points={starPath(v.explored ? 15 : 12)}
+              fill={STAR_COLORS[v.star.color]}
+              opacity={v.explored ? 1 : 0.35}
+              filter={v.explored ? 'url(#starglow)' : undefined}
+            />
+          {/if}
+          {#if !v.explored}
+            <circle r="21" class="fog" />
+            <text y="7" text-anchor="middle" class="unknown">?</text>
+          {/if}
+          {#each v.colonies.filter((c) => !c.outpost) as c, i (c.id)}
+            <circle r={22 + i * 5} fill="none" stroke={playerColor(c.owner)} stroke-width="3" opacity="0.9" />
+          {/each}
+          {#each [...new Set(v.ships.map((s) => s.owner))] as owner, i (owner)}
+            <polygon
+              points="20,{-14 + i * 14} 32,{-8 + i * 14} 20,{-2 + i * 14}"
+              fill={playerColor(owner)}
+              stroke="#05070f"
+              stroke-width="1"
+            />
+          {/each}
+          {#if v.explored && kinds}
+            {#if isRaid(kinds)}
+              <text y="-24" text-anchor="middle" class="raid">⚠</text>
+            {:else}
+              <text y="-24" text-anchor="middle" class="monster">☠</text>
+            {/if}
+          {/if}
+          {#if blockadedStars.has(v.star.id)}
+            <text x="-32" y="7" text-anchor="middle" class="blockade">⚓</text>
+          {/if}
+          <text y="38" text-anchor="middle" class="label" class:dimlabel={!v.explored}>{v.star.name}</text>
+          {#if v.explored && v.planets.length}
+            <text y="52" text-anchor="middle" class="pips">{'●'.repeat(Math.min(5, v.planets.filter((p) => p.body === 'planet').length))}</text>
+          {/if}
+        </g>
+      {/each}
+    </svg>
+    <div class="legend">
+      <label><input type="checkbox" bind:checked={showRange} /> fuel range</label>
+      <span><span class="sw" style="border-color:#5a3030"></span> dashed ring = out of range</span>
+      <span class="dimtext">◐ faded star = unexplored</span>
+      <span><span class="monster">☠</span> monster lair</span>
+      <span><span class="raid">⚠</span> Antaran raid</span>
+      <span>▶ fleet under way (label shows ETA)</span>
+    </div>
+  </div>
 
   <aside>
     {#if selected}
-      <h3 data-testid="selected-star">{selected.star.name} <span class="dim">({selected.star.color})</span></h3>
+      <h3 data-testid="selected-star">{selected.star.name} <span class="dim">({selected.star.color.replaceAll('_', ' ')})</span></h3>
       {#if !selected.explored}
-        <p class="dim">unexplored</p>
+        <p class="dim">unexplored — send a ship to chart this system</p>
       {/if}
       {#if selected.star.wormholeTo !== null}
-        <p class="dim">wormhole link</p>
+        <p class="dim">🌀 wormhole link — 1 turn transit</p>
       {/if}
       {#if !reachable.has(selected.star.id)}
-        <p class="dim">⛽ out of fuel range</p>
+        <p class="warn">⛽ out of fuel range — extend range with fuel-cell tech or a closer colony/outpost</p>
       {/if}
       {#if selected.explored && monstersByStar.has(selected.star.id)}
-        <p class="monster" data-testid="monster-warning">☠ guarded by: {monstersByStar.get(selected.star.id)!.join(', ')}</p>
+        {@const kinds = monstersByStar.get(selected.star.id)!}
+        {#if isRaid(kinds)}
+          <p class="raid" data-testid="monster-warning">⚠ Antaran raid in progress: {kinds.map(prettify).join(', ')}</p>
+        {:else}
+          <p class="monster" data-testid="monster-warning">☠ guarded by: {kinds.map(prettify).join(', ')} — destroy the keeper to settle here</p>
+        {/if}
       {/if}
       {#if blockadedStars.has(selected.star.id)}
         <p class="blockade">⚓ blockaded — output halved, no freighter food</p>
       {/if}
-      <ul>
+      {#if peacefulForeigners.length}
+        <p class="dim">🕊 {peacefulForeigners.join(', ')} ships present — you are at peace. Declare war on the Empires tab to engage.</p>
+      {/if}
+      <ul class="planets">
         {#each selected.planets as p (p.id)}
           <li data-testid="planet-{p.id}">
-            orbit {p.orbit}: {p.body === 'planet' ? `${p.climate} s${p.sizeClass} ${p.minerals} ${p.gravity}-g` : p.body}
+            <span class="orbit">{p.orbit}</span>
+            {p.body === 'planet' ? `${p.climate} · size ${p.sizeClass} · ${prettify(p.minerals)} · ${p.gravity}-g` : prettify(p.body)}
             {#each selected.colonies.filter((c) => gs?.colonies.find((x) => x.id === c.id)?.planetId === p.id) as c (c.id)}
               <b style="color:{playerColor(c.owner)}"> — {c.name}</b>
             {/each}
@@ -159,22 +299,26 @@
       </ul>
       {#if shipsHere.length}
         <h4>Your ships here</h4>
-        <ul>
+        <ul class="ships">
           {#each shipsHere as f (f.ship.id)}
             <li>
               <label>
                 <input type="checkbox" checked={selectedShipIds.includes(f.ship.id)} onchange={() => toggleShip(f.ship.id)} />
-                #{f.ship.id} {f.kind}
+                {f.name} <span class="dim">#{f.ship.id}</span>
               </label>
             </li>
           {/each}
         </ul>
         {#if selectedShipIds.length}
-          <p class="dim">click a destination star to move {selectedShipIds.length} ship(s)</p>
+          <p class="go">➤ click a destination star to move {selectedShipIds.length} ship{selectedShipIds.length > 1 ? 's' : ''} — green halo = in range</p>
         {/if}
+      {/if}
+      {#if fleets.some((f) => f.reroutable)}
+        <p class="dim">↩ fleets ordered this turn can still be re-routed from the Fleets tab.</p>
       {/if}
     {:else}
       <p class="dim">select a star</p>
+      <p class="dim">Your ships travel star-to-star within fuel range. Fleets under way show as ▶ markers with their ETA.</p>
     {/if}
   </aside>
 </div>
@@ -184,33 +328,160 @@
     display: flex;
     gap: 0.8rem;
   }
-  svg {
+  .mapcol {
     flex: 1;
-    background: #05070f;
-    border: 1px solid #26304f;
+    min-width: 0;
+  }
+  svg {
+    width: 100%;
+    background:
+      radial-gradient(70% 60% at 60% 30%, rgba(38, 48, 95, 0.35) 0%, transparent 70%),
+      #05070f;
+    border: 1px solid var(--line);
+    border-radius: 10px;
     min-height: 420px;
+    display: block;
   }
   .star {
     cursor: pointer;
+  }
+  .star:focus {
+    outline: none;
   }
   text {
     fill: #aab3d0;
     font-size: 22px;
   }
-  aside {
-    width: 21rem;
-    font-size: 0.9rem;
+  .label {
+    fill: #c7d0ee;
+    text-shadow: 0 0 6px #05070f;
   }
-  .dim {
+  .dimlabel {
+    fill: #5d6788;
+  }
+  .pips {
+    font-size: 13px;
+    fill: #6ea8ff;
+    letter-spacing: 2px;
+    opacity: 0.8;
+  }
+  .unknown {
+    fill: #5d6788;
+    font-size: 20px;
+    pointer-events: none;
+  }
+  .fog {
+    fill: none;
+    stroke: #39415f;
+    stroke-width: 1.5;
+    stroke-dasharray: 3 5;
+  }
+  .selring {
+    fill: none;
+    stroke: #8fb8ff;
+    stroke-width: 3;
+    animation: selpulse 1.6s ease-in-out infinite;
+  }
+  @keyframes selpulse {
+    0%, 100% { stroke-opacity: 1; r: 36; }
+    50% { stroke-opacity: 0.5; r: 40; }
+  }
+  .target {
+    fill: rgba(94, 224, 138, 0.08);
+    stroke: #5ee08a;
+    stroke-width: 1.5;
+    stroke-dasharray: 6 6;
+  }
+  .norange {
+    fill: none;
+    stroke: #5a3030;
+    stroke-width: 2;
+    stroke-dasharray: 4 6;
+  }
+  .range {
+    fill: rgba(110, 168, 255, 0.03);
+    stroke: rgba(110, 168, 255, 0.14);
+    stroke-width: 2;
+    pointer-events: none;
+  }
+  .route {
+    stroke: #6ea8ff;
+    stroke-width: 2;
+    stroke-dasharray: 10 10;
+    opacity: 0.5;
+    pointer-events: none;
+    animation: routeflow 1.2s linear infinite;
+  }
+  @keyframes routeflow {
+    to { stroke-dashoffset: -20; }
+  }
+  .fleetmark {
+    fill: #8fb8ff;
+    stroke: #05070f;
+    stroke-width: 1.5;
+    filter: drop-shadow(0 0 6px rgba(110, 168, 255, 0.8));
+  }
+  .fleetmark.reroutable {
+    fill: #ffd75e;
+  }
+  .eta {
+    font-size: 17px;
+    fill: #8fb8ff;
+    pointer-events: none;
+  }
+  aside {
+    width: 22rem;
+    font-size: 0.9rem;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.6rem 0.9rem;
+    align-self: flex-start;
+  }
+  aside h3 {
+    margin: 0.2rem 0 0.5rem;
+    color: var(--accent-soft);
+  }
+  .dim,
+  .dimtext {
     opacity: 0.65;
   }
+  .warn {
+    color: var(--gold);
+  }
+  .go {
+    color: var(--good);
+  }
+  ul {
+    padding-left: 1rem;
+    list-style: none;
+    margin: 0.3rem 0;
+  }
   li {
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.3rem;
+  }
+  .orbit {
+    display: inline-block;
+    width: 1.2rem;
+    height: 1.2rem;
+    line-height: 1.2rem;
+    text-align: center;
+    background: var(--panel-3);
+    border-radius: 50%;
+    font-size: 0.75rem;
+    margin-right: 0.3rem;
+    color: var(--accent-soft);
   }
   .monster {
     fill: #ff8a7a;
     color: #ff8a7a;
     font-size: 24px;
+  }
+  .raid {
+    fill: #ffd75e;
+    color: #ffd75e;
+    font-size: 26px;
+    font-weight: 700;
   }
   .blockade {
     fill: #ffd479;
@@ -218,7 +489,35 @@
     font-size: 24px;
   }
   aside .monster,
+  aside .raid,
   aside .blockade {
     font-size: 0.9rem;
+  }
+  .legend {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    padding: 0.4rem 0.2rem 0;
+    align-items: center;
+  }
+  .legend .monster,
+  .legend .raid {
+    font-size: 0.85rem;
+  }
+  .legend .sw {
+    display: inline-block;
+    width: 0.8rem;
+    height: 0.8rem;
+    border: 2px dashed #5a3030;
+    border-radius: 50%;
+    vertical-align: middle;
+  }
+  .legend label {
+    display: flex;
+    gap: 0.3rem;
+    align-items: center;
+    color: var(--text);
   }
 </style>
