@@ -18,6 +18,7 @@
   import { rngFor } from '@engine/rng';
   import { APPLICATION_ROWS, FIELD_ROWS, WEAPON_ROWS, hullById } from '@engine/data/index';
   import BattleViewer from '../battle/BattleViewer.svelte';
+  import { takeLabSeed } from '../labSeed';
   import type { ReplayEntry } from '../state.svelte';
 
   // a laboratory empire that has researched absolutely everything
@@ -67,10 +68,25 @@
     count: 2,
   });
 
+  // a live game can hand its ship types over (Empires tab -> battle simulator)
+  const seeded = takeLabSeed();
+  const seedGroups = (list: { hull: string; computer: number; shield: number; specials: string[]; weapons: LabGroup['weapons']; count: number }[] | undefined): LabGroup[] | null =>
+    list && list.length
+      ? list.map((g) => ({
+          hull: g.hull,
+          computer: g.computer,
+          shield: g.shield,
+          specials: [...g.specials],
+          weapons: g.weapons.map((w) => ({ ...w, mods: [...w.mods] })),
+          count: g.count,
+        }))
+      : null;
+
   let sides = $state<[LabSide, LabSide]>([
-    { groups: [newGroup()], orders: { ...DEFAULT_ORDERS } },
-    { groups: [newGroup()], orders: { ...DEFAULT_ORDERS, stance: 'hold_range' } },
+    { groups: seedGroups(seeded?.a) ?? [newGroup()], orders: { ...DEFAULT_ORDERS } },
+    { groups: seedGroups(seeded?.d) ?? [newGroup()], orders: { ...DEFAULT_ORDERS, stance: 'hold_range' } },
   ]);
+  const fromGame = seeded !== null;
   let seed = $state('battle-lab-0001');
   let viewing = $state<ReplayEntry | null>(null);
   let error = $state('');
@@ -192,6 +208,9 @@
   <header>
     <h2>⚗ Battle Lab</h2>
     <p class="dim">Balance sandbox — every tech unlocked, both fleets yours. Same seed + same fleets = same battle, every time.</p>
+    {#if fromGame}
+      <p class="dim" data-testid="lab-seeded">⚗ loaded from your game: side A = your designs, side B = enemy types you have met in battle. Edit freely — this sandbox never touches the real game.</p>
+    {/if}
     <div class="runbar">
       <label>seed <input bind:value={seed} size="16" /></label>
       <button class="primary" data-testid="lab-run" onclick={run}>▶ Run battle</button>

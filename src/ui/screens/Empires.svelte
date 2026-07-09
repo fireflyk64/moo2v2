@@ -1,8 +1,10 @@
 <script lang="ts">
   import { leaderById, salaryOf, MAX_LEADERS_PER_KIND, countKind } from '@engine/leaders';
-  import { selectors } from '@engine/index';
+  import { selectors, HULLS_BUILDABLE, type BattleInput } from '@engine/index';
+  import { weaponById } from '@engine/data/index';
   import type { ProposalKind } from '@engine/types';
   import { ownerName, playerColor } from '../colors';
+  import { setLabSeed, type LabSeedGroup } from '../labSeed';
   import { app, getActive } from '../state.svelte';
 
   const session = () => getActive()!.session;
@@ -23,6 +25,53 @@
     note = '';
     const res = session().submit(kind, payload);
     if (res.error) note = res.error;
+  }
+
+  // ---------- battle lab hand-off: my designs + designs met in battle ----------
+  const SHIELD_FLAT_TIERS = [0, 1, 3, 5, 7, 10];
+  function openLabWithGameShips() {
+    if (!gs || !me) return;
+    const mine: LabSeedGroup[] = me.designs
+      .filter((d) => !d.obsolete && (HULLS_BUILDABLE as readonly string[]).includes(d.hull))
+      .map((d) => ({
+        label: d.name,
+        hull: d.hull,
+        computer: d.computer,
+        shield: d.shield,
+        specials: [...d.specials],
+        weapons: d.weapons.map((w) => ({ weapon: w.weapon, count: w.count, mods: [...w.mods], arc: w.arc ?? 'F' })),
+        count: 1,
+      }));
+    // encountered: enemy hulls seen across the battles we hold replays for
+    const seen = new Map<string, LabSeedGroup>();
+    for (const r of app.replays) {
+      const input = r.input as BattleInput;
+      const mynSide = input.attacker === selfId ? 0 : input.defender === selfId ? 1 : -1;
+      for (const s of input.ships) {
+        if (s.side === mynSide || s.isBase) continue;
+        if (!(HULLS_BUILDABLE as readonly string[]).includes(s.hull)) continue; // monsters stay wild
+        const weapons = s.weapons
+          .filter((w) => w.classId <= 2 && weaponById.has(w.weaponId))
+          .map((w) => ({ weapon: w.weaponId, count: w.count, mods: [...w.mods], arc: (w.arc ?? 'F') as LabSeedGroup['weapons'][number]['arc'] }));
+        const key = JSON.stringify([s.hull, weapons, s.specials ?? []]);
+        const existing = seen.get(key);
+        if (existing) {
+          existing.count += 1;
+          continue;
+        }
+        seen.set(key, {
+          label: `encountered ${s.hull}`,
+          hull: s.hull,
+          computer: Math.max(0, Math.min(6, Math.round(s.beamAttack / 25))),
+          shield: Math.max(0, SHIELD_FLAT_TIERS.findIndex((f) => f >= s.shieldFlat)),
+          specials: [...(s.specials ?? [])],
+          weapons,
+          count: 1,
+        });
+      }
+    }
+    setLabSeed(mine, [...seen.values()]);
+    location.hash = '#battle-lab';
   }
 
   // ---------- relations ----------
@@ -261,6 +310,15 @@
       — train more agents from the colony build list
     </span>
   </div>
+
+  <h3>Battle simulator</h3>
+  <p>
+    <button data-testid="lab-from-game" onclick={openLabWithGameShips}
+      title="open the Battle Lab pre-loaded with your ship designs and every enemy design you have met in battle">
+      ⚗ Simulate with this game's ships
+    </button>
+    <span class="dim">your designs vs the enemy types you have encountered — sandbox only, the real game is untouched</span>
+  </p>
 
   {#if app.replays.length}
     <h3>Battle replays</h3>
