@@ -1008,6 +1008,47 @@ const applyDebugSetPop: Applier = (state, cmd) => {
   }
 };
 
+/** Debug/bot-mode: found a ready-made colony on an unowned planet. Used by the
+ * single-player bot's "granted the nearest colony" rule so the simulation
+ * itself never special-cases bots. */
+const validateDebugFoundColony: Validator = (state, cmd) => {
+  if (!state.settings.debugCommands) return 'debug commands disabled';
+  const p = cmd.payload as { planetId: number };
+  const planet = state.planets.find((x) => x.id === p?.planetId);
+  if (!planet) return `no planet ${p?.planetId}`;
+  if (planet.body !== 'planet') return 'cannot colonize that body';
+  if (state.colonies.some((c) => c.planetId === planet.id)) return 'already settled';
+  return null;
+};
+
+const applyDebugFoundColony: Applier = (state, cmd) => {
+  const p = cmd.payload as { planetId: number };
+  const planet = state.planets.find((x) => x.id === p.planetId)!;
+  const star = state.stars.find((s) => s.id === planet.starId)!;
+  const empire = empireOf(state, cmd.playerId);
+  state.colonies.push({
+    id: state.nextId++,
+    planetId: planet.id,
+    owner: cmd.playerId,
+    name: star.name,
+    groups: [{ race: cmd.playerId, popK: 2000, farmers: 1, workers: 1, scientists: 0, unrest: false }],
+    buildings: [],
+    queue: [],
+    storedProd: 0,
+    stickyInvested: {},
+    boughtThisTurn: false,
+    foodLackPrev: 0,
+    prodLackPrev: 0,
+    housingPPPrev: 0,
+    outpost: false,
+  });
+  state.colonies.sort((a, b) => a.id - b.id);
+  if (!empire.exploredStars.includes(star.id)) {
+    empire.exploredStars.push(star.id);
+    empire.exploredStars.sort((a, b) => a - b);
+  }
+};
+
 const applyDebugSpawnShips: Applier = (state, cmd) => {
   const p = cmd.payload as { starId: number; designId: number; count: number };
   for (let i = 0; i < Math.min(p.count, 20); i++) {
@@ -1084,6 +1125,7 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   debug_add_bc: { validate: validateDebug, apply: applyDebugAddBc },
   debug_set_pop: { validate: validateDebug, apply: applyDebugSetPop },
   debug_spawn_ships: { validate: validateDebug, apply: applyDebugSpawnShips },
+  debug_found_colony: { validate: validateDebugFoundColony, apply: applyDebugFoundColony },
 };
 
 export function validateCommand(state: GameState, cmd: EngineCommand): string | null {

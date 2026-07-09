@@ -9,9 +9,12 @@ import type { GameState } from '@engine/types';
 import type { EngineAdapter } from '@protocol/engineAdapter';
 import type { HostCore } from '@protocol/host';
 import { LobbylinkTransport } from '@protocol/lobbylinkTransport';
+import { MemoryHub } from '@protocol/memoryTransport';
 import { DEFAULT_SETTINGS, type LogCommand } from '@protocol/messages';
 import { createHostedGame, generateSeed, joinGame } from '@protocol/setup';
 import type { GameSession } from '@protocol/session';
+import type { NetTransport } from '@protocol/transport';
+import { SoloBot } from './soloBot';
 import { isOpfsLikelyAvailable, openBrowserStore } from '@storage/browser';
 import { MemoryGameStore, type GameStoreLike } from '@storage/memory';
 import type { SQLocalKysely } from 'sqlocal/kysely';
@@ -28,7 +31,7 @@ export interface RoomParams {
 }
 
 export interface ActiveGame {
-  transport: LobbylinkTransport;
+  transport: Pick<NetTransport, 'close' | 'onEvent' | 'selfId'>;
   session: GameSession<GameState>;
   host: HostCore<GameState> | null;
   store: GameStoreLike | null;
@@ -38,6 +41,8 @@ export interface ActiveGame {
   memoryOnly: boolean;
   params: RoomParams;
   startGame: () => void;
+  /** single-player mode: the bot opponent (aggression toggle lives here) */
+  solo: SoloBot | null;
 }
 
 interface ResumeInfo {
@@ -145,6 +150,7 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
       memoryOnly,
       params,
       startGame: () => hosted.host.startGame(generateSeed()),
+      solo: null,
     };
   }
 
@@ -172,5 +178,77 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
     startGame: () => {
       throw new Error('only the host can start');
     },
+    solo: null,
+  };
+}
+
+/** Single-player mode: an in-process game against the simple bot — no
+ * lobbylink server, no WebRTC. Persists like any room (code SOLO), so a
+ * reload resumes the campaign. */
+export async function enterSoloGame(name: string): Promise<ActiveGame> {
+  const params: RoomParams = { server: 'local', code: 'SOLO', name, playerCount: 2 };
+  const hub = new MemoryHub(2);
+  const hostTransport = hub.join();
+  const botTransport = hub.join();
+
+  let store: GameStoreLike | null = null;
+  let sqlocal: SQLocalKysely | null = null;
+  let memoryOnly = false;
+  if (isOpfsLikelyAvailable()) {
+    try {
+      const opened = await openBrowserStore(`moo2v2-room-${params.code}.sqlite3`);
+      const info = await opened.sqlocal.getDatabaseInfo().catch(() => null);
+      if (info && info.persisted === false) {
+        await opened.store.destroy().catch(() => undefined);
+        memoryOnly = true;
+      } else {
+        store = opened.store;
+        sqlocal = opened.sqlocal;
+      }
+    } catch (e) {
+      console.warn('[net] solo persistence unavailable (another tab?):', e);
+      memoryOnly = true;
+    }
+  } else {
+    memoryOnly = true;
+  }
+  if (!store) store = new MemoryGameStore();
+
+  const identity = {
+    name,
+    engineVersion: ENGINE_VERSION,
+    dataVersion: DATA_VERSION,
+    roomCode: params.code,
+    lobbyServer: params.server,
+  };
+  const resume = await loadResume(store, params.code, gameEngine as unknown as EngineAdapter<GameState>);
+
+  const hosted = createHostedGame<GameState>({
+    transport: hostTransport,
+    engine: gameEngine as unknown as EngineAdapter<GameState>,
+    store,
+    // debugCommands power the bot's logged "grants" — the sim has no bot cases
+    settings: { ...DEFAULT_SETTINGS, playerCount: 2, debugCommands: true },
+    identity,
+    ...(resume && resume.log.length ? { resume: { gameId: resume.gameId, log: resume.log } } : {}),
+  });
+  const botSession = joinGame<GameState>({
+    transport: botTransport,
+    engine: gameEngine as unknown as EngineAdapter<GameState>,
+    store: null, // the human's store records the game; the bot keeps nothing
+    identity: { ...identity, name: 'Bot' },
+  });
+  const solo = new SoloBot({ session: botSession });
+
+  return {
+    transport: hostTransport,
+    session: hosted.session,
+    host: hosted.host,
+    store,
+    sqlocal,
+    memoryOnly,
+    params,
+    startGame: () => hosted.host.startGame(generateSeed()),
+    solo,
   };
 }

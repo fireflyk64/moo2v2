@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DEFAULT_SERVER, enterRoom } from '../net';
+  import { DEFAULT_SERVER, enterRoom, enterSoloGame } from '../net';
   import { describeSaveError, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
   import { app, bindActive } from '../state.svelte';
 
@@ -20,6 +20,23 @@
     app.connecting = true;
     try {
       const active = await enterRoom({ server, code, name, playerCount, debug: q.get('debug') === '1' });
+      bindActive(active);
+    } catch (e) {
+      app.error = e instanceof Error ? e.message : String(e);
+    } finally {
+      app.connecting = false;
+    }
+  }
+
+  async function goSolo() {
+    if (!name) {
+      app.error = 'enter a name first';
+      return;
+    }
+    app.error = '';
+    app.connecting = true;
+    try {
+      const active = await enterSoloGame(name);
       bindActive(active);
     } catch (e) {
       app.error = e instanceof Error ? e.message : String(e);
@@ -91,6 +108,10 @@
   <label>Server <input data-testid="server" bind:value={server} size="40" /></label>
   <button data-testid="enter" onclick={go} disabled={app.connecting}>
     {app.connecting ? 'Connecting…' : 'Create / Join'}
+  </button>
+  <button data-testid="solo" onclick={goSolo} disabled={app.connecting}
+    title="offline game against a simple bot — no server, no room code needed">
+    🤖 Single player vs bot
   </button>
   <button data-testid="load-save" onclick={() => fileInput.click()} disabled={app.connecting}>
     Load saved game…
