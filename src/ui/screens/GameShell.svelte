@@ -379,7 +379,7 @@
         <li><b>Food</b> feeds colonists (2 per unit ×½); shortages starve growth. Freighters move surplus between colonies — blockades cut deliveries.</li>
         <li><b>Research</b> works one field at a time; basic fields and Cold Fusion (marked ✦) grant <i>all</i> their applications — Cold Fusion delivers colony ships, outposts, transports and freighters together. Never leave research idle — points bank but nothing finishes.</li>
         <li><b>Ships</b> travel star-to-star within fuel range (unreachable stars are dashed red on the map). Move orders can be re-routed until you commit.</li>
-        <li><b>Colonists</b> move on transports: build one, "load" at a colony, fly it, "unload" (Fleets tab). Colony bases settle other planets in the same system.</li>
+        <li><b>Colonists</b> move between stars on transports: build one, "load" at a colony, fly it, "unload" (Fleets tab). Within a system they move freely — drag citizens onto a sibling colony in the spreadsheet (no ships needed). Colony bases settle other planets in the same system.</li>
         <li><b>Battles</b> only happen between empires at <b>war</b> — declare it on the Empires tab. A battle is a single pass; set stance/targeting/retreat before the clash.</li>
         <li><b>☠ stars</b> are guarded by monsters — clear the keeper to colonize. Orion holds the Guardian and the best worlds in the galaxy.</li>
         <li><b>Leaders</b> offer their services on the Empires tab; colony leaders boost one colony, ship officers the whole fleet.</li>

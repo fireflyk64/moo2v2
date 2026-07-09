@@ -368,6 +368,7 @@
             e.preventDefault();
             dropOnColony(row);
             drag = null;
+            picked = null;
             dragOver = null;
             dragOverColony = null;
           }}

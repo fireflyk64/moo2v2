@@ -11,7 +11,7 @@
   — done: the docs' "(General)" grant-all marker is now carried through the data generator into the engine. Cold Fusion grants colony ship + freighters + outpost ship + transport to every race, alongside the five level-1 fields, exactly as the mechanics docs mark them.
 
 - [x] no transports needed for insystem colonist movement: can we drag the people around as individual citizen icons for both worker allocation (food, industry, research) as well as individual transport which auto-uses freighters not transport ships. The people should change icons if they are workers (having a hammer) or scientists (beaker) or farmer (grain)
-  — done: job cells show draggable citizen icons (🌾 farmer / 🔨 worker / 🧪 scientist); drag onto another job to reassign, or onto a same-system colony to ship one colonist via freighters (new `move_colonists` command; needs a freighter fleet; never abandons a colony; respects capacity).
+  — done: job cells show draggable citizen icons (🌾 farmer / 🔨 worker / 🧪 scientist); click one to grab it plus everyone to its right, then drag onto another job to reassign or onto a same-system colony to ship them (new `move_colonists` command; in-system moves need NO freighters or transports; never abandons a colony; respects capacity).
 
 - [x] In the colonies screen we need a button to select all of whatever has been filtered. We should be able to have quick configuration of research or industry or research-blend (where industry is set to enough to cause <= 2 pollution)
   — done: "select all (N)" respects the filter (which now also matches tags); job presets ⚗ research / ⚒ industry / ⚗⚒ blend (blend caps industry at ≤2 pollution) apply to the selection.
@@ -57,4 +57,14 @@ good-start (one other planet that is ultra rich) and  minstart (1 other planet t
   — done: "🔍 zoom in / 🗺 fit galaxy" toggle on the map; the choice persists across reloads.
 
 ---
-Verification notes (2026-07-09): `npm test` (boundaries + 280 vitest tests incl. new suites for every fix above), `MOO2_BALANCE=1` combat envelope, `svelte-check` (0 errors), and `npm run build` all pass. Playwright e2e could not run at the end of this session — the sandbox's pid limit (1024) is exhausted by unreapable zombie processes (PID 1 is websockify and never reaps), so Chrome fails at fork before loading any page; the suites should be re-run in a normal environment (`npm run test:e2e`). e2e/saveload.spec.ts was updated for the new load-preview flow.
+Follow-up round (2026-07-09, after reboot):
+
+- [x] citizen icons: clicking one selects it plus everyone to its right; a drag moves the whole selection between jobs or to a same-system colony. Icons overlap (tighter the more there are) so wide rows stay narrow.
+- [x] planet-type column shrunk to a tiny cut-off cell; hover shows the full "terran abundant normal-g size 3" description.
+- [x] in-system colonist transfers no longer require a freighter fleet (MOO2's in-system exception; transports still needed between stars).
+- [x] "another tab holds this room's database" warning fixed at the root: it keyed off sqlocal's `persisted` flag, which is just the browser's persistent-storage permission (false for nearly everyone) — that's why it fired with a single tab open. Real detection now checks for sqlocal's silent memory-driver fallback (`storageType === 'memory'`). The banner is one line ("make sure to 💾 save every turn — the browser database is not accessible…") and dismissable.
+- [x] games started from a save match each joining player to their saved empire BY NAME (welcome carries the seat; the header shows 👤 who you play). Unknown names fall back to a free seat, never a claimed one; the host itself is name-matched too, so anyone can re-host a save.
+- [x] the bot can be subbed in for an absent player: a host-side banner offers "🤖 let the bot play <name>"; the (non-cheating) bot claims the seat by name, plays and commits, and "hand the seat back" frees it for the returning human.
+- [x] non-cheating AI: bot mode select on the home screen — "parity bot" (visible logged grants, as before) or "fair bot" (no debug commands at all: researches on its own, builds and sails real colony ships, spends its own money).
+
+Verification (2026-07-09, post-reboot): `npm test` (boundaries + 285 vitest tests incl. new seatmatch/fair-bot suites), `svelte-check` (0 errors), `npm run build`, and — now that the sandbox pid limit was reset by the reboot — the full Playwright e2e suite (6/6 specs, incl. save → re-host → client rejoin) all pass.
