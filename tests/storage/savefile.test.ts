@@ -133,21 +133,37 @@ describe('save file format', () => {
     await expect(decodeSaveFile(await encodeSaveFile(badSeed))).rejects.toMatchObject({ stage: 'structure' });
   });
 
-  it('rejects version mismatches and tampered logs', async () => {
-    const { envelope } = await buildRealSave(12);
+  it('version mismatches degrade to snapshot-mode loading (forward compatibility)', async () => {
+    const { envelope, liveHash } = await buildRealSave(12);
 
     const wrongEngine = structuredClone(envelope);
     wrongEngine.game.engine_version = '99.0.0';
-    expect(() => verifySaveEnvelope(wrongEngine)).toThrowError(
-      expect.objectContaining({ stage: 'engine_version' }) as never,
-    );
+    const v1 = verifySaveEnvelope(wrongEngine);
+    expect(v1.mode).toBe('snapshot');
+    expect(v1.finalHash).toBe(liveHash); // final snapshot is the load base
+    expect(v1.warnings.join(' ')).toContain('99.0.0');
 
     const wrongData = structuredClone(envelope);
     wrongData.game.data_version = 'deadbeefdeadbeef';
-    expect(() => verifySaveEnvelope(wrongData)).toThrowError(
-      expect.objectContaining({ stage: 'data_version' }) as never,
+    const v2 = verifySaveEnvelope(wrongData);
+    expect(v2.mode).toBe('snapshot');
+
+    // without any snapshot, a version-mismatched save is genuinely unloadable
+    const noSnap = structuredClone(wrongEngine);
+    noSnap.snapshot = null;
+    noSnap.snapshots = [];
+    expect(() => verifySaveEnvelope(noSnap)).toThrowError(
+      expect.objectContaining({ stage: 'engine_version' }) as never,
     );
 
+    // a tampered snapshot cannot pass snapshot-mode integrity
+    const badSnap = structuredClone(wrongEngine);
+    badSnap.snapshot = { ...badSnap.snapshot!, stateHash: 'deadbeefdeadbeef' };
+    expect(() => verifySaveEnvelope(badSnap)).toThrowError(expect.objectContaining({ stage: 'snapshot' }) as never);
+  });
+
+  it('rejects tampered logs on same-version replay', async () => {
+    const { envelope } = await buildRealSave(12);
     // tamper a command before the snapshot seq: the replay hash check trips
     const tampered = structuredClone(envelope);
     expect(tampered.snapshot).not.toBeNull();

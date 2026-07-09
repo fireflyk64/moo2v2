@@ -9,3 +9,5 @@ export * from './repo';
 export * from './gzip';
 export { ensureSchema } from './migrations';
 export * from './savefile';
+export * from './rebase';
+export * from './memory';
