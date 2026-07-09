@@ -81,6 +81,8 @@ export interface Colony {
   boughtThisTurn: boolean;
   /** one building sale allowed per colony per turn (absent in older saves) */
   soldThisTurn?: boolean;
+  /** player-set organizational tags (sorted; subset of COLONY_TAGS; absent = none) */
+  tags?: string[];
   /** food shortage (in colonist units) recorded last resolution, drives next growth */
   foodLackPrev: number;
   /** production shortage for cybernetic races */

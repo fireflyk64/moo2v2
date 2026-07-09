@@ -1,7 +1,7 @@
 <script lang="ts">
   // The system-wide colonies spreadsheet: the primary way to run your empire.
   // Every edit is an optimistic command; dirty cells resolve on host accept.
-  import { selectors, itemLabel, explainOutput } from '@engine/index';
+  import { selectors, itemLabel, explainOutput, COLONY_TAGS } from '@engine/index';
   import { app, getActive } from '../state.svelte';
 
   const session = () => getActive()!.session;

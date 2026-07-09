@@ -177,7 +177,11 @@
       {#if researchIdle}
         ⚠ no research!
       {:else}
-        {pretty(summary.researching ?? '')}{summary.researchTurnsLeft !== null ? ` (${summary.researchTurnsLeft}t)` : ''}
+        {pretty(summary.researching ?? '')}{summary.researchProgressPct !== null
+          ? ` (${summary.researchProgressPct}%${summary.researchTurnsLeft !== null ? ` · ${summary.researchTurnsLeft}t` : ''})`
+          : summary.researchTurnsLeft !== null
+            ? ` (${summary.researchTurnsLeft}t)`
+            : ''}
       {/if}
     </button>
     <button

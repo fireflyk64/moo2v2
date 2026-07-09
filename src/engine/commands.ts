@@ -822,6 +822,80 @@ const applyAttackAntarans: Applier = (state, cmd) => {
   state.monsters.sort((a, b) => a.id - b.id);
 };
 
+// ---------- renaming + tags ----------
+
+/** Fixed set of colony tags players can attach (UI filters on these). */
+export const COLONY_TAGS = [
+  'core',
+  'border',
+  'farm',
+  'industry',
+  'research',
+  'military',
+  'staging',
+  'new',
+] as const;
+
+function validName(name: unknown): string | null {
+  if (typeof name !== 'string') return 'name must be text';
+  const trimmed = name.trim();
+  if (trimmed.length < 1) return 'name must not be empty';
+  if (trimmed.length > 24) return 'name too long (max 24)';
+  return null;
+}
+
+const validateRenameStar: Validator = (state, cmd) => {
+  const p = cmd.payload as { starId: number; name: string };
+  const star = state.stars.find((s) => s.id === p?.starId);
+  if (!star) return `no star ${p?.starId}`;
+  // only a player with a settlement in the system may rename it
+  const present = state.colonies.some((c) => {
+    if (c.owner !== cmd.playerId) return false;
+    const planet = state.planets.find((x) => x.id === c.planetId);
+    return planet?.starId === star.id;
+  });
+  if (!present) return 'you need a colony or outpost in the system to rename its star';
+  return validName(p.name);
+};
+
+const applyRenameStar: Applier = (state, cmd) => {
+  const p = cmd.payload as { starId: number; name: string };
+  state.stars.find((s) => s.id === p.starId)!.name = p.name.trim();
+};
+
+const validateRenameColony: Validator = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; name: string };
+  const c = colony(state, p?.colonyId);
+  if (!c) return `no colony ${p?.colonyId}`;
+  if (c.owner !== cmd.playerId) return `colony ${p?.colonyId} not yours`;
+  return validName(p.name);
+};
+
+const applyRenameColony: Applier = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; name: string };
+  colony(state, p.colonyId)!.name = p.name.trim();
+};
+
+const validateSetColonyTags: Validator = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; tags: string[] };
+  const c = colony(state, p?.colonyId);
+  if (!c) return `no colony ${p?.colonyId}`;
+  if (c.owner !== cmd.playerId) return `colony ${p?.colonyId} not yours`;
+  if (!Array.isArray(p.tags)) return 'tags must be a list';
+  for (const t of p.tags) {
+    if (!(COLONY_TAGS as readonly string[]).includes(t)) return `unknown tag ${t}`;
+  }
+  if (new Set(p.tags).size !== p.tags.length) return 'duplicate tags';
+  return null;
+};
+
+const applySetColonyTags: Applier = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; tags: string[] };
+  const c = colony(state, p.colonyId)!;
+  if (p.tags.length === 0) delete c.tags;
+  else c.tags = [...p.tags].sort();
+};
+
 // ---------- council votes ----------
 
 const validateVote: Validator = (state, cmd) => {
@@ -934,6 +1008,9 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   attack_antarans: { validate: validateAttackAntarans, apply: applyAttackAntarans },
   resign: { validate: validateResign, apply: applyResign },
   cast_vote: { validate: validateVote, apply: applyVote },
+  rename_star: { validate: validateRenameStar, apply: applyRenameStar },
+  rename_colony: { validate: validateRenameColony, apply: applyRenameColony },
+  set_colony_tags: { validate: validateSetColonyTags, apply: applySetColonyTags },
   debug_grant_app: { validate: validateDebug, apply: applyDebugGrantApp },
   debug_add_bc: { validate: validateDebug, apply: applyDebugAddBc },
   debug_set_pop: { validate: validateDebug, apply: applyDebugSetPop },

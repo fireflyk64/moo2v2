@@ -39,6 +39,8 @@ export interface ColonyRow {
   /** buildings that may be sold this turn, with the BC refund for each */
   sellables: Array<{ id: string; refund: number }>;
   canSell: boolean;
+  /** player-set organizational tags (subset of COLONY_TAGS) */
+  tags: string[];
 }
 
 export function colonyRows(state: GameState, empireId: number): ColonyRow[] {
@@ -115,6 +117,7 @@ export function colonyRow(state: GameState, colony: Colony): ColonyRow {
       refund: Math.floor((itemCost(state, colony.owner, b) ?? 0) / 2),
     })),
     canSell: !colony.soldThisTurn,
+    tags: colony.tags ?? [],
   };
 }
 
@@ -153,6 +156,8 @@ export interface EmpireSummary {
   colonies: number;
   researching: string | null;
   researchTurnsLeft: number | null;
+  /** progress toward the current field, 0-100 (null when no field selected) */
+  researchProgressPct: number | null;
   researchTarget: string | null;
   extraQueue: string[];
   taxRatePct: number;
@@ -177,6 +182,7 @@ export function empireSummary(state: GameState, empireId: number): EmpireSummary
     if (out.foodNet < 0) freightersNeeded += -out.foodNet;
   }
   const field = empire.research.fieldNum !== null ? fieldByNum.get(empire.research.fieldNum) : null;
+  const fieldCostNow = field ? fieldCost(state, empire, field) : 0;
   const cp = commandPoints(state, empire);
   return {
     id: empireId,
@@ -191,7 +197,9 @@ export function empireSummary(state: GameState, empireId: number): EmpireSummary
     colonies,
     researching: field?.id ?? (empire.research.extraQueue[0] ? `extra: ${empire.research.extraQueue[0]}` : null),
     researchTurnsLeft:
-      field && rp > 0 ? ceilDiv(Math.max(0, fieldCost(state, empire, field) - empire.research.accumRP), rp) : null,
+      field && rp > 0 ? ceilDiv(Math.max(0, fieldCostNow - empire.research.accumRP), rp) : null,
+    researchProgressPct:
+      field && fieldCostNow > 0 ? Math.min(100, Math.floor((empire.research.accumRP * 100) / fieldCostNow)) : null,
     researchTarget: empire.research.targetApp,
     extraQueue: empire.research.extraQueue,
     taxRatePct: empire.taxRatePct ?? 0,
