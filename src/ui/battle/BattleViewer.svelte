@@ -347,6 +347,9 @@
     border-radius: 12px;
     padding: 0.8rem;
     box-shadow: 0 14px 60px rgba(0, 0, 0, 0.65), 0 0 60px rgba(110, 168, 255, 0.1);
+    max-height: 96vh;
+    max-width: 96vw;
+    overflow: auto;
   }
   .bar {
     display: flex;

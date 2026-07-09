@@ -37,7 +37,7 @@ test('host saves a binary file, re-hosts it in a new room, client rejoins', asyn
   await a.getByTestId('start').click();
   await expect(a.getByTestId('turn')).toHaveText('Turn 1', { timeout: 20_000 });
 
-  await a.locator('[data-testid^="build-"]').first().selectOption('research_lab');
+  await a.locator('[data-testid^="build-"]').first().selectOption('housing');
   await a.getByTestId('commit').click();
   await b.getByTestId('commit').click();
   await expect(a.getByTestId('turn')).toHaveText('Turn 2', { timeout: 20_000 });
