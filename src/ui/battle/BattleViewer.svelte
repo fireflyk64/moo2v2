@@ -191,7 +191,6 @@
     gfx.moveTo(W * 0.66, 0).lineTo(W * 0.66, H).stroke({ color: 0x1c2444, width: 1 });
     gfx.moveTo(W * 0.33, 0).lineTo(W * 0.33, H).stroke({ color: 0x141a33, width: 1 });
 
-    const prev = frames[fi - 1];
     for (const shipInit of input.ships) {
       const s = f.ships.find((x) => x.id === shipInit.shipId);
       if (!s || !s.alive || s.retreated || s.crossed) continue;
@@ -199,17 +198,20 @@
       const y = (s.y / FP) * SCALE;
       const size = 4 + shipInit.hullIdx * 2.1;
       const color = colorOf(shipInit.side);
-      // face the way we are moving: retreating ships flip around
-      let dir: 1 | -1 = shipInit.side === 0 ? 1 : -1;
-      const p = prev?.ships.find((x) => x.id === shipInit.shipId);
-      if (p && Math.abs(s.x - p.x) > FP / 4) dir = s.x > p.x ? 1 : -1;
-      drawShip(x, y, size, dir, shipInit.isBase, color);
+      // sim heading (0..31) -> sprite rotation; older replays fall back to side
+      const angle = typeof s.h === 'number' ? (s.h * Math.PI * 2) / 32 : shipInit.side === 0 ? 0 : Math.PI;
+      const sys = s.sys ?? '';
+      drawShip(x, y, size, angle, shipInit.isBase, color, sys.includes('d'));
       // hp bar
       gfx.rect(x - size, y + size + 4, size * 2, 2.5).fill({ color: 0x2a3352 });
       const hpColor = s.structPct > 60 ? 0x5ee08a : s.structPct > 30 ? 0xffd75e : 0xff6b5e;
       gfx.rect(x - size, y + size + 4, (size * 2 * s.structPct) / 100, 2.5).fill({ color: hpColor });
-      if (s.shieldPct > 0) {
+      if (s.shieldPct > 0 && !sys.includes('s')) {
         gfx.circle(x, y, size + 4).stroke({ color: 0x4da3ff, alpha: 0.2 + s.shieldPct / 350, width: 1.5 });
+      }
+      if (sys) {
+        // knocked-out systems flag: d(rive) c(omputer) s(hields)
+        gfx.circle(x + size, y - size - 3, 2.2).fill({ color: 0xff6b5e, alpha: 0.9 });
       }
     }
 

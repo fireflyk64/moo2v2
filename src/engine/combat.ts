@@ -406,8 +406,9 @@ export function runBattle(
           else steer(s.x + dir * FIELD_W, s.y, 1);
           break;
         case 'passthrough':
-          // raiders punch THROUGH the line — no brawl stop, straight past
-          if (target && active(target) && !s.passedThrough) steer(target.x, target.y, 1);
+          // raiders punch THROUGH the line: run the target's lane to the far
+          // side (guns fire on the way past), never stopping to brawl
+          if (target && active(target) && !s.passedThrough) steer(s.x + dir * FIELD_W, target.y, 1);
           else steer(s.x + dir * FIELD_W, s.homeY, 1);
           break;
         case 'formation': {

@@ -49,7 +49,7 @@
     computer: number;
     shield: number;
     specials: string[];
-    weapons: Array<{ weapon: string; count: number; mods: string[] }>;
+    weapons: Array<{ weapon: string; count: number; mods: string[]; arc: 'F' | 'FX' | 'R' | '360' }>;
     count: number;
   }
   interface LabSide {
@@ -63,7 +63,7 @@
     computer: 3,
     shield: 3,
     specials: [],
-    weapons: [{ weapon: 'laser_cannon', count: 4, mods: [] }],
+    weapons: [{ weapon: 'laser_cannon', count: 4, mods: [], arc: 'F' }],
     count: 2,
   });
 
@@ -111,6 +111,7 @@
         ammo: w.row.ammo,
         cooldown: 0,
         count: w.count,
+        arc: w.arc,
       })),
       startingStructure: stats.structureHp,
       startingArmor: stats.armorHp,
@@ -173,7 +174,7 @@
   }
 
   function addWeapon(g: LabGroup) {
-    g.weapons = [...g.weapons, { weapon: weaponChoices[0]!.id, count: 1, mods: [] }];
+    g.weapons = [...g.weapons, { weapon: weaponChoices[0]!.id, count: 1, mods: [], arc: 'F' }];
   }
   function toggleMod(g: LabGroup, wi: number, mod: string) {
     const w = g.weapons[wi]!;
