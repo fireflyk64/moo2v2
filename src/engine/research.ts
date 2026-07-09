@@ -21,6 +21,12 @@ import type { Rng } from './rng';
 import { traitsOf } from './economy';
 import type { Empire, GameState, TurnEvent } from './types';
 
+/** Tier-1 ("basic") fields grant every application at once, like the classic
+ * starting techs (lasers etc.) — no target choice needed. */
+export function fieldGrantsAll(field: FieldRow): boolean {
+  return field.tier === 1 && !field.id.startsWith('advf_');
+}
+
 export function fieldCost(empire: Empire, field: FieldRow): number {
   if (field.id.startsWith('advf_')) {
     const level = empire.research.hyperLevels[field.id] ?? 0;
@@ -68,7 +74,7 @@ function completeField(
     granted.push(synthetic);
   } else {
     const unknown = apps.filter((a) => !empire.knownApps.includes(a.id));
-    if (traits.creative && !state.settings.modes.creativeVariant) {
+    if (fieldGrantsAll(field) || (traits.creative && !state.settings.modes.creativeVariant)) {
       for (const a of unknown) {
         grantApp(empire, a.id);
         granted.push(a.id);

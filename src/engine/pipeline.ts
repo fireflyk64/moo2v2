@@ -430,6 +430,9 @@ function s12_victory(state: GameState, events: TurnEvent[]): void {
 // ---------- S13 end turn ----------
 
 function s13_endTurn(state: GameState): void {
-  for (const colony of state.colonies) colony.boughtThisTurn = false;
+  for (const colony of state.colonies) {
+    colony.boughtThisTurn = false;
+    if (colony.soldThisTurn) colony.soldThisTurn = false;
+  }
   state.turn += 1;
 }

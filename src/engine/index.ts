@@ -4,7 +4,7 @@
 // - No imports from outside src/engine (zero runtime dependencies).
 // - No sources of nondeterminism; randomness comes only from the seeded PRNG.
 
-export const ENGINE_VERSION = '0.2.0'; // Phase 6: leaders/monsters/antarans state added
+export const ENGINE_VERSION = '0.3.0'; // tier-1 fields grant all apps; sell_building; same-turn move re-orders
 
 export * from './types';
 export * from './canonical';

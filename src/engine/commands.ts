@@ -8,10 +8,10 @@ import { areAtWar, relationKey, setRelation } from './battles';
 import { buyCost, empireOf, traitsOf } from './economy';
 import { canQueue, itemCost } from './items';
 import { inRange, shipStar, travelTurns } from './movement';
-import { availableFields } from './research';
+import { availableFields, fieldGrantsAll } from './research';
 import { designStats } from './shipdesign';
 import type { BattleOrders, Stance, TargetPriority } from './combat';
-import type { Colony, GameState, PopGroup, Ship } from './types';
+import type { Colony, GameState, PopGroup, Ship, Star } from './types';
 
 export interface EngineCommand {
   turn: number;
@@ -185,7 +185,9 @@ const validateSetResearch: Validator = (state, cmd) => {
   }
   const traits = traitsOf(empire);
   if (!traits.uncreative && !(traits.creative && !state.settings.modes.creativeVariant)) {
-    if (p.targetApp === null && !field.id.startsWith('advf_')) return 'target application required';
+    if (p.targetApp === null && !field.id.startsWith('advf_') && !fieldGrantsAll(field)) {
+      return 'target application required';
+    }
   }
   return null;
 };
@@ -248,20 +250,36 @@ const validateMove: Validator = (state, cmd) => {
   const dest = state.stars.find((s) => s.id === p.destStarId);
   if (!dest) return `no star ${p.destStarId}`;
   for (const ship of ships) {
-    if (ship.location.kind !== 'star') return `ship ${ship.id} is in transit`;
-    if (ship.location.starId === dest.id) return `ship ${ship.id} already there`;
+    // orders placed this turn are still re-routable until the turn resolves
+    if (ship.location.kind === 'transit' && ship.location.departedTurn !== state.turn) {
+      return `ship ${ship.id} is in transit`;
+    }
+    const origin = moveOrigin(state, ship);
+    if (origin.id === dest.id && ship.location.kind === 'star') return `ship ${ship.id} already there`;
   }
   if (!inRange(state, cmd.playerId, dest)) return `${dest.name} is out of fuel range`;
   return null;
 };
+
+/** Where a move order departs from: the current star, or — for an order placed
+ * earlier this same turn — the star the pending order departs from. */
+function moveOrigin(state: GameState, ship: Ship): Star {
+  if (ship.location.kind === 'star') return shipStar(state, ship)!;
+  return state.stars.find((s) => s.id === (ship.location as { from: number }).from)!;
+}
 
 const applyMove: Applier = (state, cmd) => {
   const p = cmd.payload as MovePayload;
   const empire = empireOf(state, cmd.playerId);
   for (const id of p.shipIds) {
     const ship = state.ships.find((s) => s.id === id)!;
-    const from = shipStar(state, ship)!;
+    const from = moveOrigin(state, ship);
     const dest = state.stars.find((s) => s.id === p.destStarId)!;
+    if (from.id === dest.id) {
+      // re-ordered back home: cancel the pending order entirely
+      ship.location = { kind: 'star', starId: from.id };
+      continue;
+    }
     const turns = travelTurns(state, empire, from, dest);
     ship.location = {
       kind: 'transit',
@@ -362,6 +380,33 @@ const applyScrap: Applier = (state, cmd) => {
   const costs: Record<string, number> = { colony_ship: 500, outpost_ship: 100, transport: 100, scout: 10 };
   empire.bc += Math.floor((costs[ship.shipKind] ?? 0) / 2);
   state.ships = state.ships.filter((s) => s.id !== p.shipId);
+};
+
+// ---------- sell_building ----------
+
+interface SellBuildingPayload {
+  colonyId: number;
+  buildingId: string;
+}
+
+const validateSellBuilding: Validator = (state, cmd) => {
+  const p = cmd.payload as SellBuildingPayload;
+  const c = ownColony(state, cmd, p?.colonyId);
+  if (typeof c === 'string') return c;
+  if (!c.buildings.includes(p.buildingId)) return `${p.buildingId} not built there`;
+  if (c.soldThisTurn) return 'already sold a building there this turn';
+  const cost = itemCost(state, cmd.playerId, p.buildingId);
+  if (cost === null) return `unknown building ${p.buildingId}`;
+  return null;
+};
+
+const applySellBuilding: Applier = (state, cmd) => {
+  const p = cmd.payload as SellBuildingPayload;
+  const c = colony(state, p.colonyId)!;
+  const cost = itemCost(state, cmd.playerId, p.buildingId) ?? 0;
+  c.buildings = c.buildings.filter((b) => b !== p.buildingId);
+  c.soldThisTurn = true;
+  empireOf(state, cmd.playerId).bc += Math.floor(cost / 2);
 };
 
 // ---------- ship designs ----------
@@ -846,6 +891,7 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
     apply: applyOutpost,
   },
   scrap_ship: { validate: validateScrap, apply: applyScrap },
+  sell_building: { validate: validateSellBuilding, apply: applySellBuilding },
   save_design: { validate: validateSaveDesign, apply: applySaveDesign },
   obsolete_design: { validate: validateObsoleteDesign, apply: applyObsoleteDesign },
   declare_war: { validate: validateDeclareWar, apply: applyDeclareWar },

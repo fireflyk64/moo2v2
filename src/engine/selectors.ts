@@ -3,10 +3,10 @@
 // from here so alternate front ends and headless bots agree exactly.
 
 import { fieldByNum, applicationsOfField, FIELD_SUBJECTS, type FieldRow } from './data/index';
-import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, type ColonyOutput } from './economy';
+import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, groupGrowthK, type ColonyOutput } from './economy';
 import { buildableItems, itemCost } from './items';
 import { driveSpeed, fuelRangeCp, inRange, supportStars } from './movement';
-import { availableFields, fieldCost } from './research';
+import { availableFields, fieldCost, fieldGrantsAll } from './research';
 import { starDistance } from './galaxy';
 import { ceilDiv } from './imath';
 import type { Colony, Empire, GameState, Planet, Ship, Star } from './types';
@@ -34,6 +34,11 @@ export interface ColonyRow {
   outpost: boolean;
   /** sticky-build mode: parked production per switched-away item */
   stickyInvested: Record<string, number>;
+  /** projected population change next turn, in popK (1000 = one colonist unit) */
+  growthK: number;
+  /** buildings that may be sold this turn, with the BC refund for each */
+  sellables: Array<{ id: string; refund: number }>;
+  canSell: boolean;
 }
 
 export function colonyRows(state: GameState, empireId: number): ColonyRow[] {
@@ -70,6 +75,18 @@ export function colonyRow(state: GameState, colony: Colony): ColonyRow {
     jobs.scientists += g.scientists;
     popK += g.popK;
   }
+  let growthK = 0;
+  if (!colony.outpost && colony.groups.length > 0) {
+    const maxPop = colonyMaxPop(state, colony);
+    const totalUnits = colonyPopUnits(colony);
+    let projected = popK;
+    for (const g of colony.groups) {
+      const inc = groupGrowthK(state, colony, g, maxPop, totalUnits);
+      const applied = inc > 0 ? Math.min(inc, Math.max(0, maxPop * 1000 - projected)) : Math.max(inc, -g.popK);
+      projected += applied;
+      growthK += applied;
+    }
+  }
   return {
     id: colony.id,
     name: colony.name,
@@ -92,6 +109,12 @@ export function colonyRow(state: GameState, colony: Colony): ColonyRow {
     buildable: colony.outpost ? [] : buildableItems(state, colony),
     buildings: colony.buildings,
     outpost: colony.outpost,
+    growthK,
+    sellables: colony.buildings.map((b) => ({
+      id: b,
+      refund: Math.floor((itemCost(state, colony.owner, b) ?? 0) / 2),
+    })),
+    canSell: !colony.soldThisTurn,
   };
 }
 
@@ -173,6 +196,8 @@ export interface ResearchChoice {
   field: FieldRow;
   subject: string;
   cost: number;
+  /** tier-1 fields deliver every application at once (no target choice) */
+  grantsAll: boolean;
   apps: Array<{ id: string; name: string; known: boolean }>;
 }
 
@@ -182,6 +207,7 @@ export function researchChoices(state: GameState, empireId: number): ResearchCho
     field,
     subject: subjectLabel(field),
     cost: fieldCost(empire, field),
+    grantsAll: fieldGrantsAll(field),
     apps: applicationsOfField(field.id).map((a) => ({
       id: a.id,
       name: a.name,
@@ -229,28 +255,48 @@ export function galaxyView(state: GameState, empireId: number): StarView[] {
 export interface FleetRow {
   ship: Ship;
   kind: string;
+  /** display name: the design's name for warships, a friendly kind otherwise */
+  name: string;
   location: string;
   atStarId: number | null;
   etaTurns: number | null;
+  /** in-flight (or ordered-this-turn) route info for map rendering */
+  transit: { fromStarId: number; toStarId: number; departedTurn: number; arrivalTurn: number } | null;
+  /** the pending order was issued this turn and can still be re-routed */
+  reroutable: boolean;
   canColonizeHere: number[]; // planet ids
   canOutpostHere: number[];
+  /** transports: own colony here that colonists can be loaded from / landed on */
+  canLoadFromColonyId: number | null;
+  canUnloadToColonyId: number | null;
 }
+
+const SHIP_KIND_NAMES: Record<string, string> = {
+  scout: 'Scout',
+  colony_ship: 'Colony Ship',
+  outpost_ship: 'Outpost Ship',
+  transport: 'Transport',
+};
 
 export function fleetRows(state: GameState, empireId: number): FleetRow[] {
   const rows: FleetRow[] = [];
+  const empire = state.empires.find((e) => e.id === empireId);
   for (const ship of state.ships) {
     if (ship.owner !== empireId) continue;
     let location: string;
     let atStarId: number | null = null;
     let eta: number | null = null;
+    let transit: FleetRow['transit'] = null;
     if (ship.location.kind === 'star') {
       const star = state.stars.find((s) => s.id === (ship.location as { starId: number }).starId)!;
       location = star.name;
       atStarId = star.id;
     } else {
-      const to = state.stars.find((s) => s.id === (ship.location as { to: number }).to)!;
-      eta = (ship.location as { arrivalTurn: number }).arrivalTurn - state.turn;
+      const loc = ship.location as { from: number; to: number; departedTurn: number; arrivalTurn: number };
+      const to = state.stars.find((s) => s.id === loc.to)!;
+      eta = loc.arrivalTurn - state.turn;
       location = `→ ${to.name} (${eta}t)`;
+      transit = { fromStarId: loc.from, toStarId: loc.to, departedTurn: loc.departedTurn, arrivalTurn: loc.arrivalTurn };
     }
     const settleTargets = (kind: 'colony_ship' | 'outpost_ship'): number[] => {
       if (ship.shipKind !== kind || atStarId === null) return [];
@@ -263,14 +309,38 @@ export function fleetRows(state: GameState, empireId: number): FleetRow[] {
         )
         .map((p) => p.id);
     };
+    let name = SHIP_KIND_NAMES[ship.shipKind] ?? ship.shipKind;
+    if (ship.shipKind === 'design' && ship.designId !== null) {
+      const design = empire?.designs.find((d) => d.id === ship.designId);
+      name = design ? design.name : 'Warship';
+    }
+    const colonyHere = (need: 'load' | 'unload'): number | null => {
+      if (ship.shipKind !== 'transport' || atStarId === null) return null;
+      if (need === 'load' && ship.cargoPopUnits > 0) return null;
+      if (need === 'unload' && ship.cargoPopUnits <= 0) return null;
+      const c = state.colonies.find(
+        (x) =>
+          x.owner === empireId &&
+          !x.outpost &&
+          state.planets.some((p) => p.id === x.planetId && p.starId === atStarId) &&
+          (need === 'unload' ||
+            x.groups.some((g) => g.race === empireId && !g.unrest && Math.floor(g.popK / 1000) > 2)),
+      );
+      return c ? c.id : null;
+    };
     rows.push({
       ship,
       kind: ship.shipKind,
+      name,
       location,
       atStarId,
       etaTurns: eta,
+      transit,
+      reroutable: transit !== null && transit.departedTurn === state.turn,
       canColonizeHere: settleTargets('colony_ship'),
       canOutpostHere: settleTargets('outpost_ship'),
+      canLoadFromColonyId: colonyHere('load'),
+      canUnloadToColonyId: colonyHere('unload'),
     });
   }
   return rows;

@@ -79,6 +79,8 @@ export interface Colony {
   /** sticky-build mode: parked progress per item id */
   stickyInvested: Record<string, number>;
   boughtThisTurn: boolean;
+  /** one building sale allowed per colony per turn (absent in older saves) */
+  soldThisTurn?: boolean;
   /** food shortage (in colonist units) recorded last resolution, drives next growth */
   foodLackPrev: number;
   /** production shortage for cybernetic races */
