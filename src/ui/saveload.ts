@@ -7,10 +7,14 @@ import {
   encodeSaveFile,
   saveFileName,
   verifySaveEnvelope,
+  resumePoints,
   SaveFileError,
   type SaveEnvelope,
+  type VerifyResult,
 } from '@storage/index';
+import { rebaseSave } from '@storage/rebase';
 import { openBrowserStore } from '@storage/browser';
+import { generateSeed } from '@protocol/setup';
 import type { ActiveGame } from './net';
 
 function downloadBlob(name: string, blob: Blob): void {
@@ -24,11 +28,15 @@ function downloadBlob(name: string, blob: Blob): void {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-/** Host: download the full game record as a verified binary save file. */
-export async function downloadSave(active: ActiveGame): Promise<string> {
+/** Download the full game record as a verified binary save file (any seat).
+ * A snapshot of the current state is embedded first, so the file stays
+ * loadable snapshot-first on every future build. `history: false` strips the
+ * command log and older snapshots (final state only). */
+export async function downloadSave(active: ActiveGame, opts: { history?: boolean } = {}): Promise<string> {
   if (!active.store || !active.session.gameId) throw new Error('no persistent game to save');
   await active.session.flush(); // ensure every accepted command reached the database
-  const envelope = await active.store.exportGame(active.session.gameId);
+  await active.session.snapshotNow(); // save-time snapshot: the future-proof load base
+  const envelope = await active.store.exportGame(active.session.gameId, opts);
   verifySaveEnvelope(envelope); // never write a save we could not load back
   const bytes = await encodeSaveFile(envelope);
   const turn = active.session.getState()?.turn ?? 0;
@@ -46,27 +54,60 @@ export async function downloadRawDatabase(active: ActiveGame): Promise<string> {
   return name;
 }
 
+export interface SavePreview {
+  envelope: SaveEnvelope;
+  verified: VerifyResult;
+  players: string[];
+  /** turns the save can branch from (replay mode: any logged turn) */
+  resumeTurns: number[];
+}
+
+/** Decode + verify an uploaded save without importing (drives the load UI). */
+export async function previewSave(bytes: Uint8Array): Promise<SavePreview> {
+  const envelope: SaveEnvelope = await decodeSaveFile(bytes);
+  const verified = verifySaveEnvelope(envelope);
+  return {
+    envelope,
+    verified,
+    players: envelope.players.map((p) => p.name),
+    resumeTurns: resumePoints(envelope, verified.mode),
+  };
+}
+
 export interface LoadResult {
   gameId: string;
   turn: number;
   commandCount: number;
   players: string[];
+  mode: 'replay' | 'snapshot';
+  warnings: string[];
 }
 
-/** Decode + verify an uploaded save, then import it into the given room's
- * database (as host, seat 0). The normal resume path picks it up on connect. */
+/** Import a decoded + verified save into the given room's database (as host,
+ * seat 0); the normal resume path picks it up on connect.
+ *  - replay mode, latest turn: imported as-is (identity + full history kept).
+ *  - older turn or snapshot mode: rebased onto a fresh branch whose
+ *    game_start embeds the chosen state (new game id). */
 export async function importSaveIntoRoom(
-  bytes: Uint8Array,
+  preview: SavePreview,
   roomCode: string,
   server: string,
+  atTurn?: number,
 ): Promise<LoadResult> {
-  const envelope: SaveEnvelope = await decodeSaveFile(bytes);
-  const verified = verifySaveEnvelope(envelope);
+  const { envelope, verified } = preview;
+  let toImport = envelope;
+  let turn = verified.turn;
+  const wantsBranch = atTurn !== undefined && atTurn !== verified.turn;
+  if (verified.mode === 'snapshot' || wantsBranch) {
+    const rebased = rebaseSave(envelope, verified.mode, wantsBranch ? atTurn : undefined, generateSeed());
+    toImport = rebased.envelope;
+    turn = rebased.turn;
+  }
 
   const rehomed: SaveEnvelope = {
-    ...envelope,
+    ...toImport,
     game: {
-      ...envelope.game,
+      ...toImport.game,
       room_code: roomCode,
       lobby_server: server,
       local_player_id: 0, // loading machine becomes the host
@@ -90,9 +131,11 @@ export async function importSaveIntoRoom(
 
   return {
     gameId: rehomed.game.game_id,
-    turn: verified.turn,
-    commandCount: verified.commandCount,
+    turn,
+    commandCount: toImport.commands.length,
     players: envelope.players.map((p) => p.name),
+    mode: verified.mode,
+    warnings: verified.warnings,
   };
 }
 

@@ -12,6 +12,9 @@ export interface GameStartPayload {
   dataVersion: string;
   /** pick-bidding mode: the sealed-bid auction outcome (audit record) */
   auction?: Array<{ pickId: string; winner: number | null; price: number }>;
+  /** resume/branch: canonical state JSON to load INSTEAD of generating a new
+   * galaxy — the log then starts at this state (save-compatibility contract) */
+  resumeState?: string;
 }
 
 export interface EngineAdapter<S = unknown> {

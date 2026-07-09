@@ -130,9 +130,10 @@
   });
 
   let saveNote = $state('');
+  let saveNoHistory = $state(false);
   async function saveGame() {
     try {
-      const name = await downloadSave(getActive()!);
+      const name = await downloadSave(getActive()!, { history: !saveNoHistory });
       saveNote = `saved ${name}`;
     } catch (e) {
       saveNote = describeSaveError(e);
@@ -203,6 +204,9 @@
         title={getActive()?.store ? 'Download the full game as a save file (works in any tab)' : 'persistence unavailable'}>
         💾 Save
       </button>
+      <label class="dim nohist" title="strip the turn-by-turn history: final state only, smaller file, no what-if branching">
+        <input type="checkbox" data-testid="save-no-history" bind:checked={saveNoHistory} /> no history
+      </label>
       {#if session().playerId === 0}
         <button data-testid="save-db" disabled={!getActive()?.sqlocal} onclick={saveDb}
           title="Download the raw sqlite database">DB</button>
@@ -511,6 +515,12 @@
     gap: 0.3rem;
     font-size: 0.85rem;
     color: var(--text-dim);
+  }
+  .nohist {
+    font-size: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
   }
   .edge {
     position: fixed;

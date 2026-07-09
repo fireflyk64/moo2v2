@@ -1,6 +1,6 @@
 <script lang="ts">
   import { DEFAULT_SERVER, enterRoom } from '../net';
-  import { describeSaveError, importSaveIntoRoom } from '../saveload';
+  import { describeSaveError, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
   import { app, bindActive } from '../state.svelte';
 
   const q = new URLSearchParams(location.search);
@@ -28,20 +28,40 @@
     }
   }
 
+  let preview = $state<SavePreview | null>(null);
+  let resumeTurn = $state<number | 'latest'>('latest');
+
   async function onLoadFile(ev: Event) {
     const input = ev.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
     if (!file) return;
+    app.error = '';
+    loadNote = 'verifying save…';
+    preview = null;
+    try {
+      preview = await previewSave(new Uint8Array(await file.arrayBuffer()));
+      resumeTurn = 'latest';
+      loadNote = '';
+    } catch (e) {
+      loadNote = '';
+      app.error = describeSaveError(e);
+    }
+  }
+
+  async function loadPreviewed() {
+    if (!preview) return;
     if (!code || !name) {
       app.error = 'enter your name and a room code before loading a save';
       return;
     }
     app.error = '';
-    loadNote = 'verifying save…';
+    loadNote = 'importing save…';
     try {
-      const res = await importSaveIntoRoom(new Uint8Array(await file.arrayBuffer()), code, server);
-      loadNote = `loaded turn ${res.turn} (${res.commandCount} commands, players: ${res.players.join(', ')}) — connecting as host…`;
+      const at = resumeTurn === 'latest' ? undefined : resumeTurn;
+      const res = await importSaveIntoRoom(preview, code, server, at);
+      loadNote = `loaded turn ${res.turn} (players: ${res.players.join(', ')}) — connecting as host…`;
+      preview = null;
       await go();
     } catch (e) {
       loadNote = '';
@@ -83,6 +103,29 @@
     style="display:none"
     onchange={onLoadFile}
   />
+  {#if preview}
+    <div class="preview" data-testid="save-preview">
+      <p>
+        <b>Save verified:</b> turn {preview.verified.turn}, players {preview.players.join(', ')}
+        {#if preview.verified.mode === 'snapshot'}
+          <span class="warnline" data-testid="save-compat">⚠ from an older build — loads from its snapshot ({preview.verified.warnings.join('; ')})</span>
+        {/if}
+      </p>
+      <label>
+        Resume at turn
+        <select data-testid="resume-turn" bind:value={resumeTurn}>
+          <option value="latest">latest (turn {preview.verified.turn})</option>
+          {#each preview.resumeTurns.filter((t) => t > 0 && t < preview!.verified.turn) as t (t)}
+            <option value={t}>turn {t} (what-if branch)</option>
+          {/each}
+        </select>
+      </label>
+      <span>
+        <button data-testid="confirm-load" onclick={loadPreviewed} disabled={app.connecting}>Load as host</button>
+        <button onclick={() => (preview = null)}>Cancel</button>
+      </span>
+    </div>
+  {/if}
   {#if loadNote}<p class="dim" data-testid="load-note">{loadNote}</p>{/if}
   {#if app.error}<p class="error" data-testid="error">{app.error}</p>{/if}
 </div>
@@ -130,6 +173,20 @@
   }
   .dim {
     color: var(--text-dim);
+  }
+  .preview {
+    border: 1px solid var(--line-bright);
+    border-radius: 8px;
+    padding: 0.5rem 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+  }
+  .warnline {
+    display: block;
+    color: var(--gold);
+    font-size: 0.82rem;
   }
   .labline {
     margin: 1rem 0 0;

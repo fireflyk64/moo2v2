@@ -55,6 +55,14 @@ async function loadResume(
   const games = await store.listGames();
   const g = games.find((x) => x.room_code === roomCode && x.status === 'active');
   if (!g) return null;
+  if (g.engine_version !== ENGINE_VERSION || g.data_version !== DATA_VERSION) {
+    // replaying an old log through a newer engine could silently diverge —
+    // leave the stored game alone; the save-file loader knows how to rebase it
+    console.warn(
+      `[net] not auto-resuming ${g.game_id}: stored ${g.engine_version}/${g.data_version} vs build ${ENGINE_VERSION}/${DATA_VERSION}`,
+    );
+    return null;
+  }
   const snap = await store.latestSnapshot(g.game_id);
   let state: GameState | null = snap ? engine.deserialize(snap.stateJson) : null;
   let lastSeq = snap?.seq ?? -1;

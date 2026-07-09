@@ -159,22 +159,30 @@ export class MemoryGameStore implements GameStoreLike {
     this.need(gameId).chat.push(rec);
   }
 
-  async exportGame(gameId: string): Promise<SaveEnvelope> {
+  async exportGame(gameId: string, opts: { history?: boolean } = {}): Promise<SaveEnvelope> {
+    const history = opts.history ?? true;
     const g = this.need(gameId);
-    const snapshot = await this.latestSnapshot(gameId);
+    const snapshots = [...g.snapshots.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([turn, s]) => ({ turn, ...s }));
+    const snapshot = snapshots.length ? snapshots[snapshots.length - 1]! : null;
     return {
       format: 'moo2v2-save',
-      version: 1,
+      version: 2,
       game: { ...g.row },
       players: g.players.map((p) => ({ ...p })),
-      commands: g.commands.map((c) => ({
-        seq: c.seq,
-        turn: c.turn,
-        playerId: c.playerId,
-        kind: c.kind,
-        payload: canonicalStringify(c.payload),
-      })),
-      snapshot: snapshot ?? null,
+      commands: history
+        ? g.commands.map((c) => ({
+            seq: c.seq,
+            turn: c.turn,
+            playerId: c.playerId,
+            kind: c.kind,
+            payload: canonicalStringify(c.payload),
+          }))
+        : [],
+      snapshot,
+      snapshots: history ? snapshots.slice(0, -1) : [],
+      history,
     };
   }
 }

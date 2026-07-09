@@ -396,6 +396,19 @@ export class GameSession<S> {
     return this.persistChain.then(() => undefined);
   }
 
+  /** Persist a snapshot of the CURRENT authoritative state (save-time base:
+   * guarantees the exported file loads snapshot-first on any future build). */
+  snapshotNow(): Promise<void> {
+    if (!this.store || !this.gameId || !this.authState) return Promise.resolve();
+    const gameId = this.gameId;
+    const turn = this.engine.turnOf(this.authState);
+    const seq = this.lastSeq;
+    const json = this.engine.serialize(this.authState);
+    const hash = this.engine.hash(this.authState);
+    this.persist(() => this.store!.saveSnapshot(gameId, turn, seq, json, hash));
+    return this.flush();
+  }
+
   // ----- reads -----
 
   getState(): S | null {

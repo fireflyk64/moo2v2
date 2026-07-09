@@ -205,7 +205,18 @@ export function initGame(start: EngineGameStart): GameState {
 export const gameEngine = {
   lastEvents: [] as TurnEvent[],
 
-  init(start: { seed: string; settings: unknown; players: Array<{ id: number; name: string; raceJson: string | null }>; dataVersion: string }): GameState {
+  init(start: {
+    seed: string;
+    settings: unknown;
+    players: Array<{ id: number; name: string; raceJson: string | null }>;
+    dataVersion: string;
+    resumeState?: string;
+  }): GameState {
+    if (start.resumeState) {
+      // resume/branch from an embedded snapshot: the state IS the game —
+      // missing newer fields default via the optional-field contract
+      return canonicalParse(start.resumeState) as unknown as GameState;
+    }
     return initGame({
       seed: start.seed,
       settings: start.settings as GameStateSettings,
