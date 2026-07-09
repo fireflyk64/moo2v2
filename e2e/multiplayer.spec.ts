@@ -41,11 +41,11 @@ test('two browsers play real turns: orders, commit, hashes, reload-resume', asyn
     .toEqual([await hashOf(a), await hashOf(a)]);
 
   // --- issue real orders on the colonies spreadsheet ---
-  // (both items are part of the average-start known fields)
+  // (housing/trade goods are always buildable regardless of start mode)
   const buildA = a.locator('[data-testid^="build-"]').first();
-  await buildA.selectOption('research_lab');
+  await buildA.selectOption('housing');
   const buildB = b.locator('[data-testid^="build-"]').first();
-  await buildB.selectOption('hydroponic_farm');
+  await buildB.selectOption('trade_goods');
 
   // set research on both (first available field button)
   await a.getByTestId('tab-research').click();

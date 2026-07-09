@@ -17,7 +17,8 @@ import {
   FIELD_SUBJECTS,
   type FieldRow,
 } from './data/index';
-import type { Rng } from './rng';
+import { rngFor, type Rng } from './rng';
+import { floorDiv } from './imath';
 import { traitsOf } from './economy';
 import type { Empire, GameState, TurnEvent } from './types';
 
@@ -27,12 +28,22 @@ export function fieldGrantsAll(field: FieldRow): boolean {
   return field.tier === 1 && !field.id.startsWith('advf_');
 }
 
-export function fieldCost(empire: Empire, field: FieldRow): number {
+/** Seeded per-game difficulty: every field's real cost is its base cost times a
+ * multiplier in [100%, 200%], fixed by the game seed — identical for every
+ * player (nobody gets "lucky" on a category), different between games.
+ * Tier-1 basics stay at list price so the opening is predictable. */
+export function fieldCostMultiplierPct(state: GameState, field: FieldRow): number {
+  if (fieldGrantsAll(field) || field.id.startsWith('advf_')) return 100;
+  return 100 + rngFor(state.seed, 'field_cost', field.num).int(101);
+}
+
+export function fieldCost(state: GameState, empire: Empire, field: FieldRow): number {
+  const scaled = floorDiv(field.cost * fieldCostMultiplierPct(state, field), 100);
   if (field.id.startsWith('advf_')) {
     const level = empire.research.hyperLevels[field.id] ?? 0;
-    return field.cost + 10000 * level;
+    return scaled + 10000 * level;
   }
-  return field.cost;
+  return scaled;
 }
 
 /** The next researchable field per subject (previous completed, not yet done). */
@@ -141,7 +152,7 @@ export function applyResearch(
   const field = fieldByNum.get(r.fieldNum);
   if (!field) return;
   r.accumRP += rp;
-  const cost = fieldCost(empire, field);
+  const cost = fieldCost(state, empire, field);
   if (r.accumRP >= cost) {
     r.accumRP -= cost;
     r.fieldNum = null;

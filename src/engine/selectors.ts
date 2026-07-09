@@ -186,7 +186,7 @@ export function empireSummary(state: GameState, empireId: number): EmpireSummary
     colonies,
     researching: field?.id ?? (empire.research.extraQueue[0] ? `extra: ${empire.research.extraQueue[0]}` : null),
     researchTurnsLeft:
-      field && rp > 0 ? ceilDiv(Math.max(0, fieldCost(empire, field) - empire.research.accumRP), rp) : null,
+      field && rp > 0 ? ceilDiv(Math.max(0, fieldCost(state, empire, field) - empire.research.accumRP), rp) : null,
     researchTarget: empire.research.targetApp,
     extraQueue: empire.research.extraQueue,
   };
@@ -206,7 +206,7 @@ export function researchChoices(state: GameState, empireId: number): ResearchCho
   return availableFields(empire).map((field) => ({
     field,
     subject: subjectLabel(field),
-    cost: fieldCost(empire, field),
+    cost: fieldCost(state, empire, field),
     grantsAll: fieldGrantsAll(field),
     apps: applicationsOfField(field.id).map((a) => ({
       id: a.id,

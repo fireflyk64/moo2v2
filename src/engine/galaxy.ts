@@ -242,6 +242,7 @@ export function generateGalaxy(
   // --- star placement with minimum separation ---
   const stars: Star[] = [];
   const taken = new Set<string>();
+  const namePool = makeNamePool(rng);
   let guard = 0;
   while (stars.length < starCount && guard++ < 20000) {
     const x = 60 + rng.int(w - 120);
@@ -251,7 +252,7 @@ export function generateGalaxy(
     }
     stars.push({
       id: nextId++,
-      name: starName(rng, taken),
+      name: starName(rng, taken, namePool),
       x,
       y,
       color: weighted(rng, COLOR_WEIGHTS),
@@ -342,6 +343,30 @@ export function generateGalaxy(
     if (existingIdx >= 0) planets[existingIdx] = hw;
     else planets.push(hw);
     homePlanets.push(hw.id);
+
+    // every home system starts with at least one other settleable world — a
+    // modest poor planet — so colony bases have somewhere to go (min-start rule)
+    const sibling = planets.find((p) => p.starId === star.id && p.id !== hw.id && p.body === 'planet');
+    if (!sibling) {
+      const usedOrbits = new Set(planets.filter((p) => p.starId === star.id).map((p) => p.orbit));
+      const orbit = [2, 4, 1, 5].find((o) => !usedOrbits.has(o)) ?? 2;
+      const existingAt = planets.findIndex((p) => p.starId === star.id && p.orbit === orbit);
+      const extra: Planet = {
+        id: existingAt >= 0 ? planets[existingAt]!.id : nextId++,
+        starId: star.id,
+        orbit,
+        body: 'planet',
+        sizeClass: 2,
+        climate: weighted(rng, CLIMATE_WEIGHTS[orbitBand(orbit)]),
+        minerals: 'poor',
+        gravity: rollGravity(rng, 2),
+        special: null,
+        homeworldOf: null,
+        terraformSteps: 0,
+      };
+      if (existingAt >= 0) planets[existingAt] = extra;
+      else planets.push(extra);
+    }
   }
   planets.sort((a, b) => a.id - b.id);
 

@@ -100,7 +100,7 @@ export type ProtocolMessage = ClientToHost | HostToClient;
 
 export const DEFAULT_SETTINGS: GameSettings = {
   galaxySize: 'medium',
-  startMode: 'average',
+  startMode: 'pre_warp', // early tech age by default: research the basics yourself
   playerCount: 2,
   modes: {
     creativeVariant: false,
