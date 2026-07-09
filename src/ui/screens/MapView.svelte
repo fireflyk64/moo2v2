@@ -137,6 +137,32 @@
     session().submit('build_outpost', { shipId, planetId });
   }
 
+  // ---- star rename (needs a settlement in the system) ----
+  let renamingStar = $state(false);
+  let renameStarText = $state('');
+  const focusNow = (el: HTMLElement) => el.focus();
+  const canRenameSelected = $derived.by(() => {
+    if (!gs || !selected) return false;
+    return gs.colonies.some((c) => {
+      if (c.owner !== me()) return false;
+      const p = gs.planets.find((x) => x.id === c.planetId);
+      return p?.starId === selected.star.id;
+    });
+  });
+  function startStarRename() {
+    if (!selected) return;
+    renamingStar = true;
+    renameStarText = selected.star.name;
+  }
+  function commitStarRename() {
+    if (!renamingStar || !selected) return;
+    const name = renameStarText.trim();
+    if (name && name !== selected.star.name) {
+      session().submit('rename_star', { starId: selected.star.id, name });
+    }
+    renamingStar = false;
+  }
+
   /** wormhole pairs (drawn once each) */
   const wormholeLinks = $derived.by(() => {
     if (!gs) return [];
@@ -327,7 +353,27 @@
 
   <aside>
     {#if selected}
-      <h3 data-testid="selected-star">{selected.star.name} <span class="dim">({selected.star.color.replaceAll('_', ' ')})</span></h3>
+      <h3 data-testid="selected-star">
+        {#if renamingStar}
+          <input
+            class="renamestar"
+            data-testid="rename-star-input"
+            bind:value={renameStarText}
+            use:focusNow
+            maxlength="24"
+            onkeydown={(e) => {
+              if (e.key === 'Enter') commitStarRename();
+              else if (e.key === 'Escape') renamingStar = false;
+            }}
+            onblur={commitStarRename}
+          />
+        {:else}
+          {selected.star.name} <span class="dim">({selected.star.color.replaceAll('_', ' ')})</span>
+          {#if canRenameSelected}
+            <button class="mini ghost" data-testid="rename-star" title="rename star (needs a settlement here)" onclick={startStarRename}>✏️</button>
+          {/if}
+        {/if}
+      </h3>
       {#if !selected.explored}
         <p class="dim">unexplored — send a ship to chart this system</p>
       {/if}
@@ -545,6 +591,19 @@
   aside h3 {
     margin: 0.2rem 0 0.5rem;
     color: var(--accent-soft);
+  }
+  aside h3 .ghost {
+    opacity: 0.35;
+    border: none;
+    background: transparent;
+    padding: 0 0.2rem;
+    font-size: 0.8rem;
+  }
+  aside h3 .ghost:hover {
+    opacity: 1;
+  }
+  .renamestar {
+    width: 11rem;
   }
   .dim,
   .dimtext {

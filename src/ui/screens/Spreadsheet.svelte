@@ -50,7 +50,8 @@
         (r) =>
           r.name.toLowerCase().includes(f) ||
           r.planet.climate.includes(f) ||
-          (r.activeItem ?? '').includes(f),
+          (r.activeItem ?? '').includes(f) ||
+          r.tags.some((t) => t.includes(f)),
       );
     }
     const fn = keyFns[sortKey];
@@ -202,6 +203,24 @@
     if (!entries.length) return '';
     return entries.map(([k, v]) => `${label(k)}: ${v}`).join(', ');
   }
+
+  // ---- rename + tags ----
+  let renaming = $state<number | null>(null);
+  let renameText = $state('');
+  const focusNow = (el: HTMLElement) => el.focus();
+  function startRename(row: selectors.ColonyRow) {
+    renaming = row.id;
+    renameText = row.name;
+  }
+  function commitRename(row: selectors.ColonyRow) {
+    if (renaming !== row.id) return;
+    const name = renameText.trim();
+    if (name && name !== row.name) session().submit('rename_colony', { colonyId: row.id, name });
+    renaming = null;
+  }
+  function setTags(row: selectors.ColonyRow, tags: string[]) {
+    session().submit('set_colony_tags', { colonyId: row.id, tags });
+  }
 </script>
 
 <div class="bar">
@@ -253,7 +272,51 @@
       {@const ex = explain(row.id)}
       <tr data-testid="colony-row-{row.id}" class:outpost={row.outpost}>
         <td><input type="checkbox" checked={selected.has(row.id)} onchange={() => toggleSelect(row.id)} /></td>
-        <td class="name">{row.name}{row.outpost ? ' (outpost)' : ''}</td>
+        <td class="name">
+          {#if renaming === row.id}
+            <input
+              class="rename"
+              data-testid="rename-input-{row.id}"
+              bind:value={renameText}
+              use:focusNow
+              onkeydown={(e) => {
+                if (e.key === 'Enter') commitRename(row);
+                else if (e.key === 'Escape') renaming = null;
+              }}
+              onblur={() => commitRename(row)}
+              maxlength="24"
+            />
+          {:else}
+            <span
+              role="button"
+              tabindex="-1"
+              title="double-click to rename"
+              ondblclick={() => startRename(row)}
+              data-testid="colony-name-{row.id}">{row.name}</span>{row.outpost ? ' (outpost)' : ''}
+            <button class="mini ghost" data-testid="rename-{row.id}" title="rename colony" onclick={() => startRename(row)}>✏️</button>
+          {/if}
+          <span class="tagsline">
+            {#each row.tags as t (t)}
+              <button class="tag" data-testid="tag-{row.id}-{t}" title="remove tag {t}" onclick={() => setTags(row, row.tags.filter((x) => x !== t))}>{t}✕</button>
+            {/each}
+            <select
+              class="tagadd"
+              data-testid="tag-add-{row.id}"
+              value=""
+              title="tag this colony"
+              onchange={(e) => {
+                const t = (e.target as HTMLSelectElement).value;
+                if (t) setTags(row, [...row.tags, t]);
+                (e.target as HTMLSelectElement).value = '';
+              }}
+            >
+              <option value="">+tag</option>
+              {#each COLONY_TAGS.filter((t) => !row.tags.includes(t)) as t (t)}
+                <option value={t}>{t}</option>
+              {/each}
+            </select>
+          </span>
+        </td>
         <td class="dim">{row.planet.climate} {pretty(row.planet.minerals)} {row.planet.gravity}-g s{row.planet.sizeClass}</td>
         <td data-testid="pop-{row.id}" title="projected growth next turn: {growthLabel(row.growthK)}">
           {row.popUnits}/{row.maxPop}
@@ -488,6 +551,39 @@
   }
   .name {
     font-weight: 600;
+  }
+  .name .ghost {
+    opacity: 0;
+    border: none;
+    background: transparent;
+  }
+  .name:hover .ghost {
+    opacity: 0.7;
+  }
+  .rename {
+    width: 8rem;
+  }
+  .tagsline {
+    display: inline-flex;
+    gap: 0.2rem;
+    margin-left: 0.3rem;
+    align-items: center;
+  }
+  .tag {
+    font-size: 0.68rem;
+    padding: 0 0.3rem;
+    background: var(--panel-3);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--accent-soft);
+  }
+  .tagadd {
+    font-size: 0.68rem;
+    max-width: 3.4rem;
+    opacity: 0.45;
+  }
+  .tagadd:hover {
+    opacity: 1;
   }
   .outpost {
     opacity: 0.6;
