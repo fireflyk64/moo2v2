@@ -118,7 +118,10 @@ export function initGame(start: EngineGameStart): GameState {
   state.empires.sort((a, b) => a.id - b.id);
 
   // starter warship design: a laser frigate everyone can build on day one
+  // (pre-warp empires know no weapons yet — they design their first warship
+  // after researching physics)
   for (const empire of state.empires) {
+    if (!empire.knownApps.includes('laser_cannon')) continue;
     empire.designs.push({
       id: state.nextId++,
       name: 'Patrol Frigate',

@@ -41,6 +41,8 @@ test('war, battle orders dialog, deterministic resolve, replay viewer', async ({
   await expect(a.getByTestId('roster-count')).toHaveText('1 joined', { timeout: 30_000 });
   await b.goto(roomUrl(room, 'Bree'));
   await expect(a.getByTestId('roster-count')).toHaveText('2 joined', { timeout: 30_000 });
+  // average start: both sides begin with an armed Patrol Frigate design
+  await a.getByTestId('start-mode').selectOption('average');
   await b.getByTestId('ready').click();
   await expect(a.getByTestId('start')).toBeEnabled({ timeout: 10_000 });
   await a.getByTestId('start').click();

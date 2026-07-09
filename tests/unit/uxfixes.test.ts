@@ -92,6 +92,70 @@ describe('same-turn fleet re-ordering (bug: cannot re-order fleets before commit
   });
 });
 
+describe('buy-then-switch lockout (bug: switching items after buying)', () => {
+  it('cannot change the active item after buying this turn', () => {
+    const state = newGame();
+    const colony = state.colonies.find((c) => c.owner === 0)!;
+    colony.queue = [{ item: 'housing' }];
+    colony.boughtThisTurn = true;
+    expect(
+      validateCommand(state, { turn: state.turn, playerId: 0, kind: 'set_build_queue', payload: { colonyId: colony.id, items: ['trade_goods'] } }),
+    ).toMatch(/bought/);
+    // keeping the same head but editing the tail is fine
+    expect(
+      validateCommand(state, { turn: state.turn, playerId: 0, kind: 'set_build_queue', payload: { colonyId: colony.id, items: ['housing', 'trade_goods'] } }),
+    ).toBeNull();
+  });
+});
+
+describe('empire tax rate (bug: need a tax when losing money)', () => {
+  it('set_tax_rate converts queue production into BC at 2:1', () => {
+    const state = newGame();
+    const colony = state.colonies.find((c) => c.owner === 0)!;
+    colony.queue = [{ item: 'star_base' }];
+    const before = colonyOutput(state, colony);
+    expect(validateCommand(state, { turn: state.turn, playerId: 0, kind: 'set_tax_rate', payload: { pct: 50 } })).toBeNull();
+    applyCommand(state, { turn: state.turn, playerId: 0, kind: 'set_tax_rate', payload: { pct: 50 } });
+    const after = colonyOutput(state, colony);
+    expect(after.prodToQueue).toBeLessThan(before.prodToQueue);
+    expect(after.taxBC).toBe(Math.floor(Math.floor((before.prodToQueue * 50) / 100) / 2));
+    expect(after.bcIncome).toBe(before.bcIncome + after.taxBC);
+    expect(validateCommand(state, { turn: state.turn, playerId: 0, kind: 'set_tax_rate', payload: { pct: 60 } })).toMatch(/0-50/);
+  });
+});
+
+describe('seeded research cost variance (same for all players, per game)', () => {
+  it('multiplier is 100-200%, identical across empires, and skips tier-1 basics', () => {
+    const state = newGame();
+    for (const f of FIELD_ROWS) {
+      const pct = fieldCostMultiplierPct(state, f);
+      expect(pct).toBeGreaterThanOrEqual(100);
+      expect(pct).toBeLessThanOrEqual(200);
+      if (fieldGrantsAll(f)) expect(pct).toBe(100);
+      expect(fieldCost(state, state.empires[0]!, f)).toBe(fieldCost(state, state.empires[1]!, f));
+    }
+    // a different seed shuffles the multipliers
+    const other = { ...state, seed: 'ffffeeeeddddccccbbbbaaaa99998888' } as GameState;
+    const changed = FIELD_ROWS.some((f) => fieldCostMultiplierPct(other, f) !== fieldCostMultiplierPct(state, f));
+    expect(changed).toBe(true);
+  });
+});
+
+describe('repulsive diplomacy (bug: repulsive should not allow trade)', () => {
+  it('treaty proposals to/from repulsive races are rejected', () => {
+    const state = newGame();
+    state.empires[1]!.picks = [...state.empires[1]!.picks, 'repulsive'].sort();
+    expect(
+      validateCommand(state, { turn: state.turn, playerId: 0, kind: 'diplo_propose', payload: { to: 1, kind: 'trade' } }),
+    ).toMatch(/repulsive/);
+    // gifts still get through
+    state.empires[0]!.bc = 100;
+    expect(
+      validateCommand(state, { turn: state.turn, playerId: 0, kind: 'diplo_propose', payload: { to: 1, kind: 'gift_bc', giveBc: 50 } }),
+    ).toBeNull();
+  });
+});
+
 describe('sell_building (bug: be able to sell buildings)', () => {
   it('sells for half cost, one per colony per turn, and resets next turn', () => {
     let state = newGame();
