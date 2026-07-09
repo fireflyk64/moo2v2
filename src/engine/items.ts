@@ -28,7 +28,7 @@ export const PROJECT_BUILDABLES = new Set([
 
 /** Buildables intentionally unavailable until later phases (documented). Their
  * effect entries in effectsMap carry matching stub notes. */
-const DEFERRED = new Set([
+export const DEFERRED_BUILDABLES = new Set([
   'artificial_planet',
   'fighter_garrison', // carrier ops omitted by the combat redesign (documented)
   'flux_shield', // superseded shield tiers stay data-only (planetary shield covers defense)
@@ -55,19 +55,20 @@ const DEFERRED = new Set([
   'armor_barracks_splinter',
 ]);
 
+/** Buildables whose unlocking application id differs from the buildable id. */
+export const BUILDABLE_APP_ALIAS: Record<string, string> = {
+  freighter_fleet: 'freighters',
+  transport: 'transport',
+  colony_ship: 'colony_ship',
+  outpost_ship: 'outpost_ship',
+  housing: 'housing',
+  trade_goods: 'trade_goods',
+};
+
 function empireKnowsItem(empire: Empire, itemId: string): boolean {
   if ((ALWAYS_KNOWN_ITEMS as readonly string[]).includes(itemId)) return true;
   if (empire.knownApps.includes(itemId)) return true;
-  // buildables whose application id differs but maps 1:1 (colony/outpost/transport ships)
-  const alias: Record<string, string> = {
-    freighter_fleet: 'freighters',
-    transport: 'transport',
-    colony_ship: 'colony_ship',
-    outpost_ship: 'outpost_ship',
-    housing: 'housing',
-    trade_goods: 'trade_goods',
-  };
-  const app = alias[itemId];
+  const app = BUILDABLE_APP_ALIAS[itemId];
   return app ? empire.knownApps.includes(app) : false;
 }
 
@@ -117,7 +118,7 @@ export function canQueue(state: GameState, colony: Colony, itemId: string): stri
 
   const b = buildableById.get(itemId);
   if (!b) return `unknown item ${itemId}`;
-  if (DEFERRED.has(itemId)) return `${itemId} not available yet`;
+  if (DEFERRED_BUILDABLES.has(itemId)) return `${itemId} not available yet`;
   if (!empireKnowsItem(empire, itemId)) return `${itemId} not researched`;
   const planet = planetOf(state, colony);
   if (!climateAllows(itemId, planet)) return `${itemId} cannot operate on ${planet.climate}`;
@@ -160,7 +161,25 @@ export function buildableItems(state: GameState, colony: Colony): string[] {
   return out;
 }
 
-/** Display label for any queue item. */
+const EXTRA_LABELS: Record<string, string> = {
+  freighter_fleet: 'Freighter Fleet (+5)',
+  colony_base: 'Colony Base (settle this system)',
+  housing: 'Housing (grow population)',
+  trade_goods: 'Trade Goods (prod → BC)',
+  spy: 'Train Agent',
+  terraforming: 'Terraforming',
+  gaia_transformation: 'Gaia Transformation',
+};
+
+function titleCase(id: string): string {
+  return id
+    .split('_')
+    .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
+/** Display label for any queue item: the application's real name when it has
+ * one (e.g. supercomputer -> "Planetary Supercomputer"), else a title-cased id. */
 export function itemLabel(state: GameState, ownerId: number, itemId: string): string {
   const designId = parseDesignItem(itemId);
   if (designId !== null) {
@@ -168,7 +187,10 @@ export function itemLabel(state: GameState, ownerId: number, itemId: string): st
     const design = empire?.designs.find((d) => d.id === designId);
     return design ? `⚔ ${design.name}` : itemId;
   }
-  return itemId;
+  const extra = EXTRA_LABELS[itemId];
+  if (extra) return extra;
+  const app = applicationById.get(itemId) ?? applicationById.get(BUILDABLE_APP_ALIAS[itemId] ?? '');
+  return app?.name ?? titleCase(itemId);
 }
 
 /** True when the application exists (guards against typo'd ids in commands). */
