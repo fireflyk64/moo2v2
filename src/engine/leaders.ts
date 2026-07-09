@@ -182,8 +182,8 @@ export function countKind(empire: Empire, kind: 'colony' | 'ship'): number {
   return n;
 }
 
-export const OFFER_TTL = 5;
-export const OFFER_BASE_CHANCE = 4; // %/turn with an open slot
+export const OFFER_TTL = 8;
+export const OFFER_BASE_CHANCE = 8; // %/turn with an open slot
 
 /** S11: expire offers, generate new offers, pay salaries, award XP. */
 export function leadersUpkeep(state: GameState, events: TurnEvent[]): void {
@@ -212,6 +212,8 @@ export function leadersUpkeep(state: GameState, events: TurnEvent[]): void {
       let chance = OFFER_BASE_CHANCE + bonuses.offerChancePct;
       if (traits.charismatic) chance += 4;
       if (traits.repulsive) chance = floorDiv(chance, 2);
+      // word gets out fast early on: empires with no leader yet see offers sooner
+      if (empire.leaders.length === 0 && !state.leaderOffers.some((o) => o.empireId === empire.id)) chance += 6;
       if (rng.chancePct(chance)) {
         const pool = LEADERS.filter(
           (l) =>

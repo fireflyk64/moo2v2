@@ -11,6 +11,7 @@ import { assimilate, isBlockaded, resolveInvasions } from './ground';
 import { leaderEmpireBonuses, leadersUpkeep } from './leaders';
 import { antaranUpkeep, randomEventsUpkeep } from './npc';
 import { itemCost, parseDesignItem } from './items';
+import { commandPoints } from './movement';
 import { applyTerraformStep, unsettledPlanetsInSystem } from './terraform';
 import { colonyMaxPop, colonyOutput, colonyPopUnits, groupGrowthK, traitsOf } from './economy';
 import { normalizeJobsForGroup } from './commands';

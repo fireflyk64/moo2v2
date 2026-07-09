@@ -5,7 +5,7 @@
 import { fieldByNum, applicationsOfField, FIELD_SUBJECTS, type FieldRow } from './data/index';
 import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, groupGrowthK, type ColonyOutput } from './economy';
 import { buildableItems, itemCost } from './items';
-import { driveSpeed, fuelRangeCp, inRange, supportStars } from './movement';
+import { commandPoints, driveSpeed, fuelRangeCp, inRange, supportStars } from './movement';
 import { availableFields, fieldCost, fieldGrantsAll } from './research';
 import { starDistance } from './galaxy';
 import { ceilDiv } from './imath';
@@ -155,6 +155,9 @@ export interface EmpireSummary {
   researchTurnsLeft: number | null;
   researchTarget: string | null;
   extraQueue: string[];
+  taxRatePct: number;
+  cpUsage: number;
+  cpSources: number;
 }
 
 export function empireSummary(state: GameState, empireId: number): EmpireSummary {
@@ -174,6 +177,7 @@ export function empireSummary(state: GameState, empireId: number): EmpireSummary
     if (out.foodNet < 0) freightersNeeded += -out.foodNet;
   }
   const field = empire.research.fieldNum !== null ? fieldByNum.get(empire.research.fieldNum) : null;
+  const cp = commandPoints(state, empire);
   return {
     id: empireId,
     name: empire.name,
@@ -190,6 +194,9 @@ export function empireSummary(state: GameState, empireId: number): EmpireSummary
       field && rp > 0 ? ceilDiv(Math.max(0, fieldCost(state, empire, field) - empire.research.accumRP), rp) : null,
     researchTarget: empire.research.targetApp,
     extraQueue: empire.research.extraQueue,
+    taxRatePct: empire.taxRatePct ?? 0,
+    cpUsage: cp.usage,
+    cpSources: cp.sources,
   };
 }
 
@@ -345,6 +352,45 @@ export function fleetRows(state: GameState, empireId: number): FleetRow[] {
     });
   }
   return rows;
+}
+
+/** Race discovery: empires you have actually met — you explored a star holding
+ * one of their colonies, your forces share a star with theirs, or you already
+ * have dealings (relations entry, proposal, or their spies caught yours…). */
+export function metEmpireIds(state: GameState, empireId: number): Set<number> {
+  const met = new Set<number>([empireId]);
+  const me = state.empires.find((e) => e.id === empireId);
+  if (!me) return met;
+  const explored = new Set(me.exploredStars);
+  const starOfPlanet = new Map(state.planets.map((p) => [p.id, p.starId]));
+  for (const c of state.colonies) {
+    if (c.owner === empireId) continue;
+    const starId = starOfPlanet.get(c.planetId);
+    if (starId !== undefined && explored.has(starId)) met.add(c.owner);
+  }
+  const myStars = new Set<number>();
+  for (const s of state.ships) {
+    if (s.owner === empireId && s.location.kind === 'star') myStars.add(s.location.starId);
+  }
+  for (const c of state.colonies) {
+    if (c.owner !== empireId) continue;
+    const starId = starOfPlanet.get(c.planetId);
+    if (starId !== undefined) myStars.add(starId);
+  }
+  for (const s of state.ships) {
+    if (s.owner !== empireId && s.owner >= 0 && s.location.kind === 'star' && myStars.has(s.location.starId)) {
+      met.add(s.owner);
+    }
+  }
+  for (const r of state.relations) {
+    if (r.a === empireId) met.add(r.b);
+    if (r.b === empireId) met.add(r.a);
+  }
+  for (const p of state.proposals) {
+    if (p.to === empireId) met.add(p.from);
+    if (p.from === empireId) met.add(p.to);
+  }
+  return met;
 }
 
 export interface MoveOption {

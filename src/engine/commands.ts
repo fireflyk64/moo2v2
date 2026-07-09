@@ -657,6 +657,14 @@ const validatePropose: Validator = (state, cmd) => {
   if (['non_aggression', 'alliance', 'trade', 'research'].includes(p.kind) && rel.status === 'war') {
     return 'make peace first';
   }
+  // repulsive races cannot sustain treaty relations — peace, gifts, and
+  // surrender terms are the only table they will sit at
+  if (['non_aggression', 'alliance', 'trade', 'research', 'tech_exchange'].includes(p.kind)) {
+    const me = empireOf(state, cmd.playerId);
+    const them = empireOf(state, p.to);
+    if (traitsOf(me).repulsive) return 'your race is repulsive — no treaties';
+    if (traitsOf(them).repulsive) return `${them.name} is repulsive — they refuse all treaties`;
+  }
   if (p.kind === 'gift_bc') {
     if (!Number.isSafeInteger(p.giveBc) || (p.giveBc ?? 0) <= 0) return 'bad gift amount';
     const me = empireOf(state, cmd.playerId);
