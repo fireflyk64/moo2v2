@@ -55,14 +55,14 @@ export const DEFERRED_BUILDABLES = new Set([
   'armor_barracks_splinter',
 ]);
 
-/** Buildables whose unlocking application id differs from the buildable id. */
+/** Buildables whose unlocking application id differs from the buildable id.
+ * Kept in lockstep with the data tables by tests/data/unlocks.test.ts. */
 export const BUILDABLE_APP_ALIAS: Record<string, string> = {
   freighter_fleet: 'freighters',
-  transport: 'transport',
-  colony_ship: 'colony_ship',
-  outpost_ship: 'outpost_ship',
-  housing: 'housing',
-  trade_goods: 'trade_goods',
+  battle_station: 'battlestation',
+  robo_miner_plant: 'robominers',
+  nanite_factory: 'nano_disassemblers',
+  gravity_generator: 'planetary_gravity_generator',
 };
 
 function empireKnowsItem(empire: Empire, itemId: string): boolean {

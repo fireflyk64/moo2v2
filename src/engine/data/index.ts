@@ -215,7 +215,9 @@ export function startingFieldNums(mode: 'pre_warp' | 'average'): readonly number
 }
 
 /** Items every empire knows regardless of research (see mechanics/unresearchable.md). */
-export const ALWAYS_KNOWN_ITEMS = ['capitol', 'marine_barracks', 'spies'] as const;
+/** Items every empire can build from turn 1 (no unlocking application exists
+ * for these: the classic always-available projects + starting structures). */
+export const ALWAYS_KNOWN_ITEMS = ['capitol', 'marine_barracks', 'spy', 'housing', 'trade_goods'] as const;
 
 // ---------- version fingerprint ----------
 
