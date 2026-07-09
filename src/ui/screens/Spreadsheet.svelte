@@ -201,34 +201,36 @@
     if (moveNoteTimer) clearTimeout(moveNoteTimer);
     moveNoteTimer = setTimeout(() => (moveNote = ''), 5000);
   }
-  function onDragStart(row: selectors.ColonyRow, job: Job, ev: DragEvent) {
-    drag = { colonyId: row.id, job };
-    ev.dataTransfer?.setData('text/plain', `${row.id}:${job}`);
+  function onDragStart(row: selectors.ColonyRow, job: Job, i: number, ev: DragEvent) {
+    drag = { colonyId: row.id, job, count: Math.max(1, grabCount(row, job, i)) };
+    ev.dataTransfer?.setData('text/plain', `${row.id}:${job}:${drag.count}`);
     if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move';
   }
   function onDrop(row: selectors.ColonyRow, job: Job) {
-    if (drag && drag.colonyId === row.id) moveJob(row, drag.job, job);
+    if (drag && drag.colonyId === row.id) moveJob(row, drag.job, job, drag.count);
     else if (drag && drag.colonyId !== row.id) dropOnColony(row); // job cell of another colony works too
     drag = null;
+    picked = null;
     dragOver = null;
     dragOverColony = null;
   }
-  /** a citizen dropped on a different colony: freighter lift within the system */
+  /** citizens dropped on a different colony: in-system shuttle (no ships needed) */
   function dropOnColony(row: selectors.ColonyRow) {
     if (!drag || drag.colonyId === row.id) return;
     const src = allRows.find((r) => r.id === drag!.colonyId);
     if (!src) return;
     if (src.planet.starId !== row.planet.starId) {
-      note('⛔ freighters only shuttle within a system — use a transport between stars');
+      note('⛔ colonists shuttle freely only within a system — use a transport between stars');
     } else {
+      const n = drag.count;
       const res = session().submit('move_colonists', {
         fromColonyId: src.id,
         toColonyId: row.id,
         race: session().playerId,
-        count: 1,
+        count: n,
       });
       if (res.error) note(`⛔ ${res.error}`);
-      else note(`🚚 colonist shipped ${src.name} → ${row.name}`);
+      else note(`🚚 ${n} colonist${n > 1 ? 's' : ''} shipped ${src.name} → ${row.name}`);
     }
   }
   const canDropColony = (row: selectors.ColonyRow): boolean => {
@@ -315,7 +317,7 @@
     </span>
     <button onclick={() => (selected = new Set())}>clear selection</button>
   {:else}
-    <span class="dim">tick colonies to bulk-set builds · click headers to sort · drag a citizen onto another job — or onto a same-system colony to ship them by freighter</span>
+    <span class="dim">tick colonies to bulk-set builds · click headers to sort · click a citizen to grab them + everyone to their right, then drag onto another job or a same-system colony</span>
   {/if}
   {#if moveNote}
     <span class="movenote" data-testid="move-note">{moveNote}</span>
@@ -414,7 +416,10 @@
             </select>
           </span>
         </td>
-        <td class="dim">{row.planet.climate} {pretty(row.planet.minerals)} {row.planet.gravity}-g s{row.planet.sizeClass}</td>
+        <td
+          class="dim planet"
+          title="{row.planet.climate} {pretty(row.planet.minerals)} {row.planet.gravity}-g size {row.planet.sizeClass}"
+        >{row.planet.climate} {pretty(row.planet.minerals)} {row.planet.gravity}-g s{row.planet.sizeClass}</td>
         <td data-testid="pop-{row.id}" title="projected growth next turn: {growthLabel(row.growthK)}">
           {row.popUnits}/{row.maxPop}
           {#if !row.outpost}
@@ -446,29 +451,24 @@
               role="group"
               data-testid="{job}-{row.id}"
               data-count={row.jobs[job]}
-              title="{row.jobs[job]} {job} — drag a citizen onto another job, or onto a same-system colony to ship them (needs a freighter fleet)"
+              title="{row.jobs[job]} {job} — click a citizen to grab them plus everyone to their right, then drag onto another job or a same-system colony"
             >
               {#if row.jobs[job] === 0}
                 <span class="zero">0</span>
               {/if}
-              {#each Array(Math.min(row.jobs[job], 6)) as _, i (i)}
+              {#each Array(row.jobs[job]) as _, i (i)}
                 <span
                   class="citizen"
+                  class:sel={isPicked(row, job, i)}
+                  style={i > 0 ? `margin-left:-${overlapPx(row.jobs[job])}px` : ''}
                   draggable="true"
                   role="button"
                   tabindex="-1"
-                  ondragstart={(e) => onDragStart(row, job, e)}
+                  onclick={() => pickFrom(row, job, i)}
+                  onkeydown={(e) => e.key === 'Enter' && pickFrom(row, job, i)}
+                  ondragstart={(e) => onDragStart(row, job, i, e)}
                 >{JOB_ICONS[job]}</span>
               {/each}
-              {#if row.jobs[job] > 6}
-                <span
-                  class="citizen more"
-                  draggable="true"
-                  role="button"
-                  tabindex="-1"
-                  ondragstart={(e) => onDragStart(row, job, e)}
-                >×{row.jobs[job]}</span>
-              {/if}
             </span>
             <button class="mini" onclick={() => adjustJob(row, job, +1)}>+</button>
           </td>
@@ -631,16 +631,15 @@
     cursor: grab;
     font-size: 0.85rem;
     line-height: 1;
-    margin: 0 -1px;
+    position: relative;
   }
   .citizen:hover {
     transform: scale(1.25);
+    z-index: 2;
   }
-  .citizen.more {
-    font-size: 0.72rem;
-    font-variant-numeric: tabular-nums;
-    margin-left: 0.1rem;
-    color: var(--text-dim);
+  .citizen.sel {
+    filter: drop-shadow(0 0 3px var(--accent)) brightness(1.3);
+    z-index: 1;
   }
   .zero {
     color: var(--text-dim);
@@ -694,6 +693,13 @@
   }
   .dim {
     opacity: 0.65;
+  }
+  /* planet specs: tiny and cut off — hover for the full description */
+  td.planet {
+    font-size: 0.58rem;
+    max-width: 5.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .parked {
     display: block;
