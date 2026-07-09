@@ -137,6 +137,44 @@
     session().submit('build_outpost', { shipId, planetId });
   }
 
+  /** wormhole pairs (drawn once each) */
+  const wormholeLinks = $derived.by(() => {
+    if (!gs) return [];
+    const out: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    for (const s of gs.stars) {
+      if (s.wormholeTo !== null && s.wormholeTo > s.id) {
+        const t = gs.stars.find((x) => x.id === s.wormholeTo);
+        if (t) out.push({ x1: s.x, y1: s.y, x2: t.x, y2: t.y });
+      }
+    }
+    return out;
+  });
+
+  /** per-star fleet markers: military vs civilian, sized by ship count */
+  function fleetMarks(ships: Array<{ owner: number; kind: string }>): Array<{ owner: number; mil: number; civ: number }> {
+    const byOwner = new Map<number, { owner: number; mil: number; civ: number }>();
+    for (const s of ships) {
+      const e = byOwner.get(s.owner) ?? { owner: s.owner, mil: 0, civ: 0 };
+      if (s.kind === 'design') e.mil++;
+      else e.civ++;
+      byOwner.set(s.owner, e);
+    }
+    return [...byOwner.values()].sort((a, b) => a.owner - b.owner);
+  }
+  const markSize = (n: number) => 10 + Math.round(5 * Math.sqrt(n));
+
+  const CLIMATE_COLORS: Record<string, string> = {
+    gaia: '#5ee08a', terran: '#6cc862', arid: '#d8bb6a', swamp: '#7aa85a', ocean: '#4da3ff',
+    tundra: '#bcd7e8', desert: '#e0a35e', barren: '#8f8a80', energized: '#c78bff', hostile: '#ff6b5e',
+  };
+  function mineralRing(m: string): { stroke: string; width: number; dash: string } | null {
+    if (m === 'ultra_rich') return { stroke: '#ffd75e', width: 2.5, dash: '' };
+    if (m === 'rich') return { stroke: '#ffd75e', width: 1.5, dash: '' };
+    if (m === 'poor') return { stroke: '#777f9d', width: 1.2, dash: '3 3' };
+    if (m === 'ultra_poor') return { stroke: '#565d78', width: 1.2, dash: '2 4' };
+    return null;
+  }
+
   /** 5-point star polygon path centred on 0,0 */
   function starPath(outer: number): string {
     const inner = outer * 0.45;
@@ -166,6 +204,12 @@
 
       {#each rangeCircles as rc, i (i)}
         <circle cx={rc.x} cy={rc.y} r={rc.r} class="range" />
+      {/each}
+
+      {#each wormholeLinks as wl, i (i)}
+        <line x1={wl.x1} y1={wl.y1} x2={wl.x2} y2={wl.y2} class="wormhole">
+          <title>wormhole — 1 turn transit either way</title>
+        </line>
       {/each}
 
       {#each transits as t (t.id)}
@@ -220,13 +264,37 @@
           {#each v.colonies.filter((c) => !c.outpost) as c, i (c.id)}
             <circle r={22 + i * 5} fill="none" stroke={playerColor(c.owner)} stroke-width="3" opacity="0.9" />
           {/each}
-          {#each [...new Set(v.ships.map((s) => s.owner))] as owner, i (owner)}
-            <polygon
-              points="20,{-14 + i * 14} 32,{-8 + i * 14} 20,{-2 + i * 14}"
-              fill={playerColor(owner)}
-              stroke="#05070f"
-              stroke-width="1"
-            />
+          {#each fleetMarks(v.ships) as fm, i (fm.owner)}
+            {@const y0 = -14 + i * 26}
+            {#if fm.mil > 0}
+              {@const s = markSize(fm.mil)}
+              <polygon
+                points="20,{y0} {20 + s},{y0 + s / 2} 20,{y0 + s}"
+                fill={playerColor(fm.owner)}
+                stroke="#05070f"
+                stroke-width="1.5"
+              >
+                <title>{fm.mil} warship{fm.mil > 1 ? 's' : ''}</title>
+              </polygon>
+              {#if fm.mil > 1}
+                <text x={22 + s} y={y0 + s / 2 + 6} class="count" fill={playerColor(fm.owner)}>{fm.mil}</text>
+              {/if}
+            {/if}
+            {#if fm.civ > 0}
+              {@const s = markSize(fm.civ)}
+              {@const yc = y0 + (fm.mil > 0 ? 16 : 0)}
+              <polygon
+                points="20,{yc} {20 + s},{yc + s / 2} 20,{yc + s}"
+                fill="none"
+                stroke={playerColor(fm.owner)}
+                stroke-width="2.5"
+              >
+                <title>{fm.civ} civilian ship{fm.civ > 1 ? 's' : ''} (scouts/colony/transport)</title>
+              </polygon>
+              {#if fm.civ > 1}
+                <text x={22 + s} y={yc + s / 2 + 6} class="count" fill={playerColor(fm.owner)}>{fm.civ}</text>
+              {/if}
+            {/if}
           {/each}
           {#if v.explored && kinds}
             {#if isRaid(kinds)}
@@ -252,6 +320,8 @@
       <span><span class="monster">☠</span> monster lair</span>
       <span><span class="raid">⚠</span> Antaran raid</span>
       <span>▶ fleet under way (label shows ETA)</span>
+      <span>▲ solid = warships · △ hollow = civilians</span>
+      <span style="color:#b78bff">┈ wormhole</span>
     </div>
   </div>
 
@@ -280,6 +350,38 @@
       {/if}
       {#if peacefulForeigners.length}
         <p class="dim">🕊 {peacefulForeigners.join(', ')} ships present — you are at peace. Declare war on the Empires tab to engage.</p>
+      {/if}
+      {#if selected.explored && selected.planets.length}
+        <!-- classic system view: star + orbit arcs, planet size/climate/richness at a glance -->
+        <svg class="system" viewBox="0 0 330 92" aria-label="system view">
+          <circle cx="-26" cy="46" r="44" fill={STAR_COLORS[selected.star.color]} opacity="0.9" />
+          <circle cx="-26" cy="46" r="52" fill="none" stroke={STAR_COLORS[selected.star.color]} opacity="0.35" />
+          {#each [1, 2, 3, 4, 5] as orbit (orbit)}
+            {@const ox = 30 + orbit * 56}
+            <circle cx="-26" cy="46" r={ox + 26} fill="none" stroke="#26304f" stroke-width="1" />
+            {#each selected.planets.filter((p) => p.orbit === orbit) as p (p.id)}
+              {@const px = ox + 4}
+              {#if p.body === 'asteroids'}
+                {#each [-8, -3, 2, 7, 12] as off, ai (ai)}
+                  <circle cx={px + off} cy={46 + ((ai * 7) % 11) - 5} r="1.6" fill="#8f8a80" />
+                {/each}
+              {:else if p.body === 'gas_giant'}
+                <circle cx={px} cy="46" r="13" fill="#c9a06a" opacity="0.85" />
+                <ellipse cx={px} cy="46" rx="17" ry="4" fill="none" stroke="#e0c090" stroke-width="1.2" opacity="0.7" />
+              {:else}
+                {@const ring = mineralRing(p.minerals)}
+                <circle cx={px} cy="46" r={4 + p.sizeClass * 1.8} fill={CLIMATE_COLORS[p.climate] ?? '#999'} />
+                {#if ring}
+                  <circle cx={px} cy="46" r={7 + p.sizeClass * 1.8} fill="none" stroke={ring.stroke} stroke-width={ring.width} stroke-dasharray={ring.dash} />
+                {/if}
+                {#each selected.colonies.filter((c) => gs?.colonies.find((x) => x.id === c.id)?.planetId === p.id) as c (c.id)}
+                  <circle cx={px} cy="46" r={10 + p.sizeClass * 1.8} fill="none" stroke={playerColor(c.owner)} stroke-width="1.8" />
+                {/each}
+              {/if}
+            {/each}
+          {/each}
+        </svg>
+        <p class="syskey">size = circle · color = climate · gold ring = rich · dashed = poor · player ring = colony</p>
       {/if}
       <ul class="planets">
         {#each selected.planets as p (p.id)}
@@ -521,5 +623,28 @@
     gap: 0.3rem;
     align-items: center;
     color: var(--text);
+  }
+  .wormhole {
+    stroke: #b78bff;
+    stroke-width: 2;
+    stroke-dasharray: 3 9;
+    opacity: 0.55;
+    pointer-events: stroke;
+  }
+  .count {
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .system {
+    width: 100%;
+    background: #05070f;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin: 0.3rem 0 0.1rem;
+  }
+  .syskey {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    margin: 0.15rem 0 0.4rem;
   }
 </style>

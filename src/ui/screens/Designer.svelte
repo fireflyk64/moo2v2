@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    availableHulls,
     bestComputer,
     bestShield,
     designStats,
@@ -7,6 +8,7 @@
     HULLS_BUILDABLE,
     SPECIALS,
     type DesignStats,
+    type EmpireDesign,
   } from '@engine/index';
   import { app, getActive } from '../state.svelte';
 
@@ -60,6 +62,32 @@
   function obsolete(designId: number) {
     session().submit('obsolete_design', { designId });
   }
+
+  const hullsOpen = $derived(empire ? availableHulls(empire) : []);
+  const HULL_REQS: Record<string, string> = {
+    cruiser: 'requires Capsule Construction',
+    battleship: 'requires Astro Construction',
+    titan: 'requires Titan Construction',
+    doomstar: 'requires Doom Star Construction',
+  };
+
+  // design inspector: expand a saved design to see exactly how it was built
+  let inspecting = $state<number | null>(null);
+  function inspect(d: EmpireDesign) {
+    inspecting = inspecting === d.id ? null : d.id;
+  }
+  function loadIntoEditor(d: EmpireDesign) {
+    name = `${d.name} II`;
+    hull = d.hull;
+    computer = d.computer;
+    shield = d.shield;
+    specials = [...d.specials];
+    weapons = d.weapons.map((w) => ({ weapon: w.weapon, count: w.count, mods: [...w.mods] }));
+  }
+  function statsOf(d: EmpireDesign): DesignStats | string | null {
+    if (!gs || !empire) return null;
+    return designStats(gs, empire, d);
+  }
 </script>
 
 {#if gs && empire}
@@ -70,7 +98,9 @@
       <label>Hull
         <select data-testid="design-hull" bind:value={hull}>
           {#each HULLS_BUILDABLE as h (h)}
-            <option value={h}>{h}</option>
+            <option value={h} disabled={!hullsOpen.includes(h)}>
+              {h}{hullsOpen.includes(h) ? '' : ` — 🔒 ${HULL_REQS[h] ?? 'locked'}`}
+            </option>
           {/each}
         </select>
       </label>
