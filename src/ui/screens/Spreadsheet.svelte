@@ -488,6 +488,15 @@
     gap: 0.6rem;
     align-items: center;
     margin-bottom: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .presets {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
+  }
+  .presets button {
+    font-size: 0.78rem;
   }
   table {
     border-collapse: collapse;

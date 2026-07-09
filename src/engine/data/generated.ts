@@ -4,7 +4,7 @@
 
 export interface PickRow { id: string; cost: number; value: number | null; meaning: string }
 export interface BuildableRow { id: string; techId: number; cost: number; maintenance: number; group: string }
-export interface FieldRow { id: string; num: number; previous: number; next: number; cost: number; tier: number }
+export interface FieldRow { id: string; num: number; previous: number; next: number; cost: number; tier: number; general: boolean }
 export interface TechRow { id: string; techId: number; fieldNum: number; aiGroup: number; strategic: boolean }
 export interface HullRow {
   id: string; cost: number; space: number; marines: number;
@@ -839,7 +839,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 18,
     "next": 34,
     "cost": 400,
-    "tier": 5
+    "tier": 5,
+    "general": false
   },
   {
     "id": "advanced_chemistry",
@@ -847,7 +848,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 9,
     "next": 47,
     "cost": 650,
-    "tier": 6
+    "tier": 6,
+    "general": false
   },
   {
     "id": "advanced_construction",
@@ -855,7 +857,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 4,
     "next": 21,
     "cost": 150,
-    "tier": 3
+    "tier": 3,
+    "general": false
   },
   {
     "id": "advanced_engineering",
@@ -863,7 +866,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 29,
     "next": 3,
     "cost": 80,
-    "tier": 2
+    "tier": 2,
+    "general": false
   },
   {
     "id": "advanced_fusion",
@@ -871,7 +875,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 23,
     "next": 41,
     "cost": 250,
-    "tier": 4
+    "tier": 4,
+    "general": false
   },
   {
     "id": "advanced_governments",
@@ -879,7 +884,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 12,
     "next": 32,
     "cost": 4500,
-    "tier": 13
+    "tier": 13,
+    "general": false
   },
   {
     "id": "advanced_magnetism",
@@ -887,7 +893,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 0,
     "next": 36,
     "cost": 250,
-    "tier": 4
+    "tier": 4,
+    "general": false
   },
   {
     "id": "advanced_manufacturing",
@@ -895,7 +902,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 19,
     "next": 11,
     "cost": 1500,
-    "tier": 9
+    "tier": 9,
+    "general": false
   },
   {
     "id": "advanced_metallurgy",
@@ -903,7 +911,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 22,
     "next": 2,
     "cost": 250,
-    "tier": 4
+    "tier": 4,
+    "general": false
   },
   {
     "id": "military_tactics",
@@ -911,7 +920,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 0,
     "next": 73,
     "cost": 150,
-    "tier": 3
+    "tier": 3,
+    "general": false
   },
   {
     "id": "advanced_robotics",
@@ -919,7 +929,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 8,
     "next": 67,
     "cost": 2000,
-    "tier": 10
+    "tier": 10,
+    "general": false
   },
   {
     "id": "teaching_methods",
@@ -927,7 +938,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 43,
     "next": 6,
     "cost": 2000,
-    "tier": 10
+    "tier": 10,
+    "general": false
   },
   {
     "id": "anti_matter_fission",
@@ -935,7 +947,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 41,
     "next": 46,
     "cost": 2000,
-    "tier": 10
+    "tier": 10,
+    "general": false
   },
   {
     "id": "artificial_consciousness",
@@ -943,7 +956,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 60,
     "next": 25,
     "cost": 1500,
-    "tier": 9
+    "tier": 9,
+    "general": false
   },
   {
     "id": "artificial_intelligence",
@@ -951,7 +965,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 56,
     "next": 60,
     "cost": 400,
-    "tier": 5
+    "tier": 5,
+    "general": false
   },
   {
     "id": "artificial_gravity",
@@ -959,7 +974,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 54,
     "next": 65,
     "cost": 1150,
-    "tier": 8
+    "tier": 8,
+    "general": false
   },
   {
     "id": "synthetic_ecosystems",
@@ -967,7 +983,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 30,
     "next": 70,
     "cost": 4500,
-    "tier": 13
+    "tier": 13,
+    "general": false
   },
   {
     "id": "astro_ecology",
@@ -975,7 +992,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 0,
     "next": 1,
     "cost": 80,
-    "tier": 2
+    "tier": 2,
+    "general": false
   },
   {
     "id": "astro_construction",
@@ -983,7 +1001,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 63,
     "next": 8,
     "cost": 1150,
-    "tier": 8
+    "tier": 8,
+    "general": false
   },
   {
     "id": "astro_engineering",
@@ -991,7 +1010,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 21,
     "next": 62,
     "cost": 400,
-    "tier": 5
+    "tier": 5,
+    "general": false
   },
   {
     "id": "capsule_construction",
@@ -999,7 +1019,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 3,
     "next": 20,
     "cost": 250,
-    "tier": 4
+    "tier": 4,
+    "general": false
   },
   {
     "id": "chemistry",
@@ -1007,7 +1028,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 0,
     "next": 9,
     "cost": 50,
-    "tier": 1
+    "tier": 1,
+    "general": true
   },
   {
     "id": "cold_fusion",
@@ -1015,7 +1037,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 55,
     "next": 5,
     "cost": 80,
-    "tier": 2
+    "tier": 2,
+    "general": true
   },
   {
     "id": "cybertechnics",
@@ -1023,7 +1046,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 25,
     "next": 33,
     "cost": 3500,
-    "tier": 12
+    "tier": 12,
+    "general": false
   },
   {
     "id": "cybertronics",
@@ -1031,7 +1055,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 14,
     "next": 24,
     "cost": 2750,
-    "tier": 11
+    "tier": 11,
+    "general": false
   },
   {
     "id": "distortion_fields",
@@ -1039,7 +1064,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 64,
     "next": 61,
     "cost": 3500,
-    "tier": 12
+    "tier": 12,
+    "general": false
   },
   {
     "id": "electromagnetic_refraction",
@@ -1047,7 +1073,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 45,
     "next": 72,
     "cost": 1500,
-    "tier": 9
+    "tier": 9,
+    "general": false
   },
   {
     "id": "electronics",
@@ -1055,7 +1082,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 0,
     "next": 56,
     "cost": 50,
-    "tier": 1
+    "tier": 1,
+    "general": true
   },
   {
     "id": "engineering",
@@ -1063,7 +1091,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 0,
     "next": 4,
     "cost": 50,
-    "tier": 1
+    "tier": 1,
+    "general": true
   },
   {
     "id": "evolutionary_adaptation",
@@ -1071,7 +1100,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 44,
     "next": 17,
     "cost": 2750,
-    "tier": 11
+    "tier": 11,
+    "general": false
   },
   {
     "id": "fusion_physics",
@@ -1079,7 +1109,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 57,
     "next": 66,
     "cost": 150,
-    "tier": 3
+    "tier": 3,
+    "general": false
   },
   {
     "id": "galactic_economics",
@@ -1087,7 +1118,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 6,
     "next": 82,
     "cost": 6000,
-    "tier": 14
+    "tier": 14,
+    "general": false
   },
   {
     "id": "galactic_networking",
@@ -1095,7 +1127,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 24,
     "next": 49,
     "cost": 4500,
-    "tier": 13
+    "tier": 13,
+    "general": false
   },
   {
     "id": "trait_adaptation",
@@ -1103,7 +1136,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 1,
     "next": 35,
     "cost": 900,
-    "tier": 7
+    "tier": 7,
+    "general": false
   },
   {
     "id": "trait_variations",
@@ -1111,7 +1145,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 34,
     "next": 44,
     "cost": 1150,
-    "tier": 8
+    "tier": 8,
+    "general": false
   },
   {
     "id": "gravitic_fields",
@@ -1119,7 +1154,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 7,
     "next": 45,
     "cost": 650,
-    "tier": 6
+    "tier": 6,
+    "general": false
   },
   {
     "id": "high_energy_distribution",
@@ -1127,7 +1163,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 46,
     "next": 38,
     "cost": 3500,
-    "tier": 12
+    "tier": 12,
+    "general": false
   },
   {
     "id": "hyper_dimensional_fission",
@@ -1135,7 +1172,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 37,
     "next": 40,
     "cost": 4500,
-    "tier": 13
+    "tier": 13,
+    "general": false
   },
   {
     "id": "hyper_dimensional_physics",
@@ -1143,7 +1181,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 51,
     "next": 69,
     "cost": 6000,
-    "tier": 14
+    "tier": 14,
+    "general": false
   },
   {
     "id": "interphased_fission",
@@ -1151,7 +1190,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 38,
     "next": 76,
     "cost": 10000,
-    "tier": 16
+    "tier": 16,
+    "general": false
   },
   {
     "id": "ion_fission",
@@ -1159,7 +1199,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 5,
     "next": 13,
     "cost": 900,
-    "tier": 7
+    "tier": 7,
+    "general": false
   },
   {
     "id": "superscalar_construction",
@@ -1167,7 +1208,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 67,
     "next": 58,
     "cost": 6000,
-    "tier": 14
+    "tier": 14,
+    "general": false
   },
   {
     "id": "macro_economics",
@@ -1175,7 +1217,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 73,
     "next": 12,
     "cost": 1150,
-    "tier": 8
+    "tier": 8,
+    "general": false
   },
   {
     "id": "macro_adaptation",
@@ -1183,7 +1226,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 35,
     "next": 30,
     "cost": 1500,
-    "tier": 9
+    "tier": 9,
+    "general": false
   },
   {
     "id": "magneto_gravitics",
@@ -1191,7 +1235,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 36,
     "next": 27,
     "cost": 900,
-    "tier": 7
+    "tier": 7,
+    "general": false
   },
   {
     "id": "matter_energy_conversion",
@@ -1199,7 +1244,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 13,
     "next": 37,
     "cost": 2750,
-    "tier": 11
+    "tier": 11,
+    "general": false
   },
   {
     "id": "molecular_compression",
@@ -1207,7 +1253,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 2,
     "next": 53,
     "cost": 1150,
-    "tier": 8
+    "tier": 8,
+    "general": false
   },
   {
     "id": "molecular_control",
@@ -1215,7 +1262,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 50,
     "next": 80,
     "cost": 10000,
-    "tier": 16
+    "tier": 16,
+    "general": false
   },
   {
     "id": "moleculartronics",
@@ -1223,7 +1271,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 33,
     "next": 81,
     "cost": 6000,
-    "tier": 14
+    "tier": 14,
+    "general": false
   },
   {
     "id": "molecular_manipulation",
@@ -1231,7 +1280,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 53,
     "next": 48,
     "cost": 4500,
-    "tier": 13
+    "tier": 13,
+    "general": false
   },
   {
     "id": "multi_dimensional_physics",
@@ -1239,7 +1289,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 59,
     "next": 39,
     "cost": 4500,
-    "tier": 13
+    "tier": 13,
+    "general": false
   },
   {
     "id": "multi_phased_physics",
@@ -1247,7 +1298,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 65,
     "next": 59,
     "cost": 2000,
-    "tier": 10
+    "tier": 10,
+    "general": false
   },
   {
     "id": "nano_technology",
@@ -1255,7 +1307,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 47,
     "next": 50,
     "cost": 2000,
-    "tier": 10
+    "tier": 10,
+    "general": false
   },
   {
     "id": "neutrino_physics",
@@ -1263,7 +1316,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 66,
     "next": 16,
     "cost": 900,
-    "tier": 7
+    "tier": 7,
+    "general": false
   },
   {
     "id": "nuclear_fission",
@@ -1271,7 +1325,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 0,
     "next": 23,
     "cost": 50,
-    "tier": 1
+    "tier": 1,
+    "general": true
   },
   {
     "id": "optronics",
@@ -1279,7 +1334,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 28,
     "next": 15,
     "cost": 150,
-    "tier": 3
+    "tier": 3,
+    "general": false
   },
   {
     "id": "physics",
@@ -1287,7 +1343,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 0,
     "next": 31,
     "cost": 50,
-    "tier": 1
+    "tier": 1,
+    "general": true
   },
   {
     "id": "planetoid_construction",
@@ -1295,7 +1352,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 42,
     "next": 78,
     "cost": 7500,
-    "tier": 15
+    "tier": 15,
+    "general": false
   },
   {
     "id": "plasma_physics",
@@ -1303,7 +1361,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 52,
     "next": 51,
     "cost": 3500,
-    "tier": 12
+    "tier": 12,
+    "general": false
   },
   {
     "id": "positronics",
@@ -1311,7 +1370,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 15,
     "next": 14,
     "cost": 900,
-    "tier": 7
+    "tier": 7,
+    "general": false
   },
   {
     "id": "quantum_fields",
@@ -1319,7 +1379,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 26,
     "next": 71,
     "cost": 4500,
-    "tier": 13
+    "tier": 13,
+    "general": false
   },
   {
     "id": "robotics",
@@ -1327,7 +1388,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 20,
     "next": 63,
     "cost": 650,
-    "tier": 6
+    "tier": 6,
+    "general": false
   },
   {
     "id": "servo_mechanics",
@@ -1335,7 +1397,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 62,
     "next": 19,
     "cost": 900,
-    "tier": 7
+    "tier": 7,
+    "general": false
   },
   {
     "id": "subspace_fields",
@@ -1343,7 +1406,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 72,
     "next": 26,
     "cost": 2750,
-    "tier": 11
+    "tier": 11,
+    "general": false
   },
   {
     "id": "subspace_physics",
@@ -1351,7 +1415,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 16,
     "next": 52,
     "cost": 1500,
-    "tier": 9
+    "tier": 9,
+    "general": false
   },
   {
     "id": "tachyon_physics",
@@ -1359,7 +1424,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 31,
     "next": 54,
     "cost": 250,
-    "tier": 4
+    "tier": 4,
+    "general": false
   },
   {
     "id": "tectonic_engineering",
@@ -1367,7 +1433,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 11,
     "next": 42,
     "cost": 3500,
-    "tier": 12
+    "tier": 12,
+    "general": false
   },
   {
     "id": "temporal_fields",
@@ -1375,7 +1442,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 71,
     "next": 79,
     "cost": 15000,
-    "tier": 17
+    "tier": 17,
+    "general": false
   },
   {
     "id": "temporal_physics",
@@ -1383,7 +1451,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 39,
     "next": 77,
     "cost": 15000,
-    "tier": 17
+    "tier": 17,
+    "general": false
   },
   {
     "id": "trans_adaptation",
@@ -1391,7 +1460,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 17,
     "next": 75,
     "cost": 7500,
-    "tier": 15
+    "tier": 15,
+    "general": false
   },
   {
     "id": "transwarp_fields",
@@ -1399,7 +1469,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 61,
     "next": 68,
     "cost": 7500,
-    "tier": 15
+    "tier": 15,
+    "general": false
   },
   {
     "id": "warp_fields",
@@ -1407,7 +1478,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 27,
     "next": 64,
     "cost": 2000,
-    "tier": 10
+    "tier": 10,
+    "general": false
   },
   {
     "id": "xeno_relations",
@@ -1415,7 +1487,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 10,
     "next": 43,
     "cost": 650,
-    "tier": 6
+    "tier": 6,
+    "general": false
   },
   {
     "id": "xenon_technology",
@@ -1423,7 +1496,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 74,
     "next": 74,
     "cost": 15000,
-    "tier": 22
+    "tier": 22,
+    "general": false
   },
   {
     "id": "advf_ecology",
@@ -1431,7 +1505,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 70,
     "next": 0,
     "cost": 25000,
-    "tier": 18
+    "tier": 18,
+    "general": false
   },
   {
     "id": "advf_power",
@@ -1439,7 +1514,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 40,
     "next": 0,
     "cost": 25000,
-    "tier": 18
+    "tier": 18,
+    "general": false
   },
   {
     "id": "advf_physics",
@@ -1447,7 +1523,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 69,
     "next": 0,
     "cost": 25000,
-    "tier": 18
+    "tier": 18,
+    "general": false
   },
   {
     "id": "advf_construction",
@@ -1455,7 +1532,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 58,
     "next": 0,
     "cost": 25000,
-    "tier": 18
+    "tier": 18,
+    "general": false
   },
   {
     "id": "advf_fields",
@@ -1463,7 +1541,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 68,
     "next": 0,
     "cost": 25000,
-    "tier": 18
+    "tier": 18,
+    "general": false
   },
   {
     "id": "advf_chemistry",
@@ -1471,7 +1550,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 48,
     "next": 0,
     "cost": 25000,
-    "tier": 18
+    "tier": 18,
+    "general": false
   },
   {
     "id": "advf_computers",
@@ -1479,7 +1559,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 49,
     "next": 0,
     "cost": 25000,
-    "tier": 18
+    "tier": 18,
+    "general": false
   },
   {
     "id": "advf_sociology",
@@ -1487,7 +1568,8 @@ export const FIELD_ROWS: readonly FieldRow[] = [
     "previous": 32,
     "next": 0,
     "cost": 25000,
-    "tier": 18
+    "tier": 18,
+    "general": false
   }
 ] as const;
 

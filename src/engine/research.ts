@@ -22,10 +22,11 @@ import { floorDiv } from './imath';
 import { traitsOf } from './economy';
 import type { Empire, GameState, TurnEvent } from './types';
 
-/** Tier-1 ("basic") fields grant every application at once, like the classic
- * starting techs (lasers etc.) — no target choice needed. */
+/** "(General)" fields grant every application at once — the five tier-1
+ * subject roots plus Cold Fusion (colony ship / outpost ship / transport /
+ * freighters), exactly as the mechanics docs mark them. No target choice. */
 export function fieldGrantsAll(field: FieldRow): boolean {
-  return field.tier === 1 && !field.id.startsWith('advf_');
+  return field.general;
 }
 
 /** Seeded per-game difficulty: every field's real cost is its base cost times a
