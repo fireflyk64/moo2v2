@@ -96,6 +96,10 @@ const validateSetQueue: Validator = (state, cmd) => {
   const c = ownColony(state, cmd, p?.colonyId);
   if (typeof c === 'string') return c;
   if (!Array.isArray(p.items) || p.items.length > 12) return 'items must be a list (max 12)';
+  // buying locks the active item for the turn (no buy-then-switch exploit)
+  if (c.boughtThisTurn && c.queue[0] && p.items[0] !== c.queue[0].item) {
+    return 'production was bought this turn — the active item is locked until next turn';
+  }
   const probe: Colony = { ...c, queue: [] };
   for (const item of p.items) {
     const err = canQueue(state, probe, item);
@@ -380,6 +384,19 @@ const applyScrap: Applier = (state, cmd) => {
   const costs: Record<string, number> = { colony_ship: 500, outpost_ship: 100, transport: 100, scout: 10 };
   empire.bc += Math.floor((costs[ship.shipKind] ?? 0) / 2);
   state.ships = state.ships.filter((s) => s.id !== p.shipId);
+};
+
+// ---------- set_tax_rate ----------
+
+const validateSetTax: Validator = (state, cmd) => {
+  const p = cmd.payload as { pct: number };
+  if (!Number.isSafeInteger(p?.pct) || p.pct < 0 || p.pct > 50) return 'tax rate must be 0-50%';
+  return null;
+};
+
+const applySetTax: Applier = (state, cmd) => {
+  const p = cmd.payload as { pct: number };
+  empireOf(state, cmd.playerId).taxRatePct = p.pct;
 };
 
 // ---------- sell_building ----------
@@ -892,6 +909,7 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   },
   scrap_ship: { validate: validateScrap, apply: applyScrap },
   sell_building: { validate: validateSellBuilding, apply: applySellBuilding },
+  set_tax_rate: { validate: validateSetTax, apply: applySetTax },
   save_design: { validate: validateSaveDesign, apply: applySaveDesign },
   obsolete_design: { validate: validateObsoleteDesign, apply: applyObsoleteDesign },
   declare_war: { validate: validateDeclareWar, apply: applyDeclareWar },

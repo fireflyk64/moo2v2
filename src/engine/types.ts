@@ -148,6 +148,9 @@ export interface Empire {
     mode: 'steal' | 'sabotage';
   };
   leaders: HiredLeader[];
+  /** empire-wide tax: this % of each colony's queue production is converted to
+   * BC at 2 prod -> 1 BC (0-50; absent in older saves = 0) */
+  taxRatePct?: number;
   eliminated: boolean;
 }
 

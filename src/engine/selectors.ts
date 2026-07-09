@@ -135,6 +135,7 @@ function emptyOutput(): ColonyOutput {
     popUnits: 0,
     housingPP: 0,
     tradeBC: 0,
+    taxBC: 0,
     prodToQueue: 0,
   };
 }

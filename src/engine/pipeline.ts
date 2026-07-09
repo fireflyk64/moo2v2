@@ -4,10 +4,8 @@
 // Phase 3 implements S0-S6 + S12/S13; encounters/combat (S7-S10) and empire
 // upkeep systems (S11) arrive in Phases 4-6.
 
-import { CP_SOURCES, CP_USAGE } from './data/index';
 import { detectBattles, resolveBattle } from './battles';
 import { diplomacyUpkeep } from './diplomacy';
-import { effectsOf, empireAccum } from './effects';
 import { resolveEspionage } from './espionage';
 import { assimilate, isBlockaded, resolveInvasions } from './ground';
 import { leaderEmpireBonuses, leadersUpkeep } from './leaders';
@@ -104,25 +102,8 @@ function s10_shipUpkeep(state: GameState, events: TurnEvent[]): void {
   // command points: overage costs 10 BC per point (documented combat-redesign rule)
   for (const empire of state.empires) {
     if (empire.eliminated) continue;
-    let sources = empireAccum(state, empire).cpFlat; // tachyon communications etc.
-    sources += leaderEmpireBonuses(empire).cpFlat; // operations officers
-    for (const colony of state.colonies) {
-      if (colony.owner !== empire.id) continue;
-      if (!colony.outpost) sources += CP_SOURCES['colony'] ?? 1;
-      for (const b of colony.buildings) {
-        for (const m of effectsOf(b)?.modifiers ?? []) {
-          if (m.target === 'cp_flat' && m.scope === 'colony') sources += m.amount;
-        }
-      }
-    }
-    if (empire.picks.includes('warlord')) sources += CP_SOURCES['warlord_pick_bonus'] ?? 2;
-    let usage = 0;
-    for (const ship of state.ships) {
-      if (ship.owner !== empire.id || ship.designId === null) continue;
-      const design = empire.designs.find((d) => d.id === ship.designId);
-      if (design) usage += CP_USAGE[design.hull] ?? 0;
-    }
-    const over = usage - sources;
+    const cp = commandPoints(state, empire);
+    const over = cp.usage - cp.sources;
     if (over > 0) {
       empire.bc -= over * 10;
       events.push({ visibleTo: empire.id, kind: 'cp_overage', payload: { over, bc: over * 10 } });
@@ -214,13 +195,24 @@ function s2_colonyOutput(state: GameState, events: TurnEvent[]): TurnOutputs {
       else deficits.push({ colony: c, lack: -out.foodNet });
     }
     let capacity = empire.freighters * 5;
+    // chartered civilian haulers beyond freighter capacity: 1 BC per food unit
+    let charterBudget = Math.max(0, empire.bc + (empireBC.get(empire.id) ?? 0));
+    let charterSpent = 0;
     deficits = deficits.sort((a, b) => a.colony.id - b.colony.id);
     for (const d of deficits) {
-      // blockaded colonies cannot receive freighter deliveries
-      const moved = isBlockaded(state, d.colony) ? 0 : Math.min(d.lack, surplus, capacity);
+      // blockaded colonies cannot receive deliveries at all
+      const blockaded = isBlockaded(state, d.colony);
+      const moved = blockaded ? 0 : Math.min(d.lack, surplus, capacity);
       surplus -= moved;
       capacity -= moved;
       d.lack -= moved;
+      const chartered = blockaded ? 0 : Math.min(d.lack, surplus, charterBudget);
+      if (chartered > 0) {
+        surplus -= chartered;
+        charterBudget -= chartered;
+        charterSpent += chartered;
+        d.lack -= chartered;
+      }
       d.colony.foodLackPrev = d.lack;
       if (d.lack > 0) {
         events.push({
@@ -229,6 +221,10 @@ function s2_colonyOutput(state: GameState, events: TurnEvent[]): TurnOutputs {
           payload: { colonyId: d.colony.id, lack: d.lack },
         });
       }
+    }
+    if (charterSpent > 0) {
+      empireBC.set(empire.id, (empireBC.get(empire.id) ?? 0) - charterSpent);
+      events.push({ visibleTo: empire.id, kind: 'food_chartered', payload: { units: charterSpent, bc: charterSpent } });
     }
     for (const c of mine) {
       if (!deficits.some((d) => d.colony.id === c.id)) c.foodLackPrev = 0;

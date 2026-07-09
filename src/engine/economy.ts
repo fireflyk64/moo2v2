@@ -156,6 +156,8 @@ export interface ColonyOutput {
   housingPP: number;
   /** BC from trade goods diversion */
   tradeBC: number;
+  /** BC minted by the empire tax rate (2 taxed prod -> 1 BC) */
+  taxBC: number;
   /** whether prod goes to the build queue (false when housing/trade goods active) */
   prodToQueue: number;
 }
@@ -324,6 +326,15 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
     prodToQueue = 0;
   }
 
+  // empire tax: a slice of queue production is minted into BC (2 prod -> 1 BC)
+  const taxRate = owner.taxRatePct ?? 0;
+  let taxBC = 0;
+  if (taxRate > 0 && prodToQueue > 0) {
+    const taxedProd = floorDiv(prodToQueue * taxRate, 100);
+    prodToQueue -= taxedProd;
+    taxBC = floorDiv(taxedProd, 2);
+  }
+
   return {
     food: food2,
     foodConsumed,
@@ -333,13 +344,14 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
     prodLack,
     pollution,
     research,
-    bcIncome: bcIncome + tradeBC,
+    bcIncome: bcIncome + tradeBC + taxBC,
     maintenance,
     moralePct: morale,
     maxPop,
     popUnits,
     housingPP,
     tradeBC,
+    taxBC,
     prodToQueue,
   };
 }

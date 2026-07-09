@@ -5,6 +5,8 @@
 import { ceilDiv } from './imath';
 import { starDistance } from './galaxy';
 import { leaderEmpireBonuses } from './leaders';
+import { CP_SOURCES, CP_USAGE } from './data/index';
+import { effectsOf, empireAccum } from './effects';
 import type { Empire, GameState, Ship, Star } from './types';
 
 /** best known drive speed in parsecs/turn */
@@ -55,6 +57,40 @@ export function travelTurns(state: GameState, empire: Empire, from: Star, to: St
   const dist = starDistance(from, to);
   const speed = driveSpeed(empire) * 100; // centiparsecs per turn
   return Math.max(1, ceilDiv(dist, speed));
+}
+
+/** Orbital bases anchor fleet logistics: star base +1, battle station +2,
+ * star fortress +3 command points, on top of the per-colony baseline. */
+const BASE_CP: Record<string, number> = { star_base: 1, battle_station: 2, star_fortress: 3 };
+
+export interface CommandPointInfo {
+  sources: number;
+  usage: number;
+}
+
+/** Command point ledger: colonies + bases + tech + officers vs fleet upkeep.
+ * Going over costs 10 BC per point each turn (combat-redesign rule). */
+export function commandPoints(state: GameState, empire: Empire): CommandPointInfo {
+  let sources = empireAccum(state, empire).cpFlat; // tachyon communications etc.
+  sources += leaderEmpireBonuses(empire).cpFlat; // operations officers
+  for (const colony of state.colonies) {
+    if (colony.owner !== empire.id) continue;
+    if (!colony.outpost) sources += CP_SOURCES['colony'] ?? 1;
+    for (const b of colony.buildings) {
+      sources += BASE_CP[b] ?? 0;
+      for (const m of effectsOf(b)?.modifiers ?? []) {
+        if (m.target === 'cp_flat' && m.scope === 'colony') sources += m.amount;
+      }
+    }
+  }
+  if (empire.picks.includes('warlord')) sources += CP_SOURCES['warlord_pick_bonus'] ?? 2;
+  let usage = 0;
+  for (const ship of state.ships) {
+    if (ship.owner !== empire.id || ship.designId === null) continue;
+    const design = empire.designs.find((d) => d.id === ship.designId);
+    if (design) usage += CP_USAGE[design.hull] ?? 0;
+  }
+  return { sources, usage };
 }
 
 export function shipStar(state: GameState, ship: Ship): Star | null {
