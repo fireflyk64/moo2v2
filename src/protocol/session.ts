@@ -52,7 +52,9 @@ export function gameIdFromSeed(seed: string): string {
 }
 
 export class GameSession<S> {
-  readonly playerId: number;
+  /** empire seat we play — may be reassigned by the host's welcome (a resumed
+   * game matches players to saved empires by name) */
+  playerId: number;
   gameId: string | null = null;
 
   private link: HostLink;
@@ -182,6 +184,10 @@ export class GameSession<S> {
         this.rosterCache = msg.players;
         this.settingsCache = msg.settings;
         this.startedFlag = msg.started || this.startedFlag;
+        if (typeof msg.seat === 'number' && msg.seat !== this.playerId) {
+          this.playerId = msg.seat;
+          this.plannedDirty = true;
+        }
         // host will push resync if we're behind; nothing else to do
         this.bump({ type: 'lobby' });
         return;

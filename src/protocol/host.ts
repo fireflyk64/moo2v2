@@ -50,6 +50,12 @@ export class HostCore<S> {
   private readonly dataVersion: string;
 
   private seats = new Map<number, Seat>();
+  /** channel (transport peer id, or host-local link id) → empire seat. In a
+   * fresh lobby channels and seats coincide; a game resumed from a save
+   * matches each hello to a saved empire by name instead of join order. */
+  private seatMap = new Map<number, number>();
+  private localLinks = new Map<number, LocalHostLink>();
+  private nextLocalChannel = 1000; // never collides with lobbylink peer ids
   private log: LogCommand[] = [];
   private lastSeq = -1;
   private state: S | null = null;
@@ -81,6 +87,7 @@ export class HostCore<S> {
     this.engineVersion = opts.engineVersion;
     this.dataVersion = opts.dataVersion;
     this.localLink = new LocalHostLink((msg) => this.route(0, msg));
+    this.localLinks.set(0, this.localLink);
 
     this.seats.set(0, {
       name: opts.hostName,
@@ -100,12 +107,13 @@ export class HostCore<S> {
     this.unsubs.push(this.transport.onMessage((from, msg) => this.route(from, msg as ClientToHost)));
     this.unsubs.push(
       this.transport.onEvent((ev) => {
+        const seatId = this.seatMap.get(ev.playerId);
         if (ev.type === 'player-left') {
-          const seat = this.seats.get(ev.playerId);
+          const seat = seatId !== undefined ? this.seats.get(seatId) : undefined;
           if (seat) seat.connected = false;
           this.broadcastLobby();
         } else if (ev.type === 'player-rejoined' || ev.type === 'player-joined') {
-          const seat = this.seats.get(ev.playerId);
+          const seat = seatId !== undefined ? this.seats.get(seatId) : undefined;
           if (seat) seat.connected = true;
           // roster broadcast happens after their hello
         }
@@ -129,40 +137,58 @@ export class HostCore<S> {
   // ----- message routing -----
 
   private route(from: number, msg: ClientToHost): void {
+    if (msg.t === 'hello') return this.onHello(from, msg);
+    const seat = this.seatMap.get(from);
+    if (seat === undefined) return; // must hello (and get a seat) first
     switch (msg.t) {
-      case 'hello':
-        return this.onHello(from, msg);
       case 'race_config':
-        return this.onRaceConfig(from, msg);
+        return this.onRaceConfig(seat, msg);
       case 'cmd_submit':
-        return this.onSubmit(from, msg);
+        return this.onSubmit(seat, msg);
       case 'commit_turn':
-        return this.onCommit(from, msg.turn, true);
+        return this.onCommit(seat, msg.turn, true);
       case 'uncommit_turn':
-        return this.onCommit(from, msg.turn, false);
+        return this.onCommit(seat, msg.turn, false);
       case 'hash_report':
-        return this.onHashReport(from, msg);
+        return this.onHashReport(seat, msg);
       case 'resync_request':
-        return this.sendResync(from, msg.haveSeq);
+        return this.sendResync(seat, msg.haveSeq);
       case 'chat_send':
-        return this.onChat(from, msg);
+        return this.onChat(seat, msg);
       case 'auction_commit':
-        return this.onAuctionCommit(from, msg.hash);
+        return this.onAuctionCommit(seat, msg.hash);
       case 'auction_reveal':
-        return this.onAuctionReveal(from, msg.bids, msg.nonce);
+        return this.onAuctionReveal(seat, msg.bids, msg.nonce);
       default:
         return;
     }
   }
 
-  private sendTo(playerId: number, msg: HostToClient): void {
-    if (playerId === 0) {
-      this.localLink._deliver(msg);
+  private sendToChannel(channel: number, msg: HostToClient): void {
+    const link = this.localLinks.get(channel);
+    if (link) {
+      link._deliver(msg);
       return;
     }
-    void this.transport.send(playerId, msg).catch(() => {
+    void this.transport.send(channel, msg).catch(() => {
       // unreachable peer resyncs on rejoin
     });
+  }
+
+  private sendTo(seatId: number, msg: HostToClient): void {
+    for (const [channel, seat] of this.seatMap) {
+      if (seat === seatId) return this.sendToChannel(channel, msg);
+    }
+    // unclaimed seat (resumed game waiting for its player): nothing to send
+  }
+
+  /** Extra host-side channel for a locally driven session (a bot taking over
+   * a seat). Its hello goes through normal seat matching by name. */
+  createLocalLink(): LocalHostLink {
+    const channel = this.nextLocalChannel++;
+    const link = new LocalHostLink((msg) => this.route(channel, msg));
+    this.localLinks.set(channel, link);
+    return link;
   }
 
   private broadcast(msg: HostToClient): void {

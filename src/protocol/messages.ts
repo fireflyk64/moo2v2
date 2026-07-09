@@ -74,6 +74,9 @@ export type HostToClient =
       players: PlayerRoster[];
       lastSeq: number;
       started: boolean;
+      /** the empire seat this connection plays: normally your join order, but
+       * a game resumed from a save matches you to a saved empire by name */
+      seat: number;
     }
   | { t: 'version_reject'; reason: string }
   | { t: 'lobby_update'; players: PlayerRoster[]; settings: GameSettings }
