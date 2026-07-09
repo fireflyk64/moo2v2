@@ -80,6 +80,17 @@ enforced by `scripts/check-boundaries.mjs` along with layer imports
   parses.
 - `vendor/lobbylink/` — vendored WebRTC client (provenance + update script).
 
+## Save compatibility
+
+Saves are forward-compatible from format v2 on: every `.moo2save` embeds a
+final-state snapshot and loads on any future build (snapshot-first when
+versions differ, full replay verification when they match). Saves carry the
+whole turn history unless "no history" is checked, and the load screen can
+branch a "what-if" game from any earlier turn. The rules that keep this true
+live in `docs/save-compatibility.md` — read them before changing engine state
+or data tables. `tests/storage/golden.test.ts` enforces them with a frozen
+fixture.
+
 ## Multiplayer model
 
 The host (room seat 0) sequences every command — including its own — into a

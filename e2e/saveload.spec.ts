@@ -60,8 +60,9 @@ test('host saves a binary file, re-hosts it in a new room, client rejoins', asyn
   await a.getByTestId('name').fill('Alice');
   await a.getByTestId('room').fill(room2);
   await a.getByTestId('load-file').setInputFiles(savePath);
-  // import verifies the save and auto-connects as host; the load-note is
-  // transient (the screen switches to the game), so assert on the outcome
+  // the save is verified and previewed (turn + resume options), then loaded
+  await expect(a.getByTestId('save-preview')).toContainText('turn 2', { timeout: 15_000 });
+  await a.getByTestId('confirm-load').click();
   await expect(a.getByTestId('turn')).toHaveText('Turn 2', { timeout: 30_000 });
   await expect.poll(() => hashOf(a), { timeout: 15_000 }).toBe(savedHash);
 
