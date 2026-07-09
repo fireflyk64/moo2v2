@@ -442,7 +442,7 @@ interface SaveDesignPayload {
   computer: number;
   shield: number;
   specials: string[];
-  weapons: Array<{ weapon: string; count: number; mods: string[] }>;
+  weapons: Array<{ weapon: string; count: number; mods: string[]; arc?: 'F' | 'FX' | 'R' | '360' }>;
 }
 
 const validateSaveDesign: Validator = (state, cmd) => {
@@ -471,7 +471,12 @@ const applySaveDesign: Applier = (state, cmd) => {
     computer: p.computer,
     shield: p.shield,
     specials: [...(p.specials ?? [])].sort(),
-    weapons: (p.weapons ?? []).map((w) => ({ weapon: w.weapon, count: w.count, mods: [...w.mods].sort() })),
+    weapons: (p.weapons ?? []).map((w) => ({
+      weapon: w.weapon,
+      count: w.count,
+      mods: [...w.mods].sort(),
+      ...(w.arc && w.arc !== 'F' ? { arc: w.arc } : {}),
+    })),
     obsolete: false,
   });
 };
@@ -533,7 +538,7 @@ const applyOfferPeace: Applier = (state, cmd) => {
 
 // ---------- battle orders (battle_orders sub-phase) ----------
 
-const STANCES: Stance[] = ['charge', 'hold_range', 'standoff', 'evade_retreat'];
+const STANCES: Stance[] = ['charge', 'hold_range', 'standoff', 'evade_retreat', 'formation', 'passthrough'];
 const PRIORITIES: TargetPriority[] = ['nearest', 'biggest', 'smallest', 'warships', 'bases'];
 
 const validateBattleOrders: Validator = (state, cmd) => {

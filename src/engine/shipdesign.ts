@@ -35,7 +35,18 @@ export interface DesignWeapon {
   weapon: string;
   count: number;
   mods: string[]; // flag keys: hv pd ap co sp af nr ...
+  /** firing arc: F (forward 180°, default), FX (270°), R (rear 180°), 360 */
+  arc?: 'F' | 'FX' | 'R' | '360';
 }
+
+/** Arc space/cost multipliers (%): wider coverage costs mount volume; a rear
+ * mount is slightly cheaper than forward. */
+export const ARC_SPACE_PCT: Record<'F' | 'FX' | 'R' | '360', number> = {
+  F: 100,
+  FX: 120,
+  R: 90,
+  '360': 140,
+};
 
 export interface ShipDesign {
   id: number;
@@ -137,6 +148,7 @@ export interface FittedWeapon {
   row: WeaponRow;
   count: number;
   mods: string[];
+  arc: 'F' | 'FX' | 'R' | '360';
   spaceEach: number;
   costEach: number;
 }
@@ -166,9 +178,11 @@ export function fitWeapon(empire: Empire, dw: DesignWeapon): FittedWeapon | stri
     if (!row.availableMods.includes(m)) return `${dw.weapon} cannot take ${m}`;
   }
   if (!Number.isSafeInteger(dw.count) || dw.count < 1 || dw.count > 200) return 'bad weapon count';
+  const arc = dw.arc ?? 'F';
+  if (!(arc in ARC_SPACE_PCT)) return `unknown arc ${arc}`;
   const mini = miniaturizationPct(empire, dw.weapon);
-  let spacePct = 100;
-  let costPct = 100;
+  let spacePct = ARC_SPACE_PCT[arc];
+  let costPct = ARC_SPACE_PCT[arc];
   for (const m of dw.mods) {
     spacePct += MOD_SPACE_PCT[m]!;
     costPct += MOD_SPACE_PCT[m]!;
@@ -180,6 +194,7 @@ export function fitWeapon(empire: Empire, dw: DesignWeapon): FittedWeapon | stri
     row,
     count: dw.count,
     mods: dw.mods,
+    arc,
     spaceEach: Math.max(1, roundDiv(baseSpace * spacePct * mini, 100 * 100)),
     costEach: Math.max(1, roundDiv(baseCost * costPct * mini, 100 * 100)),
   };

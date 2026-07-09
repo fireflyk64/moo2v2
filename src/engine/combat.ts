@@ -263,9 +263,12 @@ export function runBattle(
     init,
     x: 0,
     y: 0,
+    heading: init.side === 0 ? 0 : DIRS / 2, // face the enemy line
+    homeY: 0,
     alive: true,
     retreated: false,
     crossed: false,
+    passedThrough: false,
     shield: init.shieldPool,
     shieldRegenAcc: 0,
     armor: init.startingArmor,
@@ -278,6 +281,9 @@ export function runBattle(
     specials: new Set(init.specials ?? []),
     missileEvasion: 0,
     repairAcc: 0,
+    sysDrive: false,
+    sysComputer: false,
+    sysShield: false,
   }));
   // ECM: personal jammers, plus fleet-wide wide-area jammers
   const fleetJam = [false, false];
@@ -310,6 +316,7 @@ export function runBattle(
       s.y = Math.floor(((di + 1) * FIELD_H) / (countD + 1));
       di++;
     }
+    s.homeY = s.y;
   }
 
   const projectiles: Projectile[] = [];
@@ -343,51 +350,114 @@ export function runBattle(
       s.targetIdx = pickTarget(sims, s);
     }
 
-    // --- movement ---
+    // --- passthrough cohesion: once EVERY raider has punched past the enemy
+    // line, the whole group wheels around and withdraws together ---
+    for (const side of [0, 1] as const) {
+      const raiders = sims.filter((s) => s.init.side === side && s.stance === 'passthrough' && active(s));
+      if (!raiders.length) continue;
+      const enemies = sims.filter((s) => s.init.side !== side && active(s));
+      const lineX = enemies.length
+        ? side === 0
+          ? Math.max(...enemies.map((e) => e.x))
+          : Math.min(...enemies.map((e) => e.x))
+        : side === 0
+          ? FIELD_W
+          : 0;
+      for (const s of raiders) {
+        if (side === 0 ? s.x > lineX + 20 * FP : s.x < lineX - 20 * FP) s.passedThrough = true;
+      }
+      if (raiders.every((s) => s.passedThrough)) {
+        for (const s of raiders) s.stance = 'evade_retreat'; // cohesive withdrawal
+      }
+    }
+
+    // --- formation pacing: the line advances at the slowest member's speed ---
+    const formationSpeed: number[] = [0, 0];
+    for (const side of [0, 1] as const) {
+      const line = sims.filter((s) => s.init.side === side && s.stance === 'formation' && active(s) && !s.init.isBase);
+      if (line.length) {
+        formationSpeed[side] = Math.min(...line.map((s) => (s.sysDrive ? 0 : Math.max(1, s.init.speed))));
+      }
+    }
+
+    // --- movement: turn toward the desired course (hull turn rate), then move
+    // along the current heading — capitals answer the helm slowly ---
     for (const s of sims) {
-      if (!active(s) || s.init.speed === 0) continue;
+      if (!active(s) || s.init.speed === 0 || s.sysDrive) continue;
       const crippled = s.structure * 3 < s.init.structureHp;
-      const speed = Math.max(1, crippled ? Math.floor(s.init.speed / 2) : s.init.speed) * FP;
+      let speed = Math.max(1, crippled ? Math.floor(s.init.speed / 2) : s.init.speed) * FP;
       const dir = s.init.side === 0 ? 1 : -1;
       const target = s.targetIdx >= 0 ? sims[s.targetIdx] : undefined;
-      let dx = 0;
-      let dy = 0;
+      let desiredX = 0;
+      let desiredY = 0;
+      let travel = speed;
       const BRAWL = 30 * FP; // charge closes to point-blank and holds, no overshoot
-      const stepToward = (tx: number, ty: number, sign: 1 | -1, stopAt = 0) => {
-        const ddx = tx - s.x;
-        const ddy = ty - s.y;
-        const d = Math.max(1, idist(Math.abs(ddx), Math.abs(ddy)));
-        const travel = sign === 1 ? Math.min(speed, Math.max(0, d - stopAt)) : speed;
-        dx = roundDiv(ddx * travel * sign, d);
-        dy = roundDiv(ddy * travel * sign, d);
+      const steer = (tx: number, ty: number, sign: 1 | -1, stopAt = 0) => {
+        const ddx = (tx - s.x) * sign;
+        const ddy = (ty - s.y) * sign;
+        const d = Math.max(1, idist(Math.abs(tx - s.x), Math.abs(ty - s.y)));
+        desiredX = ddx;
+        desiredY = ddy;
+        travel = sign === 1 ? Math.min(speed, Math.max(0, d - stopAt)) : speed;
       };
       switch (s.stance) {
         case 'charge':
-          if (target && active(target)) stepToward(target.x, target.y, 1, BRAWL);
-          else dx = dir * speed;
+          if (target && active(target)) steer(target.x, target.y, 1, BRAWL);
+          else steer(s.x + dir * FIELD_W, s.y, 1);
           break;
+        case 'passthrough':
+          // raiders punch THROUGH the line — no brawl stop, straight past
+          if (target && active(target) && !s.passedThrough) steer(target.x, target.y, 1);
+          else steer(s.x + dir * FIELD_W, s.homeY, 1);
+          break;
+        case 'formation': {
+          speed = Math.max(1, formationSpeed[s.init.side]!) * FP;
+          travel = speed;
+          const nearest = target && active(target) ? idist(Math.abs(target.x - s.x), Math.abs(target.y - s.y)) : Infinity;
+          if (nearest > 210 * FP) steer(s.x + dir * FIELD_W, s.homeY, 1); // advance in lane
+          else if (nearest < 140 * FP && target) steer(target.x, target.y, -1);
+          else travel = 0; // hold the line and fire
+          break;
+        }
         case 'hold_range': {
           if (target && active(target)) {
             const d = idist(Math.abs(target.x - s.x), Math.abs(target.y - s.y));
-            if (d > 200 * FP) stepToward(target.x, target.y, 1, 200 * FP);
-            else if (d < 150 * FP) stepToward(target.x, target.y, -1);
-          } else dx = dir * speed;
+            if (d > 200 * FP) steer(target.x, target.y, 1, 200 * FP);
+            else if (d < 150 * FP) steer(target.x, target.y, -1);
+            else travel = 0;
+          } else steer(s.x + dir * FIELD_W, s.y, 1);
           break;
         }
         case 'standoff': {
           if (target && active(target)) {
             const d = idist(Math.abs(target.x - s.x), Math.abs(target.y - s.y));
-            if (d > 430 * FP) stepToward(target.x, target.y, 1);
-            else if (d < 360 * FP) stepToward(target.x, target.y, -1);
-          }
+            if (d > 430 * FP) steer(target.x, target.y, 1);
+            else if (d < 360 * FP) steer(target.x, target.y, -1);
+            else travel = 0;
+          } else travel = 0;
           break;
         }
         case 'evade_retreat':
-          dx = -dir * speed;
+          steer(s.x - dir * FIELD_W, s.y, 1);
           break;
       }
-      s.x += dx;
-      s.y = clamp(s.y + dy, 8 * FP, FIELD_H - 8 * FP);
+
+      if (desiredX !== 0 || desiredY !== 0) {
+        const want = headingToward(desiredX, desiredY);
+        const delta = headingDelta(s.heading, want);
+        const rate = turnRateOf(s.init.hullIdx, s.init.isBase);
+        if (delta !== 0) {
+          s.heading = (s.heading + clamp(delta, -rate, rate) + DIRS) % DIRS;
+        }
+        // hard turns bleed speed; near-aligned courses run at full burn
+        const off = Math.abs(headingDelta(s.heading, want));
+        if (off > 8) travel = 0; // pointing the wrong way: come about first
+        else if (off > 4) travel = Math.floor(travel / 2);
+      }
+      if (travel > 0) {
+        s.x += roundDiv(TRIG[s.heading]![0] * travel, 16384);
+        s.y = clamp(s.y + roundDiv(TRIG[s.heading]![1] * travel, 16384), 8 * FP, FIELD_H - 8 * FP);
+      }
       // edges (warp dissipaters pin the enemy on the field)
       if (s.stance === 'evade_retreat' && !noRetreat[s.init.side]) {
         if ((s.init.side === 0 && s.x <= 4 * FP) || (s.init.side === 1 && s.x >= FIELD_W - 4 * FP)) {
@@ -425,7 +495,7 @@ export function runBattle(
           p.hp = 0;
           continue;
         }
-        applyDamage(t, p.dmg, ['guided'], frameShots, tick, p.from, p.targetIdx, p.weaponId, p.classId, frameDeaths, sims);
+        applyDamage(t, p.dmg, ['guided'], frameShots, tick, p.from, p.targetIdx, p.weaponId, p.classId, frameDeaths, sims, rng);
         p.hp = 0;
       } else {
         p.x += roundDiv(ddx * step, d);
@@ -466,6 +536,9 @@ export function runBattle(
         const t = s.targetIdx >= 0 ? sims[s.targetIdx] : undefined;
         if (!t || !active(t)) continue;
         const dist = idist(Math.abs(t.x - s.x), Math.abs(t.y - s.y));
+        // firing arc: the mount must bear on the target (PD turrets track 360°)
+        const bearing = headingToward(t.x - s.x, t.y - s.y);
+        if (!isPd && !inArc(w.arc ?? 'F', bearing, s.heading)) continue;
         // rangemaster treats the band one step closer
         let band = bandOf(dist);
         if (band > 0 && s.specials.has('rangemaster_target_unit')) band = (band - 1) as 0 | 1 | 2;
@@ -474,10 +547,11 @@ export function runBattle(
           const maxBand = isPd ? BAND_SHORT : w.mods.includes('hv') ? BAND_HV : BAND_LONG;
           if (dist > maxBand) continue;
           const shots = w.mods.includes('af') ? 3 : 1;
+          const attack = s.sysComputer ? 0 : s.init.beamAttack; // fried targeting computer
           for (let burst = 0; burst < shots; burst++) {
             for (let n = 0; n < w.count; n++) {
               let hitPct = clamp(
-                50 + s.init.beamAttack - t.init.beamDefense + BAND_HIT[band]! +
+                50 + attack - t.init.beamDefense + BAND_HIT[band]! +
                   (w.mods.includes('co') ? 25 : 0) + (w.mods.includes('af') ? -20 : 0),
                 5,
                 95,
@@ -496,7 +570,7 @@ export function runBattle(
               if (s.specials.has('high_energy_focus')) dmg = roundDiv(dmg * 150, 100);
               if (s.specials.has('structural_analyzer')) dmg *= 2;
               const mods = s.specials.has('achilles_targeting_unit') ? [...w.mods, 'achilles'] : w.mods;
-              applyDamage(t, dmg, mods, frameShots, tick, s.init.shipId, s.targetIdx, w.weaponId, 0, frameDeaths, sims);
+              applyDamage(t, dmg, mods, frameShots, tick, s.init.shipId, s.targetIdx, w.weaponId, 0, frameDeaths, sims, rng);
             }
           }
           s.cds[wi] = cooldownOf(w, crippled, s.specials);
@@ -525,7 +599,7 @@ export function runBattle(
 
     // --- shield regen (3%/tick; 5% with a capacitor) + automated repair ---
     for (const s of sims) {
-      if (s.alive && s.init.shieldPool > 0 && s.shield < s.init.shieldPool) {
+      if (s.alive && !s.sysShield && s.init.shieldPool > 0 && s.shield < s.init.shieldPool) {
         const rate = s.specials.has('shield_capacitor') ? 5 : 3;
         s.shieldRegenAcc += s.init.shieldPool * rate;
         if (s.shieldRegenAcc >= 100) {
@@ -554,11 +628,13 @@ export function runBattle(
           id: s.init.shipId,
           x: s.x,
           y: s.y,
+          h: s.heading,
           alive: s.alive,
           retreated: s.retreated,
           crossed: s.crossed,
           structPct: s.init.structureHp > 0 ? Math.floor((s.structure * 100) / s.init.structureHp) : 0,
           shieldPct: s.init.shieldPool > 0 ? Math.floor((s.shield * 100) / s.init.shieldPool) : 0,
+          sys: `${s.sysDrive ? 'd' : ''}${s.sysComputer ? 'c' : ''}${s.sysShield ? 's' : ''}`,
         })),
         shots: frameShots,
         deaths: frameDeaths,
@@ -647,6 +723,7 @@ function applyDamage(
   classId: number,
   deaths: number[],
   sims: Sim[],
+  rng: Rng,
 ): number {
   let dmg = raw;
   // damper field (Antaran tech): incoming damage reduced by 3/4
@@ -661,13 +738,16 @@ function applyDamage(
     t.shield -= absorbed;
     dmg -= absorbed;
   }
+  let structDmg = 0;
   if (dmg > 0) {
     if (mods.includes('ap') || mods.includes('achilles')) {
       t.structure -= dmg;
+      structDmg = dmg;
     } else {
       const toArmor = Math.min(t.armor, dmg);
       t.armor -= toArmor;
-      t.structure -= dmg - toArmor;
+      structDmg = dmg - toArmor;
+      t.structure -= structDmg;
     }
   }
   shots.push({ tick, from: fromId, to: t.init.shipId, weaponId, classId, hit: true, dmg: raw });
@@ -676,7 +756,39 @@ function applyDamage(
     t.structure = 0;
     deaths.push(t.init.shipId);
   }
+  // internal hits can knock out systems for the rest of the fight (transient:
+  // only structure/armor percentages persist after the battle)
+  if (structDmg > 0 && t.alive && rng.chancePct(SYSTEM_KNOCKOUT_PCT)) {
+    const knockable: Array<'drive' | 'computer' | 'shield'> = [];
+    if (!t.sysDrive && t.init.speed > 0) knockable.push('drive');
+    if (!t.sysComputer && t.init.beamAttack > 0) knockable.push('computer');
+    if (!t.sysShield && t.init.shieldPool > 0) knockable.push('shield');
+    if (knockable.length) {
+      const hit = knockable[rng.int(knockable.length)]!;
+      if (hit === 'drive') t.sysDrive = true;
+      else if (hit === 'computer') t.sysComputer = true;
+      else {
+        t.sysShield = true;
+        t.shield = 0;
+      }
+    }
+  }
   void targetIdx;
   void sims;
   return dmg;
+}
+
+/** Expected damage per second of a design's broadside at SHORT band (both
+ * sides in arc, targets at 50% base to-hit) — the designer's DPS readout. */
+export function designDps(weapons: CombatWeapon[], beamAttack: number): number {
+  let total = 0; // x100 fixed point
+  for (const w of weapons) {
+    if (w.classId === 3) continue; // bombs don't fire in the pass
+    const expected = roundDiv(w.dmgMin + w.dmgMax, 2);
+    const perShot = w.classId === 0 ? roundDiv(expected * (50 + clamp(beamAttack, 0, 100)), 100) : expected;
+    const shots = w.classId === 0 && w.mods.includes('af') ? 3 : 1;
+    const cd = Math.max(1, cooldownOf(w, false));
+    total += roundDiv(perShot * shots * w.count * 10 * 100, cd); // 10 ticks/sec
+  }
+  return roundDiv(total, 100);
 }

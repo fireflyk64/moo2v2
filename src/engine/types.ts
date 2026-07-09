@@ -113,7 +113,7 @@ export interface EmpireDesign {
   computer: number;
   shield: number;
   specials: string[];
-  weapons: Array<{ weapon: string; count: number; mods: string[] }>;
+  weapons: Array<{ weapon: string; count: number; mods: string[]; arc?: 'F' | 'FX' | 'R' | '360' }>;
   obsolete: boolean;
 }
 
