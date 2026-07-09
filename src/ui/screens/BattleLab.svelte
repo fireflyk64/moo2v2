@@ -149,7 +149,12 @@
       ordersA: { ...snap[0].orders },
       ordersD: { ...snap[1].orders },
     };
-    const padded = seed.padEnd(32, '0').slice(0, 32);
+    // master seeds must be 32 hex chars: encode the free-text seed as hex
+    const padded = [...seed]
+      .map((c) => c.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join('')
+      .padEnd(32, '0')
+      .slice(0, 32);
     const result = runBattle(structuredClone(input), rngFor(padded, ...input.seedLabel));
     viewing = {
       battleId: input.battleId,
