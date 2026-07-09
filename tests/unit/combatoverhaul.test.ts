@@ -50,7 +50,11 @@ const beam = (arc: 'F' | 'FX' | 'R' | '360', dmg = 6) => ({
   arc,
 });
 
-function battle(ships: CombatShipInit[], stanceA = 'charge' as const, stanceB = 'hold_range' as const): { frames: BattleTickFrame[]; result: ReturnType<typeof runBattle> } {
+function battle(
+  ships: CombatShipInit[],
+  stanceA: import('@engine/combat').Stance = 'charge',
+  stanceB: import('@engine/combat').Stance = 'hold_range',
+): { frames: BattleTickFrame[]; result: ReturnType<typeof runBattle> } {
   const input: BattleInput = {
     battleId: 't',
     seedLabel: ['t'],
