@@ -22,6 +22,11 @@
 
   // ---- filter + sort ----
   let filter = $state('');
+  let showTags = $state(localStorage.getItem('moo2.showTags') !== '0');
+  function toggleTags() {
+    showTags = !showTags;
+    localStorage.setItem('moo2.showTags', showTags ? '1' : '0');
+  }
   type SortKey = 'name' | 'pop' | 'food' | 'prod' | 'sci' | 'bc' | 'morale' | 'building';
   let sortKey = $state<SortKey>('name');
   let sortDir = $state(1);
@@ -111,6 +116,19 @@
     for (const row of rows) {
       if (!selected.has(row.id) || !row.buildable.includes(item)) continue;
       const items = row.queue.length ? [item, ...row.queue.slice(1)] : [item];
+      session().submit('set_build_queue', { colonyId: row.id, items });
+    }
+  }
+  /** queue an item on every selected colony: 'front' = right after the item
+   * being built (nothing invested is lost), 'back' = end of the queue */
+  function bulkQueue(item: string, where: 'front' | 'back') {
+    if (!item) return;
+    for (const row of rows) {
+      if (!selected.has(row.id) || !row.buildable.includes(item)) continue;
+      const items =
+        where === 'back' || row.queue.length === 0
+          ? [...row.queue, item]
+          : [row.queue[0]!, item, ...row.queue.slice(1)];
       session().submit('set_build_queue', { colonyId: row.id, items });
     }
   }
@@ -277,6 +295,13 @@
   <button data-testid="select-filtered" title="select every colony matching the current filter" onclick={selectAllFiltered}>
     select all ({selectableRows.length})
   </button>
+  <button
+    class="mini"
+    class:dimoff={!showTags}
+    data-testid="toggle-tags"
+    title={showTags ? 'hide colony tags' : 'show colony tags'}
+    onclick={toggleTags}
+  >🏷</button>
   {#if selected.size > 0}
     <span>{selected.size} selected:</span>
     <select
@@ -290,6 +315,30 @@
       <option value="">set build for all…</option>
       {#each bulkOptions as item (item)}<option value={item}>{label(item)}</option>{/each}
     </select>
+    <select
+      data-testid="bulk-queue-front"
+      value=""
+      title="insert right after each colony's current build (nothing invested is lost)"
+      onchange={(e) => {
+        bulkQueue((e.target as HTMLSelectElement).value, 'front');
+        (e.target as HTMLSelectElement).value = '';
+      }}
+    >
+      <option value="">⤴ queue next for all…</option>
+      {#each bulkOptions as item (item)}<option value={item}>{label(item)}</option>{/each}
+    </select>
+    <select
+      data-testid="bulk-queue-back"
+      value=""
+      title="append to the end of each selected colony's queue"
+      onchange={(e) => {
+        bulkQueue((e.target as HTMLSelectElement).value, 'back');
+        (e.target as HTMLSelectElement).value = '';
+      }}
+    >
+      <option value="">⤵ queue last for all…</option>
+      {#each bulkOptions as item (item)}<option value={item}>{label(item)}</option>{/each}
+    </select>
     <span class="presets">
       jobs:
       <button data-testid="preset-research" title="minimum farmers to stay fed; everyone else does research" onclick={() => applyPreset('research')}>⚗ research</button>
@@ -298,7 +347,7 @@
     </span>
     <button onclick={() => (selected = new Set())}>clear selection</button>
   {:else}
-    <span class="dim">tick colonies to bulk-set builds · click headers to sort · click a citizen to grab them + everyone to their right, then drag onto another job or a same-system colony</span>
+    <span class="dim">tick colonies to bulk-select · click headers to sort · click a citizen to grab them + everyone to their right, then drag onto another job or a same-system colony</span>
   {/if}
   {#if moveNote}
     <span class="movenote" data-testid="move-note">{moveNote}</span>
@@ -376,27 +425,29 @@
               data-testid="colony-name-{row.id}">{row.name}</span>{row.outpost ? ' (outpost)' : ''}
             <button class="mini ghost" data-testid="rename-{row.id}" title="rename colony" onclick={() => startRename(row)}>✏️</button>
           {/if}
-          <span class="tagsline">
-            {#each row.tags as t (t)}
-              <button class="tag" data-testid="tag-{row.id}-{t}" title="remove tag {t}" onclick={() => setTags(row, row.tags.filter((x) => x !== t))}>{t}✕</button>
-            {/each}
-            <select
-              class="tagadd"
-              data-testid="tag-add-{row.id}"
-              value=""
-              title="tag this colony"
-              onchange={(e) => {
-                const t = (e.target as HTMLSelectElement).value;
-                if (t) setTags(row, [...row.tags, t]);
-                (e.target as HTMLSelectElement).value = '';
-              }}
-            >
-              <option value="">+tag</option>
-              {#each COLONY_TAGS.filter((t) => !row.tags.includes(t)) as t (t)}
-                <option value={t}>{t}</option>
+          {#if showTags}
+            <span class="tagsline">
+              {#each row.tags as t (t)}
+                <button class="tag" data-testid="tag-{row.id}-{t}" title="remove tag {t}" onclick={() => setTags(row, row.tags.filter((x) => x !== t))}>{t}✕</button>
               {/each}
-            </select>
-          </span>
+              <select
+                class="tagadd"
+                data-testid="tag-add-{row.id}"
+                value=""
+                title="tag this colony"
+                onchange={(e) => {
+                  const t = (e.target as HTMLSelectElement).value;
+                  if (t) setTags(row, [...row.tags, t]);
+                  (e.target as HTMLSelectElement).value = '';
+                }}
+              >
+                <option value="">+</option>
+                {#each COLONY_TAGS.filter((t) => !row.tags.includes(t)) as t (t)}
+                  <option value={t}>{t}</option>
+                {/each}
+              </select>
+            </span>
+          {/if}
         </td>
         <td
           class="dim planet"
@@ -715,12 +766,18 @@
     color: var(--accent-soft);
   }
   .tagadd {
-    font-size: 0.68rem;
-    max-width: 3.4rem;
-    opacity: 0.45;
+    font-size: 0.6rem;
+    max-width: 1.5rem;
+    padding: 0 0.1rem;
+    border: none;
+    background: transparent;
+    opacity: 0.4;
   }
   .tagadd:hover {
     opacity: 1;
+  }
+  .dimoff {
+    opacity: 0.35;
   }
   .outpost {
     opacity: 0.6;

@@ -223,8 +223,8 @@
   {/if}
 
   <label>
-    <input type="radio" data-testid="custom-race" checked={custom} onchange={() => { custom = true; pushConfig(); }} /> Custom race:
-    <input bind:value={raceName} disabled={!custom} maxlength="20" style="width:9rem" onchange={pushConfig} />
+    <input type="radio" data-testid="custom-race" checked={custom} onchange={() => { custom = true; pushConfig(); }} /> Custom race — empire name:
+    <input data-testid="empire-name" bind:value={raceName} disabled={!custom} maxlength="20" style="width:9rem" placeholder="name your empire" onchange={pushConfig} />
   </label>
   {#if custom}
     <p data-testid="pick-budget" class:bad={!validation.ok}>

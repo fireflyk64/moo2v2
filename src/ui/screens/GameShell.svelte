@@ -43,7 +43,9 @@
   const mySeatName = $derived.by(() => {
     void app.version;
     const me = session().playerId;
-    return roster.find((p) => p.id === me)?.name ?? `#${me}`;
+    const player = roster.find((p) => p.id === me)?.name ?? `#${me}`;
+    const race = gs?.empires.find((e) => e.id === me)?.raceName;
+    return race && race !== player ? `${player} · ${race}` : player;
   });
   const botOnSeat = (seatId: number) => getActive()?.bots.find((b) => b.seatId === seatId) ?? null;
   // snapshot the fields: pbm.note mutates in place on a non-reactive object,
