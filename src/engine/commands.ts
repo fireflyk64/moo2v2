@@ -389,8 +389,14 @@ const applyScrap: Applier = (state, cmd) => {
   const p = cmd.payload as { shipId: number };
   const ship = state.ships.find((s) => s.id === p.shipId)!;
   const empire = empireOf(state, cmd.playerId);
+  // MOO2 scrap value: a quarter of the ship's production cost, in BC —
+  // designed warships use their design's real cost
   const costs: Record<string, number> = { colony_ship: 500, outpost_ship: 100, transport: 100, scout: 10 };
-  empire.bc += Math.floor((costs[ship.shipKind] ?? 0) / 2);
+  const cost =
+    ship.shipKind === 'design' && ship.designId !== null
+      ? (itemCost(state, cmd.playerId, `design:${ship.designId}`) ?? 0)
+      : (costs[ship.shipKind] ?? 0);
+  empire.bc += Math.floor(cost / 4);
   state.ships = state.ships.filter((s) => s.id !== p.shipId);
 };
 

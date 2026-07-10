@@ -10,7 +10,7 @@ import { resolveEspionage } from './espionage';
 import { assimilate, isBlockaded, resolveInvasions } from './ground';
 import { leaderEmpireBonuses, leadersUpkeep } from './leaders';
 import { antaranUpkeep, randomEventsUpkeep } from './npc';
-import { itemCost, parseDesignItem } from './items';
+import { itemCost, parseDesignItem, parseRefitItem } from './items';
 import { commandPoints } from './movement';
 import { applyTerraformStep, unsettledPlanetsInSystem } from './terraform';
 import { colonyMaxPop, colonyOutput, colonyPopUnits, groupGrowthK, traitsOf } from './economy';
@@ -325,6 +325,38 @@ function completeItem(state: GameState, colony: Colony, item: string, events: Tu
   if (item === 'freighter_fleet') {
     empire.freighters += 5;
     events.push({ visibleTo: colony.owner, kind: 'freighters_built', payload: { colonyId: colony.id } });
+    return;
+  }
+  const refit = parseRefitItem(item);
+  if (refit !== null) {
+    const ship = state.ships.find((s) => s.id === refit.shipId && s.owner === colony.owner);
+    const design = empire.designs.find((d) => d.id === refit.designId);
+    if (
+      ship &&
+      design &&
+      ship.shipKind === 'design' &&
+      ship.location.kind === 'star' &&
+      ship.location.starId === planet.starId
+    ) {
+      ship.designId = refit.designId;
+      // the yard overhauls the ship while rebuilding it
+      ship.dmgStructure = 0;
+      ship.dmgArmor = 0;
+      events.push({
+        visibleTo: colony.owner,
+        kind: 'ship_refitted',
+        payload: { colonyId: colony.id, shipId: ship.id, designId: refit.designId },
+      });
+    } else {
+      // the ship sailed (or died) before the yard finished: salvage half back
+      const cost = itemCost(state, colony.owner, item, colony) ?? 0;
+      empire.bc += Math.floor(cost / 2);
+      events.push({
+        visibleTo: colony.owner,
+        kind: 'refit_failed',
+        payload: { colonyId: colony.id, shipId: refit.shipId, refundBC: Math.floor(cost / 2) },
+      });
+    }
     return;
   }
   const designId = parseDesignItem(item);

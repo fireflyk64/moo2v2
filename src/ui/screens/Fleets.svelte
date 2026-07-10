@@ -106,7 +106,36 @@
                 onclick={() => submit('unload_transports', { colonyId: f.canUnloadToColonyId, shipId: f.ship.id })}
               >⬇ unload</button>
             {/if}
-            <button class="dimbtn" onclick={() => scrap(f.ship.id)}>scrap</button>
+            {#if f.ship.shipKind === 'design' && f.atStarId !== null}
+              {@const refit = selectors.refitOptions(gs!, session().playerId, f.ship.id)}
+              {#if refit.options.length}
+                <select
+                  class="refitsel"
+                  data-testid="refit-{f.ship.id}"
+                  value=""
+                  disabled={refit.colonyId === null}
+                  title={refit.colonyId === null
+                    ? 'refits need one of your colonies with a star base (or better) in this system'
+                    : 'rebuild this ship to another design of the same hull class — MOO2 price: cost difference, minimum ¼ of the new design; queued at the shipyard colony'}
+                  onchange={(e) => {
+                    const designId = Number((e.target as HTMLSelectElement).value);
+                    (e.target as HTMLSelectElement).value = '';
+                    if (!designId || refit.colonyId === null) return;
+                    const colony = gs!.colonies.find((c) => c.id === refit.colonyId)!;
+                    submit('set_build_queue', {
+                      colonyId: refit.colonyId,
+                      items: [...colony.queue.map((q) => q.item), `refit:${f.ship.id}:${designId}`],
+                    });
+                  }}
+                >
+                  <option value="">⟳ retrofit…</option>
+                  {#each refit.options as o (o.designId)}
+                    <option value={o.designId}>{o.name} ({o.cost} prod)</option>
+                  {/each}
+                </select>
+              {/if}
+            {/if}
+            <button class="dimbtn" title="scrap for a quarter of the build cost in BC" onclick={() => scrap(f.ship.id)}>scrap</button>
           </td>
         </tr>
       {/each}
@@ -160,6 +189,10 @@
   }
   .dim {
     opacity: 0.65;
+  }
+  .refitsel {
+    max-width: 8.5rem;
+    font-size: 0.78rem;
   }
   .dimbtn {
     opacity: 0.65;

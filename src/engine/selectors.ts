@@ -4,7 +4,7 @@
 
 import { fieldByNum, applicationsOfField, FIELD_SUBJECTS, type FieldRow } from './data/index';
 import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, groupGrowthK, type ColonyOutput } from './economy';
-import { buildableItems, itemCost } from './items';
+import { buildableItems, itemCost, refitCost, SHIPYARD_BASES } from './items';
 import { empireAccum } from './effects';
 import { isBlockaded } from './ground';
 import { leaderById } from './leaders';
@@ -441,6 +441,42 @@ export function galaxyView(state: GameState, empireId: number): StarView[] {
       inRange: inRange(state, empireId, star),
     };
   });
+}
+
+export interface RefitOption {
+  designId: number;
+  name: string;
+  cost: number;
+}
+
+/** Refit choices for a warship parked at a star: same-hull designs, priced by
+ * the MOO2 formula, buildable at this system's shipyard colony (star base or
+ * better). colonyId null = no yard here (options still listed for info). */
+export function refitOptions(
+  state: GameState,
+  empireId: number,
+  shipId: number,
+): { colonyId: number | null; options: RefitOption[] } {
+  const empire = state.empires.find((e) => e.id === empireId);
+  const ship = state.ships.find((s) => s.id === shipId);
+  if (!empire || !ship || ship.owner !== empireId || ship.shipKind !== 'design' || ship.location.kind !== 'star') {
+    return { colonyId: null, options: [] };
+  }
+  const starId = ship.location.starId;
+  const colony = state.colonies.find(
+    (c) =>
+      c.owner === empireId &&
+      !c.outpost &&
+      SHIPYARD_BASES.some((b) => c.buildings.includes(b)) &&
+      state.planets.some((p) => p.id === c.planetId && p.starId === starId),
+  );
+  const options: RefitOption[] = [];
+  for (const d of empire.designs) {
+    if (d.obsolete) continue;
+    const cost = refitCost(state, empireId, shipId, d.id);
+    if (cost !== null) options.push({ designId: d.id, name: d.name, cost });
+  }
+  return { colonyId: colony?.id ?? null, options };
 }
 
 export interface FleetRow {

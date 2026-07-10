@@ -86,6 +86,36 @@ export function parseDesignItem(itemId: string): number | null {
   return Number.isSafeInteger(n) ? n : null;
 }
 
+/** 'refit:<shipId>:<designId>' queue items rebuild an existing warship to
+ * another design of the same hull class at a starbase colony's yard. */
+export function parseRefitItem(itemId: string): { shipId: number; designId: number } | null {
+  if (!itemId.startsWith('refit:')) return null;
+  const [a, b] = itemId.slice(6).split(':');
+  const shipId = Number(a);
+  const designId = Number(b);
+  return Number.isSafeInteger(shipId) && Number.isSafeInteger(designId) ? { shipId, designId } : null;
+}
+
+/** shipyard-capable bases (refits need one in orbit) */
+export const SHIPYARD_BASES = ['star_base', 'battle_station', 'star_fortress'] as const;
+
+/** MOO2 refit price: the cost difference between the designs, but never less
+ * than a quarter of the new design's cost. Null when the refit is invalid
+ * (wrong owner/kind, different hull, unknown design). */
+export function refitCost(state: GameState, ownerId: number, shipId: number, designId: number): number | null {
+  const empire = state.empires.find((e) => e.id === ownerId);
+  const ship = state.ships.find((s) => s.id === shipId);
+  if (!empire || !ship || ship.owner !== ownerId) return null;
+  if (ship.shipKind !== 'design' || ship.designId === null || ship.designId === designId) return null;
+  const oldDesign = empire.designs.find((d) => d.id === ship.designId);
+  const newDesign = empire.designs.find((d) => d.id === designId);
+  if (!oldDesign || !newDesign || newDesign.hull !== oldDesign.hull) return null;
+  const oldStats = designStats(state, empire, oldDesign);
+  const newStats = designStats(state, empire, newDesign);
+  if (typeof oldStats === 'string' || typeof newStats === 'string') return null;
+  return Math.max(newStats.cost - oldStats.cost, Math.ceil(newStats.cost / 4));
+}
+
 export function itemCost(state: GameState, ownerId: number, itemId: string, colony?: Colony): number | null {
   const designId = parseDesignItem(itemId);
   if (designId !== null) {
@@ -95,6 +125,8 @@ export function itemCost(state: GameState, ownerId: number, itemId: string, colo
     const stats = designStats(state, empire, design);
     return typeof stats === 'string' ? null : stats.cost;
   }
+  const refit = parseRefitItem(itemId);
+  if (refit !== null) return refitCost(state, ownerId, refit.shipId, refit.designId);
   if (itemId === 'terraforming' && colony) {
     const planet = state.planets.find((p) => p.id === colony.planetId);
     if (planet) return terraformCost(planet);
@@ -113,6 +145,23 @@ export function canQueue(state: GameState, colony: Colony, itemId: string): stri
     const design = empire.designs.find((d) => d.id === designId);
     if (!design) return `no design ${designId}`;
     if (design.obsolete) return `${design.name} is obsolete`;
+    return null;
+  }
+
+  const refit = parseRefitItem(itemId);
+  if (refit !== null) {
+    const cost = refitCost(state, colony.owner, refit.shipId, refit.designId);
+    if (cost === null) return 'invalid refit (same hull class, own warship, different design)';
+    const ship = state.ships.find((s) => s.id === refit.shipId)!;
+    const planet = planetOf(state, colony);
+    if (ship.location.kind !== 'star' || ship.location.starId !== planet.starId) {
+      return 'the ship must wait at this colony for its refit';
+    }
+    if (!SHIPYARD_BASES.some((b) => colony.buildings.includes(b))) {
+      return 'refits need a star base (or better) at the colony';
+    }
+    const newDesign = empire.designs.find((d) => d.id === refit.designId)!;
+    if (newDesign.obsolete) return `${newDesign.name} is obsolete`;
     return null;
   }
 
@@ -186,6 +235,12 @@ export function itemLabel(state: GameState, ownerId: number, itemId: string): st
     const empire = state.empires.find((e) => e.id === ownerId);
     const design = empire?.designs.find((d) => d.id === designId);
     return design ? `⚔ ${design.name}` : itemId;
+  }
+  const refit = parseRefitItem(itemId);
+  if (refit !== null) {
+    const empire = state.empires.find((e) => e.id === ownerId);
+    const design = empire?.designs.find((d) => d.id === refit.designId);
+    return design ? `⟳ Refit → ${design.name}` : itemId;
   }
   const extra = EXTRA_LABELS[itemId];
   if (extra) return extra;
