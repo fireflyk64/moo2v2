@@ -1,0 +1,3305 @@
+commit 93685099f771a18a413a0bb21d334e5a6428323f
+Author: sandbox <sandbox@sandbox>
+Date:   Fri Jul 10 17:36:39 2026 +0000
+
+    stylin
+
+diff --git a/README.md b/README.md
+index ec242df..a46d837 100644
+--- a/README.md
++++ b/README.md
+@@ -64,7 +64,12 @@ src/storage    kysely over better-sqlite3 (node) / sqlocal+OPFS (browser):
+                .moo2save binary save files with full replay verification.
+ src/ui         Svelte 5 screens (colonies spreadsheet, map, research, fleets,
+                designer, empires, reports) + pixi.js battle viewer that re-runs
+-               the deterministic sim for playback.
++               the deterministic sim for playback. Warships are procedural
++               pixel-art sprites: every empire picks one of ten fleet styles
++               (set_ship_style, cosmetic) and every design one model variant of
++               its hull class; battle/shipart.ts generates the grids, shiptex.ts
++               rasterizes/tints them, effects.ts draws weapon, shield, engine
++               and explosion VFX on an additive glow layer.
+ src/headless   scripted bots (expander, chaos) driving full games for tests.
+ ```
+ 
+diff --git a/src/engine/battles.ts b/src/engine/battles.ts
+index 5bd5484..bb6a40e 100644
+--- a/src/engine/battles.ts
++++ b/src/engine/battles.ts
+@@ -8,6 +8,7 @@ import { leaderCombatBonuses } from './leaders';
+ import { floorDiv } from './imath';
+ import { rngFor } from './rng';
+ import { baseDesign, designStats, knownWeapons, HULLS_BUILDABLE, BASE_HULLS, type ShipDesign } from './shipdesign';
++import { shipStyleOf } from './shipstyles';
+ import { ANTARAN_EMPIRE, antaranRaze, factionOf, guardianReward, monstersAt, monsterToCombat } from './npc';
+ import type { Colony, Empire, GameState, PendingBattle, Ship, TurnEvent } from './types';
+ 
+@@ -194,6 +195,9 @@ function shipToCombat(state: GameState, empire: Empire, ship: Ship, side: 0 | 1)
+       startingStructure: Math.max(1, stats.structureHp - ship.dmgStructure),
+       startingArmor: Math.max(0, stats.armorHp - ship.dmgArmor),
+       specials: [],
++      style: shipStyleOf(empire),
++      modelIdx: ship.id, // designless hulls: stable per-ship variety
++      modelKind: 'scout',
+     };
+   }
+   if (!isWarship(ship) || ship.designId === null) return null;
+@@ -228,6 +232,8 @@ function shipToCombat(state: GameState, empire: Empire, ship: Ship, side: 0 | 1)
+     startingStructure: Math.max(1, stats.structureHp - ship.dmgStructure),
+     startingArmor: Math.max(0, stats.armorHp - ship.dmgArmor),
+     specials: design.specials,
++    style: shipStyleOf(empire),
++    modelIdx: design.modelIdx ?? design.id,
+   };
+ }
+ 
+@@ -280,6 +286,8 @@ function baseToCombat(state: GameState, empire: Empire, colony: Colony, syntheti
+     })),
+     startingStructure: stats.structureHp,
+     startingArmor: stats.armorHp,
++    style: shipStyleOf(empire),
++    modelIdx: colony.id, // stations vary per colony
+   };
+ }
+ 
+diff --git a/src/engine/combat.ts b/src/engine/combat.ts
+index 6c9d911..f6bb069 100644
+--- a/src/engine/combat.ts
++++ b/src/engine/combat.ts
+@@ -126,6 +126,14 @@ export interface CombatShipInit {
+   startingArmor: number;
+   /** design specials with in-battle behavior (ecm, damper_field, ...) */
+   specials?: string[];
++  /** cosmetic: owning empire's fleet style id at battle time (shipstyles.ts).
++   * Display-only — the sim never reads it. */
++  style?: string;
++  /** cosmetic: model variant within the style's hull class (viewer wraps by
++   * the class's variant count). Display-only. */
++  modelIdx?: number;
++  /** cosmetic: overrides the art class ('scout' for designless scout hulls) */
++  modelKind?: string;
+ }
+ 
+ export interface BattleInput {
+@@ -151,6 +159,12 @@ export interface ShotEvent {
+   dmg: number;
+   /** this hit destroyed the target (viewer highlights the killing blow) */
+   kill?: boolean;
++  /** damage points soaked by the target's shield (viewer draws the fizzle) */
++  sh?: number;
++  /** point-defense intercepts (to === -1): field position of the downed
++   * projectile, so the viewer can draw the tracer and the pop */
++  ix?: number;
++  iy?: number;
+ }
+ 
+ export interface BattleTickFrame {
+@@ -170,8 +184,10 @@ export interface BattleTickFrame {
+     sys: string;
+   }>;
+   shots: ShotEvent[];
+-  /** guided munitions in flight this tick (missiles classId 1, torpedoes 2) */
+-  projectiles: Array<{ x: number; y: number; classId: number }>;
++  /** guided munitions in flight this tick (missiles classId 1, torpedoes 2,
++   * strike craft 4). id is stable across ticks (launch order) so the viewer
++   * can track headings and draw trails; w = weapon id; from = launcher. */
++  projectiles: Array<{ id: number; x: number; y: number; classId: number; w: string; from: number }>;
+   deaths: number[];
+ }
+ 
+@@ -551,7 +567,7 @@ export function runBattle(
+           );
+           if (incoming) {
+             const hit = rng.chancePct(70);
+-            frameShots.push({ tick, from: s.init.shipId, to: -1, weaponId: w.weaponId, classId: 0, hit, dmg: 0 });
++            frameShots.push({ tick, from: s.init.shipId, to: -1, weaponId: w.weaponId, classId: 0, hit, dmg: 0, ix: incoming.x, iy: incoming.y });
+             if (hit) incoming.hp = 0;
+             s.cds[wi] = cooldownOf(w, crippled, s.specials);
+             continue;
+@@ -708,8 +724,9 @@ export function runBattle(
+       onFrame({
+         tick,
+         projectiles: projectiles
++          .map((p, pi) => ({ id: pi, x: p.x, y: p.y, classId: p.classId, w: p.weaponId, from: p.from, hp: p.hp }))
+           .filter((p) => p.hp > 0)
+-          .map((p) => ({ x: p.x, y: p.y, classId: p.classId })),
++          .map(({ hp: _hp, ...p }) => p),
+         ships: sims.map((s) => ({
+           id: s.init.shipId,
+           x: s.x,
+@@ -821,12 +838,18 @@ function applyDamage(
+   // energy absorber (monster trait): quarter of the damage is drunk
+   if (t.specials.has('energy_absorber')) dmg = Math.max(1, Math.floor((dmg * 3) / 4));
+   const pierces = mods.includes('sp') && !t.specials.has('hard_shields');
++  let soaked = 0; // shield-stopped damage (flat + pool) — the viewer's fizzle cue
+   if (!pierces) {
+     // flat per-hit reduction then pool absorption
+-    if (!mods.includes('ap')) dmg = Math.max(0, dmg - t.init.shieldFlat);
++    if (!mods.includes('ap')) {
++      const flat = Math.min(dmg, t.init.shieldFlat);
++      if (t.shield > 0) soaked += flat; // a collapsed shield deflects nothing visible
++      dmg = Math.max(0, dmg - t.init.shieldFlat);
++    }
+     const absorbed = Math.min(t.shield, dmg);
+     t.shield -= absorbed;
+     dmg -= absorbed;
++    soaked += absorbed;
+   }
+   let structDmg = 0;
+   if (dmg > 0) {
+@@ -841,7 +864,7 @@ function applyDamage(
+     }
+   }
+   const killed = t.structure <= 0 && t.alive;
+-  shots.push({ tick, from: fromId, to: t.init.shipId, weaponId, classId, hit: true, dmg: raw, ...(killed ? { kill: true } : {}) });
++  shots.push({ tick, from: fromId, to: t.init.shipId, weaponId, classId, hit: true, dmg: raw, ...(killed ? { kill: true } : {}), ...(soaked > 0 ? { sh: soaked } : {}) });
+   if (killed) {
+     t.alive = false;
+     t.structure = 0;
+diff --git a/src/engine/commands.ts b/src/engine/commands.ts
+index 3a7fb95..82fead0 100644
+--- a/src/engine/commands.ts
++++ b/src/engine/commands.ts
+@@ -18,6 +18,7 @@ import { canQueue, itemCost } from './items';
+ import { inRange, shipStar, travelTurns } from './movement';
+ import { availableFields, fieldGrantsAll } from './research';
+ import { designStats } from './shipdesign';
++import { isShipStyle } from './shipstyles';
+ import type { BattleOrders, Stance, TargetPriority } from './combat';
+ import type { Colony, GameState, PopGroup, Ship, Star } from './types';
+ 
+@@ -424,6 +425,18 @@ const applySetTax: Applier = (state, cmd) => {
+   empireOf(state, cmd.playerId).taxRatePct = p.pct;
+ };
+ 
++// ---------- set_ship_style (cosmetic: fleet appearance in battle replays) ----------
++
++const validateSetShipStyle: Validator = (_state, cmd) => {
++  const p = cmd.payload as { style: string };
++  return isShipStyle(p?.style) ? null : `unknown ship style ${String(p?.style)}`;
++};
++
++const applySetShipStyle: Applier = (state, cmd) => {
++  const p = cmd.payload as { style: string };
++  empireOf(state, cmd.playerId).shipStyle = p.style;
++};
++
+ // ---------- sell_building ----------
+ 
+ interface SellBuildingPayload {
+@@ -460,12 +473,15 @@ interface SaveDesignPayload {
+   shield: number;
+   specials: string[];
+   weapons: Array<{ weapon: string; count: number; mods: string[]; arc?: 'F' | 'FX' | 'R' | '360' }>;
++  /** cosmetic model variant within the hull class (optional; small index) */
++  modelIdx?: number;
+ }
+ 
+ const validateSaveDesign: Validator = (state, cmd) => {
+   const p = cmd.payload as SaveDesignPayload;
+   const empire = empireOf(state, cmd.playerId);
+   if (typeof p?.name !== 'string' || !p.name.trim() || p.name.length > 30) return 'bad design name';
++  if (p.modelIdx !== undefined && (!Number.isSafeInteger(p.modelIdx) || p.modelIdx < 0 || p.modelIdx > 31)) return 'bad model variant';
+   if (empire.designs.filter((d) => !d.obsolete).length >= 12) return 'design limit reached (obsolete one first)';
+   const stats = designStats(state, empire, {
+     name: p.name,
+@@ -495,6 +511,7 @@ const applySaveDesign: Applier = (state, cmd) => {
+       ...(w.arc && w.arc !== 'F' ? { arc: w.arc } : {}),
+     })),
+     obsolete: false,
++    ...(p.modelIdx !== undefined ? { modelIdx: p.modelIdx } : {}),
+   });
+ };
+ 
+@@ -1242,6 +1259,7 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
+   scrap_ship: { validate: validateScrap, apply: applyScrap },
+   sell_building: { validate: validateSellBuilding, apply: applySellBuilding },
+   set_tax_rate: { validate: validateSetTax, apply: applySetTax },
++  set_ship_style: { validate: validateSetShipStyle, apply: applySetShipStyle },
+   save_design: { validate: validateSaveDesign, apply: applySaveDesign },
+   obsolete_design: { validate: validateObsoleteDesign, apply: applyObsoleteDesign },
+   declare_war: { validate: validateDeclareWar, apply: applyDeclareWar },
+diff --git a/src/engine/index.ts b/src/engine/index.ts
+index 5b268e2..67a9004 100644
+--- a/src/engine/index.ts
++++ b/src/engine/index.ts
+@@ -4,7 +4,7 @@
+ // - No imports from outside src/engine (zero runtime dependencies).
+ // - No sources of nondeterminism; randomness comes only from the seeded PRNG.
+ 
+-export const ENGINE_VERSION = '0.6.0'; // ETA arrivals, freighter pop transits, starvation floor, armed scouts, combat mods/fighters, value-guarded monsters
++export const ENGINE_VERSION = '0.7.0'; // fleet ship styles + design model variants (cosmetic), richer battle replay frames (projectile ids, shield-soak markers, PD intercepts)
+ 
+ export * from './types';
+ export * from './canonical';
+@@ -27,6 +27,7 @@ export * from './espionage';
+ export * from './diplomacy';
+ export * from './commands';
+ export * from './shipdesign';
++export * from './shipstyles';
+ export * from './combat';
+ export * from './battles';
+ export * from './pipeline';
+diff --git a/src/engine/shipstyles.ts b/src/engine/shipstyles.ts
+new file mode 100644
+index 0000000..148eb4b
+--- /dev/null
++++ b/src/engine/shipstyles.ts
+@@ -0,0 +1,37 @@
++// Fleet visual styles (cosmetic only — never touches combat math).
++//
++// Every empire owns one style; it decides the pixel-art silhouette family its
++// warships use in battle replays. Ship DESIGNS additionally pick one of the
++// style's model variants per hull class (EmpireDesign.modelIdx). The style ids
++// live in the engine so the set_ship_style command can validate them and so
++// battle inputs can snapshot them; the actual pixel plans live in the UI
++// (src/ui/battle/shipart.ts) — the sim itself never reads these.
++
++export interface ShipStyleInfo {
++  id: string;
++  name: string;
++  blurb: string;
++}
++
++export const SHIP_STYLES: readonly ShipStyleInfo[] = [
++  { id: 'raptor', name: 'Raptor', blurb: 'swept-wing wedge darts — knife-edged interceptor lines' },
++  { id: 'saucer', name: 'Meridian', blurb: 'circular primary hulls with outrigger drive nacelles' },
++  { id: 'lattice', name: 'Lattice', blurb: 'blocky machine collectives — greebled cubes and grids' },
++  { id: 'orbital', name: 'Orbital', blurb: 'near-future spaceframes — trusses, tanks and radiators' },
++  { id: 'crescent', name: 'Crescent', blurb: 'flowing blade hulls — curved scimitars and fins' },
++  { id: 'gemini', name: 'Gemini', blurb: 'twin-pod catamarans — paired hulls on a cross spar' },
++  { id: 'needle', name: 'Needle', blurb: 'spinal lances — long thin spikes with cross fins' },
++  { id: 'manta', name: 'Manta', blurb: 'smooth biomorphic rays — rounded lifting bodies' },
++  { id: 'bulwark', name: 'Bulwark', blurb: 'brutalist armored slabs — citadel monitors' },
++  { id: 'halo', name: 'Halo', blurb: 'annular ring ships — hulls built around a halo' },
++];
++
++export function isShipStyle(id: unknown): boolean {
++  return typeof id === 'string' && SHIP_STYLES.some((s) => s.id === id);
++}
++
++/** The style an empire renders with: chosen, else a stable per-empire default. */
++export function shipStyleOf(empire: { id: number; shipStyle?: string }): string {
++  if (empire.shipStyle && SHIP_STYLES.some((s) => s.id === empire.shipStyle)) return empire.shipStyle;
++  return SHIP_STYLES[((empire.id % SHIP_STYLES.length) + SHIP_STYLES.length) % SHIP_STYLES.length]!.id;
++}
+diff --git a/src/engine/types.ts b/src/engine/types.ts
+index ba8753a..dd20655 100644
+--- a/src/engine/types.ts
++++ b/src/engine/types.ts
+@@ -115,6 +115,9 @@ export interface EmpireDesign {
+   specials: string[];
+   weapons: Array<{ weapon: string; count: number; mods: string[]; arc?: 'F' | 'FX' | 'R' | '360' }>;
+   obsolete: boolean;
++  /** cosmetic: which model variant of the hull class this design uses within
++   * the empire's ship style (absent = derived from design id) */
++  modelIdx?: number;
+ }
+ 
+ /** A leader in an empire's employ (pool row in data/leaders.ts). */
+@@ -159,6 +162,9 @@ export interface Empire {
+   /** empire-wide tax: this % of each colony's queue production is converted to
+    * BC at 2 prod -> 1 BC (0-50; absent in older saves = 0) */
+   taxRatePct?: number;
++  /** cosmetic fleet style id (shipstyles.ts); absent = per-empire default.
++   * Purely visual: battle replays render this empire's ships in this style. */
++  shipStyle?: string;
+   /** UI time-spent aggregates, seconds per screen (submitted with commits so
+    * every player can see where the table's time goes; absent = none) */
+   telemetry?: Record<string, number>;
+diff --git a/src/ui/battle/BattleViewer.svelte b/src/ui/battle/BattleViewer.svelte
+index c1863e1..566f396 100644
+--- a/src/ui/battle/BattleViewer.svelte
++++ b/src/ui/battle/BattleViewer.svelte
+@@ -1,12 +1,24 @@
+ <script lang="ts">
+   // Battle playback: re-runs the deterministic sim to produce frames, then
+-  // animates them with pixi. Sprites are procedural shapes (original art).
+-  import { Application, Container, Graphics } from 'pixi.js';
++  // animates them with pixi. Ships are procedural pixel-art sprites in each
++  // empire's chosen fleet style (shipart.ts); weapons, shields, flames and
++  // deaths are layered VFX (effects.ts) split across a normal layer and an
++  // additive glow layer so energy weapons genuinely glow. All effects are
++  // deterministic in (tick, seed): scrubbing re-renders identical frames.
++  import { Application, Container, Graphics, Sprite } from 'pixi.js';
+   import { onDestroy, onMount } from 'svelte';
+-  import { FIELD_H, FIELD_W, FP, runBattle, type BattleInput, type BattleTickFrame } from '@engine/index';
++  import { FIELD_H, FIELD_W, FP, runBattle, shipStyleOf, type BattleInput, type BattleTickFrame, type CombatShipInit } from '@engine/index';
+   import { rngFor } from '@engine/rng';
+   import { ownerColor, ownerName } from '../colors';
+   import { app, getActive, type ReplayEntry } from '../state.svelte';
++  import { artClassOf, getMonsterModel, getShipModel, glowPixels, MONSTER_KINDS, type Mount, type ShipModel } from './shipart';
++  import { cssToNum, flameColorFor, paletteFor, textureForModel } from './shiptex';
++  import {
++    beamStyleOf, drawBeam, drawDamageSmoke, drawDissipaterWake, drawExplosion, drawFighter, drawFlame,
++    drawImpact, drawLightningAura, drawMissile, drawMuzzle, drawPdPop, drawRepairDrones, drawShieldBubble,
++    drawShieldCollapse, drawShieldHit, drawSlug, drawTorpedo, drawTrail, drawWarpStreak, fxHash,
++    MISSILE_TINT, TORPEDO_TINT,
++  } from './effects';
+ 
+   const { replay, onclose }: { replay: ReplayEntry; onclose: () => void } = $props();
+ 
+@@ -42,10 +54,18 @@
+   }
+ 
+   const SCALE = 1.7;
++  const PAD = 26; // margin so edge brawls (and their sprites) stay on canvas
+   const W = (FIELD_W / FP) * SCALE;
+   const H = (FIELD_H / FP) * SCALE;
++  const CW = W + PAD * 2;
++  const CH = H + PAD * 2;
++  const PIX = 2; // art pixel -> screen px
+ 
+-  let gfx: Graphics;
++  let bgG: Graphics; // static backdrop
++  let shipC: Container; // pixel-art sprites
++  let fxG: Graphics; // normal blend: smoke, debris, munition bodies
++  let glowG: Graphics; // additive blend: beams, flames, shields, fire
++  let uiG: Graphics; // bars, markers, bystanders
+   let elapsed = 0;
+ 
+   // deterministic decorative starfield for the battle backdrop
+@@ -53,53 +73,135 @@
+   {
+     let s = 1234567;
+     const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+-    for (let i = 0; i < 90; i++) {
+-      stars.push({ x: rnd() * W, y: rnd() * H, r: rnd() * 1.4 + 0.3, a: rnd() * 0.5 + 0.15 });
++    for (let i = 0; i < 110; i++) {
++      stars.push({ x: rnd() * CW, y: rnd() * CH, r: rnd() * 1.4 + 0.3, a: rnd() * 0.5 + 0.15 });
+     }
+   }
+ 
++  function empireOfSide(side: 0 | 1): number {
++    return side === 0 ? input.attacker : input.defender;
++  }
+   function colorOf(side: 0 | 1): number {
+-    const owner = side === 0 ? input.attacker : input.defender;
+-    return Number('0x' + ownerColor(owner).slice(1));
++    return cssToNum(ownerColor(empireOfSide(side)));
+   }
+ 
+-  function drawShip(x: number, y: number, size: number, angle: number, isBase: boolean, color: number, driveOut = false, hullIdx = 0): void {
+-    if (hullIdx === 6 && !isBase) {
+-      // doom star: a planet-sized sphere with a superlaser dish, not a dart
+-      gfx.circle(x, y, size * 1.5).fill({ color }).stroke({ color: 0x05070f, width: 1.5 });
+-      gfx.circle(x, y, size * 1.1).stroke({ color: 0x05070f, width: 0.8, alpha: 0.5 });
+-      const dx = Math.cos(angle) * size * 0.85;
+-      const dy = Math.sin(angle) * size * 0.85;
+-      gfx.circle(x + dx, y + dy, size * 0.45).fill({ color: 0x05070f, alpha: 0.75 });
+-      gfx.circle(x + dx, y + dy, size * 0.2).fill({ color: driveOut ? 0xff6b5e : 0xbfe6ff, alpha: 0.9 });
+-      return;
+-    }
+-    if (isBase) {
+-      // orbital platform: hex + core
+-      const r = size * 1.2;
+-      const pts: number[] = [];
+-      for (let i = 0; i < 6; i++) {
+-        const a = (Math.PI / 3) * i;
+-        pts.push(x + Math.cos(a) * r, y + Math.sin(a) * r);
+-      }
+-      gfx.poly(pts).fill({ color, alpha: 0.9 }).stroke({ color: 0x05070f, width: 1.5 });
+-      gfx.circle(x, y, r * 0.4).fill({ color: 0x05070f, alpha: 0.6 });
+-      return;
+-    }
+-    // hull: sleek dart rotated to the sim heading (sprites turn with the helm)
++  // ---- per-ship render info (model + sprite + fx hooks) ----
++  interface ShipView {
++    init: CombatShipInit;
++    model: ShipModel;
++    sprite: Sprite;
++    color: number;
++    flame: number;
++    /** shield bubble / explosion radius in screen px */
++    radius: number;
++    flameLen: number;
++    flameW: number;
++    lights: Mount[];
++    specials: Set<string>;
++    seed: number;
++  }
++  const views = new Map<number, ShipView>();
++
++  function buildView(init: CombatShipInit): ShipView {
++    const empireId = empireOfSide(init.side);
++    const npc = empireId < 0;
++    const style = init.style ?? shipStyleOf({ id: Math.max(0, empireId) });
++    const colorHex = ownerColor(empireId);
++    const cls = artClassOf(init);
++    const monster = MONSTER_KINDS.includes(cls);
++    const heavyBeams = init.weapons.some((w) => w.classId === 0 && w.mods.includes('hv'));
++    const missileTubes = init.weapons.filter((w) => w.classId === 1).reduce((n, w) => n + w.count, 0);
++    const model = monster
++      ? getMonsterModel(cls)
++      : getShipModel({ style, cls: cls as never, variant: init.modelIdx ?? 0, specials: init.specials, heavyBeams, missileTubes });
++    const pal = paletteFor(style, colorHex, npc);
++    const specialsKey = (init.specials ?? []).slice().sort().join(',');
++    const tex = textureForModel(`${monster ? 'npc' : style}|${cls}|${init.modelIdx ?? 0}|${colorHex}|${specialsKey}|${heavyBeams ? 1 : 0}|${Math.min(9, missileTubes)}`, model, pal);
++    const sprite = new Sprite(tex);
++    sprite.anchor.set(0.5);
++    sprite.scale.set(PIX);
++    sprite.visible = false;
++    shipC.addChild(sprite);
++    const tier = Math.min(6, Math.max(0, init.modelKind === 'scout' ? 0 : init.hullIdx));
++    const allLights = glowPixels(model);
++    const lights = allLights.filter((_, i) => i % Math.max(1, Math.ceil(allLights.length / 5)) === 0);
++    return {
++      init,
++      model,
++      sprite,
++      color: cssToNum(colorHex),
++      flame: cssToNum(flameColorFor(style, npc || monster)),
++      radius: (model.radius + 1.5) * PIX,
++      flameLen: (3.2 + tier * 1.5) * PIX,
++      flameW: (0.9 + tier * 0.22) * PIX,
++      lights,
++      specials: new Set(init.specials ?? []),
++      seed: init.shipId,
++    };
++  }
++
++  /** rotate a model-local mount into world space */
++  function mountWorld(v: ShipView, x: number, y: number, angle: number, m: Mount): [number, number] {
++    const lx = (m.x + 0.5 - v.model.w / 2) * PIX;
++    const ly = (m.y + 0.5 - v.model.h / 2) * PIX;
+     const ca = Math.cos(angle);
+     const sa = Math.sin(angle);
+-    const rot = (px: number, py: number): [number, number] => [x + px * ca - py * sa, y + px * sa + py * ca];
+-    const pts = [
+-      ...rot(size * 1.8, 0),
+-      ...rot(-size * 0.9, -size * 0.85),
+-      ...rot(-size * 0.45, 0),
+-      ...rot(-size * 0.9, size * 0.85),
++    return [x + lx * ca - ly * sa, y + lx * sa + ly * ca];
++  }
++
++  const toScreen = (fx: number, fy: number): [number, number] => [(fx / FP) * SCALE + PAD, (fy / FP) * SCALE + PAD];
++  const angleOfHeading = (h: number): number => (h * Math.PI * 2) / 32;
++  function lerpAngle(a: number, b: number, t: number): number {
++    let d = b - a;
++    while (d > Math.PI) d -= Math.PI * 2;
++    while (d < -Math.PI) d += Math.PI * 2;
++    return a + d * t;
++  }
++
++  type FrameShip = BattleTickFrame['ships'][number];
++  /** interpolated screen position + rotation of a ship at (fi, frac) */
++  function shipPose(fi: number, frac: number, s: FrameShip): { x: number; y: number; angle: number } {
++    const nf = frames[fi + 1];
++    const s2 = nf?.ships.find((n) => n.id === s.id);
++    const useNext = frac > 0 && s2 && s2.alive && !s2.retreated && !s2.crossed;
++    const fx = useNext ? s.x + (s2.x - s.x) * frac : s.x;
++    const fy = useNext ? s.y + (s2.y - s.y) * frac : s.y;
++    const [x, y] = toScreen(fx, fy);
++    const a0 = angleOfHeading(typeof s.h === 'number' ? s.h : 0);
++    const a1 = useNext && typeof s2.h === 'number' ? angleOfHeading(s2.h) : a0;
++    return { x, y, angle: useNext ? lerpAngle(a0, a1, frac) : a0 };
++  }
++
++  function drawBackdrop(): void {
++    bgG.clear();
++    bgG.rect(0, 0, CW, CH).fill({ color: 0x04060e });
++    // nebula washes
++    const blobs: Array<[number, number, number, number, number]> = [
++      [CW * 0.22, CH * 0.3, 170, 0x1b2450, 0.16],
++      [CW * 0.7, CH * 0.72, 210, 0x2a1b47, 0.13],
++      [CW * 0.55, CH * 0.18, 130, 0x0f2b3d, 0.14],
++      [CW * 0.85, CH * 0.35, 100, 0x321c33, 0.1],
+     ];
+-    gfx.poly(pts).fill({ color }).stroke({ color: 0x05070f, width: 1 });
+-    const [ex, ey] = rot(-size * 1.1, 0);
+-    // engine glow dims to a red sputter when the drive is knocked out
+-    gfx.circle(ex, ey, size * 0.28).fill({ color: driveOut ? 0xff6b5e : 0xffd18a, alpha: driveOut ? 0.5 : 0.85 });
++    for (const [bx, by, br, bc, ba] of blobs) {
++      for (let i = 3; i >= 1; i--) {
++        bgG.circle(bx, by, (br * i) / 3).fill({ color: bc, alpha: ba / i });
++      }
++    }
++    for (const st of stars) {
++      bgG.circle(st.x, st.y, st.r).fill({ color: 0xdde6ff, alpha: st.a });
++    }
++    // a few bright stars with cross flares
++    for (let i = 0; i < stars.length; i += 27) {
++      const st = stars[i]!;
++      bgG.moveTo(st.x - 3, st.y).lineTo(st.x + 3, st.y).stroke({ color: 0xdde6ff, width: 0.6, alpha: st.a * 0.7 });
++      bgG.moveTo(st.x, st.y - 3).lineTo(st.x, st.y + 3).stroke({ color: 0xdde6ff, width: 0.6, alpha: st.a * 0.7 });
++    }
++    // range band guides around the defender edge (dotted)
++    for (const [gx, ga] of [[PAD + W * 0.66, 0.5], [PAD + W * 0.33, 0.3]] as const) {
++      for (let y = 4; y < CH; y += 14) {
++        bgG.moveTo(gx, y).lineTo(gx, y + 6).stroke({ color: 0x1c2444, width: 1, alpha: ga });
++      }
++    }
+   }
+ 
+   function drawBystanders(fi: number): void {
+@@ -127,18 +229,18 @@
+     for (const b of bys) {
+       const i = idx[b.side]++;
+       const n = counts[b.side]!;
+-      const x = b.side === 0 ? 12 : W - 12;
+-      const y = (H * (i + 1)) / (n + 1);
++      const x = b.side === 0 ? 12 : CW - 12;
++      const y = (CH * (i + 1)) / (n + 1);
+       const dir = b.side === 0 ? 1 : -1;
+       const s = 7;
+       // hollow arrow: civilians sit out the fight at the field edge
+-      gfx
++      uiG
+         .poly([x + dir * s * 1.7, y, x - dir * s * 0.8, y - s * 0.8, x - dir * s * 0.4, y, x - dir * s * 0.8, y + s * 0.8])
+         .stroke({ color: colorOf(b.side), width: 1.5, alpha: 0.85 });
+       if (sideLost(b.side)) {
+         // escorts gone: these ships are lost with the field
+-        gfx.moveTo(x - 6, y - 6).lineTo(x + 6, y + 6).stroke({ color: 0xff6b5e, width: 2 });
+-        gfx.moveTo(x + 6, y - 6).lineTo(x - 6, y + 6).stroke({ color: 0xff6b5e, width: 2 });
++        uiG.moveTo(x - 6, y - 6).lineTo(x + 6, y + 6).stroke({ color: 0xff6b5e, width: 2 });
++        uiG.moveTo(x + 6, y - 6).lineTo(x - 6, y + 6).stroke({ color: 0xff6b5e, width: 2 });
+       }
+     }
+   }
+@@ -147,139 +249,282 @@
+    * slugs fly as dots; a full src→dst line never appears */
+   const BEAM_TRAVEL = 2;
+   const SLUG_TRAVEL = 3;
++  const FIZZLE_TICKS = 4;
+   function isSlug(weaponId: string): boolean {
+     return weaponId.includes('driver') || weaponId.includes('gauss');
+   }
+ 
+   function drawShots(fi: number, frac: number): void {
+-    const maxTravel = Math.max(BEAM_TRAVEL, SLUG_TRAVEL);
+-    for (let back = 0; back <= maxTravel; back++) {
++    const lookback = Math.max(BEAM_TRAVEL, SLUG_TRAVEL) + FIZZLE_TICKS + 4;
++    for (let back = 0; back <= lookback; back++) {
+       const sf = fi - back;
+       const pf = frames[sf];
+       if (!pf) continue;
+-      for (const shot of pf.shots) {
++      for (let si = 0; si < pf.shots.length; si++) {
++        const shot = pf.shots[si]!;
+         if (shot.classId !== 0) continue; // guided munitions render from frame.projectiles
++        const fromV = views.get(shot.from);
+         const from = pf.ships.find((x) => x.id === shot.from);
++        // point defense intercept: tracer burst to the downed projectile
++        if (shot.to === -1) {
++          if (typeof shot.ix !== 'number' || typeof shot.iy !== 'number' || !from || !fromV) continue;
++          const age = back + frac;
++          if (age > 3) continue;
++          const [tx, ty] = toScreen(shot.ix, shot.iy);
++          if (age < 1.2) {
++            const pose = shipPose(sf, 0, from);
++            const gm = fromV.model.guns[si % fromV.model.guns.length]!;
++            const [mx, my] = mountWorld(fromV, pose.x, pose.y, pose.angle, gm);
++            const dx = tx - mx;
++            const dy = ty - my;
++            for (let k = 0; k < 3; k++) {
++              const t0 = 0.2 + k * 0.25;
++              glowG.moveTo(mx + dx * t0, my + dy * t0).lineTo(mx + dx * (t0 + 0.12), my + dy * (t0 + 0.12)).stroke({ color: 0xffe9b0, width: 1.1, alpha: 0.8 - age * 0.5 });
++            }
++          }
++          if (shot.hit) drawPdPop(glowG, tx, ty, age / 3);
++          continue;
++        }
++        const toV = views.get(shot.to);
+         const to = shot.to >= 0 ? pf.ships.find((x) => x.id === shot.to) : null;
+-        if (!from || !to) continue;
++        if (!from || !to || !fromV || !toV) continue;
+         const travel = (isSlug(shot.weaponId) ? SLUG_TRAVEL : BEAM_TRAVEL) + (shot.kill ? 4 : 0);
+         const p = (back + frac) / travel;
+         const over = shot.hit ? 1 : 1.35; // misses streak past the target
+-        if (p > over) continue;
+-        const x0 = (from.x / FP) * SCALE;
+-        const y0 = (from.y / FP) * SCALE;
+-        const x1 = (to.x / FP) * SCALE;
+-        const y1 = (to.y / FP) * SCALE;
++        const fizzAge = ((back + frac) - travel) / FIZZLE_TICKS; // >0 once landed
++        if (p > over && fizzAge > 1) continue;
++        const fromPose = shipPose(sf, 0, from);
++        const toPose = shipPose(sf, 0, to);
++        // muzzle: pick a hardpoint per shot so volleys spread across the hull
++        const gm = fromV.model.guns[Math.floor(fxHash(shot.tick, shot.from * 31 + si, 5) * fromV.model.guns.length) % fromV.model.guns.length]!;
++        const [x0, y0] = mountWorld(fromV, fromPose.x, fromPose.y, fromPose.angle, gm);
++        // impact point: stop at the target's hull edge, jittered per shot
++        const ddx = toPose.x - x0;
++        const ddy = toPose.y - y0;
++        const dl = Math.hypot(ddx, ddy) || 1;
++        const edge = Math.max(0, dl - toV.radius * 0.55);
++        const jit = (fxHash(shot.tick, si, 9) - 0.5) * toV.radius * 0.8;
++        const x1 = x0 + (ddx / dl) * edge - (ddy / dl) * jit * (shot.hit ? 1 : 2.2);
++        const y1 = y0 + (ddy / dl) * edge + (ddx / dl) * jit * (shot.hit ? 1 : 2.2);
+         const lerp = (t: number) => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t] as const;
+-        if (isSlug(shot.weaponId)) {
+-          const [px, py] = lerp(Math.min(p, over));
+-          gfx.circle(px, py, 2.4).fill({ color: shot.hit ? 0xd8e2ff : 0x8b93b8, alpha: shot.hit ? 0.95 : 0.5 });
+-        } else if (shot.weaponId === 'starlight_projector') {
+-          // captured starlight: a blinding lance with a halo (it should be flashy)
+-          const head = Math.min(p, over);
+-          const tail = Math.max(0, head - 0.55);
+-          const [hx, hy] = lerp(head);
+-          const [tx, ty] = lerp(tail);
+-          gfx.moveTo(tx, ty).lineTo(hx, hy).stroke({ color: 0xfff7d6, alpha: 0.35, width: 7 });
+-          gfx.moveTo(tx, ty).lineTo(hx, hy).stroke({ color: 0xffffff, alpha: shot.hit ? 1 : 0.5, width: 2.6 });
+-          if (shot.hit) gfx.circle(hx, hy, 5).fill({ color: 0xffffff, alpha: 0.5 });
+-        } else {
+-          const head = Math.min(p, over);
+-          const tail = Math.max(0, head - 0.3);
+-          const [hx, hy] = lerp(head);
+-          const [tx, ty] = lerp(tail);
+-          const kill = shot.kill === true;
+-          const color = kill ? 0xff8d5e : shot.hit ? 0xffd75e : 0x59628c;
+-          gfx.moveTo(tx, ty).lineTo(hx, hy).stroke({ color, alpha: shot.hit ? 0.95 : 0.35, width: kill ? 3 : shot.hit ? 1.8 : 1 });
++        const style = beamStyleOf(shot.weaponId);
++        if (p <= over) {
++          if (isSlug(shot.weaponId)) {
++            const [px, py] = lerp(Math.min(p, over));
++            drawSlug(glowG, px, py, (x1 - x0) / dl, (y1 - y0) / dl, shot.hit);
++          } else {
++            const head = Math.min(p, over);
++            const tail = Math.max(0, head - (style.kind === 'lance' ? 0.55 : 0.34));
++            const [hx, hy] = lerp(head);
++            const [tx2, ty2] = lerp(tail);
++            drawBeam(glowG, tx2, ty2, hx, hy, style, shot.hit ? 1 : 0.4, shot.kill === true, shot.tick + back, shot.from * 37 + si);
++            if (back === 0 && frac < 0.6) drawMuzzle(glowG, x0, y0, style.color, 1.6 + style.width * 0.4);
++          }
+         }
+-        if (shot.hit && p >= 0.92 && p <= 1.08 && shot.dmg > 0) {
+-          gfx.circle(x1, y1, 3 + Math.min(6, shot.dmg / 6)).fill({ color: shot.kill ? 0xff7d4e : 0xffb066, alpha: shot.kill ? 0.85 : 0.55 });
++        // arrival: shield fizzle for soaked damage, hull sparks for the rest
++        if (shot.hit && fizzAge >= -0.1 && fizzAge <= 1) {
++          const age01 = Math.max(0, fizzAge);
++          const nowShip = frames[fi]!.ships.find((x) => x.id === shot.to);
++          const nowPose = nowShip && nowShip.alive ? shipPose(fi, frac, nowShip) : toPose;
++          const soaked = shot.sh ?? 0;
++          if (soaked > 0) {
++            const bearing = Math.atan2(y0 - nowPose.y, x0 - nowPose.x);
++            drawShieldHit(glowG, nowPose.x, nowPose.y, toV.radius, bearing, age01, Math.min(1, soaked / 22), 0x6fc0ff, shot.from * 41 + si, shot.tick);
++          }
++          if (shot.dmg > soaked && age01 < 0.6) {
++            drawImpact(glowG, x1, y1, style.color, 2 + Math.min(6, (shot.dmg - soaked) / 6), shot.kill === true, shot.tick, shot.to * 13 + si);
++          }
+         }
+       }
+     }
+   }
+ 
++  function drawProjectiles(fi: number, frac: number): void {
++    const f = frames[fi]!;
++    const nf = frames[fi + 1];
++    for (const pr of f.projectiles ?? []) {
++      const nx = nf?.projectiles?.find((q) => q.id === pr.id);
++      const fx0 = nx && frac > 0 ? pr.x + (nx.x - pr.x) * frac : pr.x;
++      const fy0 = nx && frac > 0 ? pr.y + (nx.y - pr.y) * frac : pr.y;
++      const [x, y] = toScreen(fx0, fy0);
++      // course from motion (next frame, else previous frame, else owner side)
++      let angle: number;
++      const prev = frames[fi - 1]?.projectiles?.find((q) => q.id === pr.id);
++      if (nx) angle = Math.atan2(nx.y - pr.y, nx.x - pr.x);
++      else if (prev) angle = Math.atan2(pr.y - prev.y, pr.x - prev.x);
++      else {
++        const owner = input.ships.find((s) => s.shipId === pr.from);
++        angle = owner?.side === 1 ? Math.PI : 0;
++      }
++      const ownerSide = input.ships.find((s) => s.shipId === pr.from)?.side ?? 0;
++      const sideColor = colorOf(ownerSide as 0 | 1);
++      // trail from recent frames
++      const trail: Array<[number, number]> = [[x, y]];
++      for (let k = 1; k <= 5; k++) {
++        const old = frames[fi - k]?.projectiles?.find((q) => q.id === pr.id);
++        if (!old) break;
++        trail.push(toScreen(old.x, old.y));
++      }
++      trail.reverse();
++      const id = pr.id ?? 0;
++      if (pr.classId === 4) {
++        drawFighter(fxG, glowG, x, y, angle, sideColor, pr.w === 'assault_shuttle');
++        continue;
++      }
++      if (pr.classId === 1) {
++        const tint = MISSILE_TINT[pr.w] ?? 0xffb066;
++        drawTrail(glowG, trail, tint, 2);
++        drawMissile(fxG, glowG, x, y, angle, tint, sideColor, f.tick, id);
++      } else {
++        const tint = TORPEDO_TINT[pr.w] ?? 0xd07aff;
++        drawTrail(glowG, trail, tint, 3);
++        drawTorpedo(glowG, x, y, tint, f.tick, frac, id);
++      }
++    }
++  }
++
++  function drawDeaths(fi: number, frac: number): void {
++    for (let back = 0; back < 42; back++) {
++      const pf = frames[fi - back];
++      if (!pf) break;
++      for (const dead of pf.deaths) {
++        const s = pf.ships.find((x) => x.id === dead);
++        const v = views.get(dead);
++        if (!s || !v) continue;
++        const [x, y] = toScreen(s.x, s.y);
++        drawExplosion(fxG, glowG, x, y, v.radius * 0.85, back, frac, dead * 7 + 3);
++      }
++    }
++  }
++
++  function drawTransitions(fi: number, frac: number): void {
++    // retreat / cross-line: warp-out streaks at the exit point
++    for (let back = 0; back <= 5; back++) {
++      const pf = frames[fi - back];
++      const before = frames[fi - back - 1];
++      if (!pf || !before) break;
++      for (const s of pf.ships) {
++        const b = before.ships.find((x) => x.id === s.id);
++        if (!b || !s.alive) continue;
++        const gone = (s.retreated && !b.retreated) || (s.crossed && !b.crossed);
++        if (!gone) continue;
++        const v = views.get(s.id);
++        if (!v) continue;
++        const [x, y] = toScreen(b.x, b.y);
++        const angle = angleOfHeading(typeof b.h === 'number' ? b.h : 0);
++        drawWarpStreak(glowG, x, y, angle, (back + frac) / 5, v.color);
++      }
++    }
++  }
++
+   function drawFrame(fi: number, frac = 0): void {
+     const f = frames[fi];
+     if (!f) return;
+-    gfx.clear();
+-    gfx.rect(0, 0, W, H).fill({ color: 0x05070f });
+-    for (const st of stars) {
+-      gfx.circle(st.x, st.y, st.r).fill({ color: 0xdde6ff, alpha: st.a });
++    fxG.clear();
++    glowG.clear();
++    uiG.clear();
++
++    // twinkle a sparse subset of stars
++    for (let i = 0; i < stars.length; i += 9) {
++      const st = stars[i]!;
++      const tw = 0.5 + 0.5 * Math.sin((f.tick + frac) * 0.35 + i);
++      glowG.circle(st.x, st.y, st.r * 0.9).fill({ color: 0xdde6ff, alpha: st.a * tw * 0.5 });
+     }
+-    // range band guides around the defender edge
+-    gfx.moveTo(W * 0.66, 0).lineTo(W * 0.66, H).stroke({ color: 0x1c2444, width: 1 });
+-    gfx.moveTo(W * 0.33, 0).lineTo(W * 0.33, H).stroke({ color: 0x141a33, width: 1 });
+-
+-    for (const shipInit of input.ships) {
+-      const s = f.ships.find((x) => x.id === shipInit.shipId);
+-      if (!s || !s.alive || s.retreated || s.crossed) continue;
+-      const x = (s.x / FP) * SCALE;
+-      const y = (s.y / FP) * SCALE;
+-      const size = 4 + shipInit.hullIdx * 2.1;
+-      const color = colorOf(shipInit.side);
+-      // sim heading (0..31) -> sprite rotation; older replays fall back to side
+-      const angle = typeof s.h === 'number' ? (s.h * Math.PI * 2) / 32 : shipInit.side === 0 ? 0 : Math.PI;
++
++    const pf = frames[fi - 1];
++    for (const initShip of input.ships) {
++      const v = views.get(initShip.shipId);
++      if (!v) continue;
++      const s = f.ships.find((x) => x.id === initShip.shipId);
++      if (!s || !s.alive || s.retreated || s.crossed) {
++        v.sprite.visible = false;
++        continue;
++      }
++      const pose = shipPose(fi, frac, s);
++      v.sprite.visible = true;
++      v.sprite.position.set(pose.x, pose.y);
++      v.sprite.rotation = pose.angle;
+       const sys = s.sys ?? '';
+-      drawShip(x, y, size, angle, shipInit.isBase, color, sys.includes('d'), shipInit.hullIdx);
+-      // hp bar
+-      gfx.rect(x - size, y + size + 4, size * 2, 2.5).fill({ color: 0x2a3352 });
+-      const hpColor = s.structPct > 60 ? 0x5ee08a : s.structPct > 30 ? 0xffd75e : 0xff6b5e;
+-      gfx.rect(x - size, y + size + 4, (size * 2 * s.structPct) / 100, 2.5).fill({ color: hpColor });
++
++      // engine flames scale with actual motion this tick
++      if (v.model.engines.length) {
++        const ps = pf?.ships.find((x) => x.id === s.id);
++        const moved = ps ? Math.hypot(s.x - ps.x, s.y - ps.y) / FP : 0;
++        const driveOut = sys.includes('d');
++        const throttle = Math.min(1.25, 0.3 + moved * 0.22);
++        for (let ei = 0; ei < v.model.engines.length; ei++) {
++          const [ex, ey] = mountWorld(v, pose.x, pose.y, pose.angle, v.model.engines[ei]!);
++          drawFlame(glowG, ex, ey, pose.angle, v.flameLen * throttle, v.flameW, v.flame, f.tick, frac, v.seed * 5 + ei, driveOut);
++        }
++      } else if (v.lights.length) {
++        // engineless hulls (stations, beasts): blinking running lights
++        for (let li = 0; li < v.lights.length; li++) {
++          if (fxHash(f.tick >> 2, v.seed, li) < 0.45) continue;
++          const [lx, ly] = mountWorld(v, pose.x, pose.y, pose.angle, v.lights[li]!);
++          glowG.circle(lx, ly, 1.3).fill({ color: 0xdfefff, alpha: 0.5 });
++        }
++      }
++
++      // shields: standing bubble + collapse flash when it fails
+       if (s.shieldPct > 0 && !sys.includes('s')) {
+-        gfx.circle(x, y, size + 4).stroke({ color: 0x4da3ff, alpha: 0.2 + s.shieldPct / 350, width: 1.5 });
++        drawShieldBubble(glowG, pose.x, pose.y, v.radius, s.shieldPct, f.tick, frac);
++      } else if (v.init.shieldPool > 0) {
++        for (let back = 0; back <= 3; back++) {
++          const a = frames[fi - back]?.ships.find((x) => x.id === s.id);
++          const b = frames[fi - back - 1]?.ships.find((x) => x.id === s.id);
++          if (a && b && (a.shieldPct === 0 || a.sys.includes('s')) && b.shieldPct > 0 && !b.sys.includes('s')) {
++            drawShieldCollapse(glowG, pose.x, pose.y, v.radius, (back + frac) / 4);
++            break;
++          }
++        }
++      }
++
++      // specials with a visible field presence
++      if (v.specials.has('lightning_field')) drawLightningAura(glowG, pose.x, pose.y, v.radius + 2, f.tick, v.seed);
++      if (v.specials.has('automated_repair_unit') && s.structPct < 100) drawRepairDrones(glowG, pose.x, pose.y, v.radius + 3, f.tick, frac, v.seed);
++      if (v.specials.has('warp_dissipater')) drawDissipaterWake(glowG, pose.x, pose.y, pose.angle, v.radius, f.tick, frac);
++
++      drawDamageSmoke(fxG, glowG, pose.x, pose.y, v.radius, s.structPct, f.tick, v.seed);
++
++      // status bars: hull + shield ribbon
++      const bw = Math.max(14, v.radius * 1.5);
++      const bx = pose.x - bw / 2;
++      const by = pose.y + v.radius + 4;
++      uiG.rect(bx, by, bw, 2.4).fill({ color: 0x232c49 });
++      const hpColor = s.structPct > 60 ? 0x5ee08a : s.structPct > 30 ? 0xffd75e : 0xff6b5e;
++      uiG.rect(bx, by, (bw * s.structPct) / 100, 2.4).fill({ color: hpColor });
++      if (v.init.shieldPool > 0) {
++        uiG.rect(bx, by - 2, (bw * s.shieldPct) / 100, 1.3).fill({ color: 0x4da3ff, alpha: sys.includes('s') ? 0.25 : 0.9 });
+       }
+       if (sys) {
+         // knocked-out systems flag: d(rive) c(omputer) s(hields)
+-        gfx.circle(x + size, y - size - 3, 2.2).fill({ color: 0xff6b5e, alpha: 0.9 });
++        uiG.circle(pose.x + v.radius * 0.8, pose.y - v.radius * 0.8, 2.2).fill({ color: 0xff6b5e, alpha: 0.9 });
+       }
+     }
+ 
+-    // guided munitions in flight (from the sim itself); classId 4 = strike craft
+-    for (const pr of f.projectiles ?? []) {
+-      const x = (pr.x / FP) * SCALE;
+-      const y = (pr.y / FP) * SCALE;
+-      if (pr.classId === 4) {
+-        // fighters / assault shuttles: tiny wedges
+-        gfx.poly([x + 3, y, x - 2.2, y - 2, x - 2.2, y + 2]).fill({ color: 0x9fe8a8, alpha: 0.95 });
+-        continue;
+-      }
+-      const color = pr.classId === 1 ? 0xff8a5e : 0xd07aff;
+-      gfx.circle(x, y, pr.classId === 1 ? 2.2 : 3).fill({ color, alpha: 0.95 });
+-      gfx.circle(x, y, pr.classId === 1 ? 4.5 : 6).fill({ color, alpha: 0.18 });
+-    }
+-
++    drawProjectiles(fi, frac);
+     drawShots(fi, frac);
++    drawTransitions(fi, frac);
++    drawDeaths(fi, frac);
+     drawBystanders(fi);
+-
+-    // deaths as expanding blast rings — big, bright and long-lived, so a kill
+-    // is unmissable even when scrubbing the timeline
+-    for (let back = 0; back < 14; back++) {
+-      const pf = frames[fi - back];
+-      if (!pf) break;
+-      for (const dead of pf.deaths) {
+-        const s = pf.ships.find((x) => x.id === dead);
+-        if (!s) continue;
+-        const x = (s.x / FP) * SCALE;
+-        const y = (s.y / FP) * SCALE;
+-        const age = back;
+-        gfx.circle(x, y, 5 + age * 5).stroke({ color: 0xff6b5e, width: Math.max(1.2, 5 - age * 0.35), alpha: Math.max(0, 0.95 - age * 0.07) });
+-        gfx.circle(x, y, 2 + age * 3).stroke({ color: 0xffd75e, width: Math.max(0.8, 3 - age * 0.3), alpha: Math.max(0, 0.8 - age * 0.08) });
+-        if (age < 5) gfx.circle(x, y, 4 + age * 2).fill({ color: 0xffd18a, alpha: 0.8 - age * 0.15 });
+-        if (age < 2) gfx.circle(x, y, 9).fill({ color: 0xffffff, alpha: 0.5 - age * 0.25 });
+-      }
+-    }
+   }
+ 
+   onMount(async () => {
+     computeFrames();
+     pixi = new Application();
+-    await pixi.init({ width: W, height: H, background: 0x05070f, antialias: true });
++    await pixi.init({ width: CW, height: CH, background: 0x04060e, antialias: true });
+     host.appendChild(pixi.canvas);
+     const stage = new Container();
+     pixi.stage.addChild(stage);
+-    gfx = new Graphics();
+-    stage.addChild(gfx);
++    bgG = new Graphics();
++    shipC = new Container();
++    fxG = new Graphics();
++    glowG = new Graphics();
++    glowG.blendMode = 'add';
++    uiG = new Graphics();
++    stage.addChild(bgG, shipC, fxG, glowG, uiG);
++    drawBackdrop();
++    for (const s of input.ships) views.set(s.shipId, buildView(s));
+     ready = true;
+     if (frames.length) drawFrame(0);
+     pixi.ticker.add((t) => {
+@@ -293,7 +538,7 @@
+         }
+         if (frameIdx >= frames.length - 1) playing = false;
+       }
+-      // sub-tick fraction keeps beam pulses and slugs gliding between ticks
++      // sub-tick fraction keeps motion, beams and plumes gliding between ticks
+       const frac = playing ? Math.min(0.999, elapsed / msPerTick) : 0;
+       drawFrame(Math.min(frameIdx, frames.length - 1), frac);
+     });
+@@ -302,6 +547,7 @@
+   onDestroy(() => {
+     pixi?.destroy(true, { children: true });
+     pixi = null;
++    views.clear();
+   });
+ 
+   function skip() {
+diff --git a/src/ui/battle/ShipPreview.svelte b/src/ui/battle/ShipPreview.svelte
+new file mode 100644
+index 0000000..1fdd2d9
+--- /dev/null
++++ b/src/ui/battle/ShipPreview.svelte
+@@ -0,0 +1,56 @@
++<script lang="ts">
++  // Small DOM preview of a procedural pixel ship (no pixi): used by the
++  // Designer's fleet-style picker / model selector and the Battle Lab.
++  import { getShipModel, variantsFor, wrapVariant, type ArtClass } from './shipart';
++  import { paletteFor, renderModelToCanvas } from './shiptex';
++
++  const {
++    style,
++    cls,
++    variant = 0,
++    color = '#4da3ff',
++    specials = [],
++    heavyBeams = false,
++    missileTubes = 0,
++    px = 3,
++    title = '',
++  }: {
++    style: string;
++    cls: ArtClass;
++    variant?: number;
++    color?: string;
++    specials?: string[];
++    heavyBeams?: boolean;
++    missileTubes?: number;
++    px?: number;
++    title?: string;
++  } = $props();
++
++  let host: HTMLSpanElement | undefined = $state();
++
++  $effect(() => {
++    if (!host) return;
++    const model = getShipModel({
++      style,
++      cls,
++      variant: wrapVariant(cls, variant),
++      specials: [...specials],
++      heavyBeams,
++      missileTubes,
++    });
++    const canvas = renderModelToCanvas(model, paletteFor(style, color), px);
++    canvas.style.imageRendering = 'pixelated';
++    canvas.title = title || `${style} ${cls} — model ${wrapVariant(cls, variant) + 1}/${variantsFor(cls)}`;
++    host.replaceChildren(canvas);
++  });
++</script>
++
++<span class="preview" bind:this={host}></span>
++
++<style>
++  .preview {
++    display: inline-flex;
++    align-items: center;
++    justify-content: center;
++  }
++</style>
+diff --git a/src/ui/battle/effects.ts b/src/ui/battle/effects.ts
+new file mode 100644
+index 0000000..cc91895
+--- /dev/null
++++ b/src/ui/battle/effects.ts
+@@ -0,0 +1,467 @@
++// Battle VFX toolbox: pure draw helpers for the replay viewer. Everything is
++// deterministic in (tick, seed) so scrubbing the timeline re-renders the exact
++// same frame. Callers pass two layers: `fx` (normal blend: smoke, debris) and
++// `glow` (additive blend: beams, flames, shields, fire) — the additive layer
++// is what makes energy weapons actually *glow* over dark space.
++
++import type { Graphics } from 'pixi.js';
++
++// ---- deterministic hash noise ----
++export function fxHash(a: number, b = 0, c = 0): number {
++  let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0;
++  h = Math.imul(h ^ (h >>> 13), 1274126177);
++  h ^= h >>> 16;
++  return (h >>> 0) / 4294967296;
++}
++
++// ---- weapon beam styling ----
++export interface BeamStyle {
++  color: number;
++  kind: 'line' | 'jag' | 'pulse' | 'lance';
++  width: number;
++}
++
++const BEAM_FX: Record<string, BeamStyle> = {
++  laser_cannon: { color: 0xff5a4d, kind: 'line', width: 1.7 },
++  fusion_beam: { color: 0xffb14d, kind: 'line', width: 2.3 },
++  particle_beam: { color: 0xcfe8ff, kind: 'line', width: 2.0 },
++  ion_pulse_cannon: { color: 0x7db8ff, kind: 'pulse', width: 2.2 },
++  graviton_beam: { color: 0xb98cff, kind: 'line', width: 2.5 },
++  neutron_blaster: { color: 0x7dffc8, kind: 'line', width: 2.1 },
++  phasor: { color: 0xff4da8, kind: 'line', width: 2.4 },
++  disrupter: { color: 0x9dff5e, kind: 'jag', width: 2.0 },
++  plasma_cannon: { color: 0xbaff5e, kind: 'line', width: 2.9 },
++  mauler_device: { color: 0xff3d2e, kind: 'line', width: 3.8 },
++  stellar_converter: { color: 0xffffff, kind: 'lance', width: 4.2 },
++  starlight_projector: { color: 0xfff7d6, kind: 'lance', width: 3.0 },
++  spatial_compressor: { color: 0xd0a2ff, kind: 'jag', width: 2.4 },
++  tractor_beam: { color: 0x7de8ff, kind: 'pulse', width: 2.0 },
++  stasis_field: { color: 0x7de8ff, kind: 'pulse', width: 2.4 },
++  pulsar: { color: 0xcfe8ff, kind: 'jag', width: 2.6 },
++  plasma_web: { color: 0x9dff5e, kind: 'jag', width: 2.2 },
++  gyro_destabilizer: { color: 0xd0a2ff, kind: 'pulse', width: 2.2 },
++  black_hole_generator: { color: 0x8a7dff, kind: 'jag', width: 3.0 },
++  anti_missile_rocket: { color: 0xffe9b0, kind: 'line', width: 1.2 },
++  // monster breath weapons
++  dragon_breath: { color: 0xff8a3d, kind: 'jag', width: 3.2 },
++  phasor_eye: { color: 0xff4da8, kind: 'line', width: 3.0 },
++  crystal_ray: { color: 0xeaffff, kind: 'lance', width: 2.6 },
++  plasma_breath: { color: 0x9dff5e, kind: 'jag', width: 3.0 },
++  plasma_flux: { color: 0x9dff5e, kind: 'line', width: 2.4 },
++  caustic_slime: { color: 0xd6ff5e, kind: 'line', width: 3.0 },
++};
++
++const FALLBACK_BEAMS = [0xffd75e, 0x7db8ff, 0xff8a5e, 0x9dff5e, 0xd07aff];
++
++export function beamStyleOf(weaponId: string): BeamStyle {
++  const hit = BEAM_FX[weaponId];
++  if (hit) return hit;
++  let h = 0;
++  for (let i = 0; i < weaponId.length; i++) h = (h * 31 + weaponId.charCodeAt(i)) | 0;
++  return { color: FALLBACK_BEAMS[Math.abs(h) % FALLBACK_BEAMS.length]!, kind: 'line', width: 2 };
++}
++
++/** guided munition tints (exhaust / plasma color) */
++export const MISSILE_TINT: Record<string, number> = {
++  nuclear_missile: 0xffb066,
++  merculite_missile: 0xffe066,
++  pulson_missile: 0x7db8ff,
++  zeon_missile: 0xd07aff,
++};
++
++export const TORPEDO_TINT: Record<string, number> = {
++  anti_matter_torpedo: 0xd07aff,
++  proton_torpedo: 0x7db8ff,
++  plasma_torpedo: 0x9dff5e,
++};
++
++// ---- beams ----
++
++/** layered glowing beam segment from (x0,y0) to (x1,y1) */
++export function drawBeam(
++  glow: Graphics,
++  x0: number,
++  y0: number,
++  x1: number,
++  y1: number,
++  style: BeamStyle,
++  alpha: number,
++  kill: boolean,
++  tick: number,
++  seed: number,
++): void {
++  const w = style.width * (kill ? 1.5 : 1);
++  if (style.kind === 'jag') {
++    // crackling arc: jittered polyline, rebuilt every tick
++    const dx = x1 - x0;
++    const dy = y1 - y0;
++    const len = Math.hypot(dx, dy) || 1;
++    const nx = -dy / len;
++    const ny = dx / len;
++    const segs = Math.max(3, Math.min(9, Math.round(len / 22)));
++    const pts: Array<[number, number]> = [[x0, y0]];
++    for (let i = 1; i < segs; i++) {
++      const t = i / segs;
++      const off = (fxHash(seed, tick, i) - 0.5) * Math.min(14, len * 0.12);
++      pts.push([x0 + dx * t + nx * off, y0 + dy * t + ny * off]);
++    }
++    pts.push([x1, y1]);
++    for (const [lw, la] of [[w * 3, 0.14], [w * 1.4, 0.5], [w * 0.6, 1]] as const) {
++      glow.moveTo(pts[0]![0], pts[0]![1]);
++      for (let i = 1; i < pts.length; i++) glow.lineTo(pts[i]![0], pts[i]![1]);
++      glow.stroke({ color: lw < w ? 0xffffff : style.color, width: lw, alpha: la * alpha, cap: 'round', join: 'round' });
++    }
++    return;
++  }
++  if (style.kind === 'pulse') {
++    // bolt train marching along the path
++    const dx = x1 - x0;
++    const dy = y1 - y0;
++    const len = Math.hypot(dx, dy) || 1;
++    const ux = dx / len;
++    const uy = dy / len;
++    const gap = 16;
++    const phase = ((tick * 6 + seed % 7) % gap);
++    for (let d = phase; d < len; d += gap) {
++      const bx = x0 + ux * d;
++      const by = y0 + uy * d;
++      glow.circle(bx, by, w * 1.9).fill({ color: style.color, alpha: 0.18 * alpha });
++      glow.moveTo(bx - ux * 4, by - uy * 4).lineTo(bx + ux * 4, by + uy * 4).stroke({ color: style.color, width: w, alpha: 0.85 * alpha, cap: 'round' });
++      glow.circle(bx + ux * 3, by + uy * 3, w * 0.5).fill({ color: 0xffffff, alpha: 0.9 * alpha });
++    }
++    return;
++  }
++  // line / lance: wide halo, colored core, white-hot center
++  const layers: Array<[number, number, number]> =
++    style.kind === 'lance'
++      ? [[w * 3.4, 0.16, style.color], [w * 1.7, 0.4, style.color], [w * 0.8, 1, 0xffffff]]
++      : [[w * 2.8, 0.13, style.color], [w * 1.2, 0.55, style.color], [w * 0.45, 0.95, 0xffffff]];
++  for (const [lw, la, lc] of layers) {
++    glow.moveTo(x0, y0).lineTo(x1, y1).stroke({ color: lc, width: lw, alpha: la * alpha, cap: 'round' });
++  }
++}
++
++export function drawMuzzle(glow: Graphics, x: number, y: number, color: number, s: number): void {
++  glow.circle(x, y, s * 2.4).fill({ color, alpha: 0.22 });
++  glow.circle(x, y, s).fill({ color: 0xffffff, alpha: 0.75 });
++}
++
++export function drawImpact(glow: Graphics, x: number, y: number, color: number, mag: number, kill: boolean, tick: number, seed: number): void {
++  glow.circle(x, y, mag * 1.9).fill({ color, alpha: 0.28 });
++  glow.circle(x, y, mag * 0.9).fill({ color: 0xffffff, alpha: 0.6 });
++  const sparks = kill ? 7 : 4;
++  for (let i = 0; i < sparks; i++) {
++    const a = fxHash(seed, i, 11) * Math.PI * 2;
++    const d = mag * (1.2 + fxHash(seed, i, 12) * 1.6);
++    glow.moveTo(x, y).lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d).stroke({ color, width: 1, alpha: 0.6 });
++  }
++}
++
++// ---- slugs / tracers ----
++export function drawSlug(glow: Graphics, x: number, y: number, ux: number, uy: number, hit: boolean): void {
++  glow.moveTo(x - ux * 6, y - uy * 6).lineTo(x, y).stroke({ color: 0x9fb4ff, width: 1.6, alpha: hit ? 0.5 : 0.25, cap: 'round' });
++  glow.circle(x, y, 1.7).fill({ color: hit ? 0xe8efff : 0x8b93b8, alpha: hit ? 1 : 0.55 });
++}
++
++// ---- guided munitions ----
++
++/** a proper little missile: finned body + warhead + exhaust, rotated to course */
++export function drawMissile(
++  fx: Graphics,
++  glow: Graphics,
++  x: number,
++  y: number,
++  angle: number,
++  tint: number,
++  accent: number,
++  tick: number,
++  id: number,
++): void {
++  const ca = Math.cos(angle);
++  const sa = Math.sin(angle);
++  const P = (px: number, py: number): [number, number] => [x + px * ca - py * sa, y + px * sa + py * ca];
++  const body: Array<[number, number]> = [P(4.2, 0), P(2.2, -1.3), P(-3.4, -1.3), P(-3.4, 1.3), P(2.2, 1.3)];
++  fx.poly(body.flat()).fill({ color: 0xb9c2d8 });
++  fx.poly([...P(4.2, 0), ...P(2.2, -1.3), ...P(2.2, 1.3)]).fill({ color: accent });
++  // tail fins
++  fx.poly([...P(-3.4, -1.3), ...P(-4.6, -2.4), ...P(-2.6, -1.3)]).fill({ color: 0x8b93b8 });
++  fx.poly([...P(-3.4, 1.3), ...P(-4.6, 2.4), ...P(-2.6, 1.3)]).fill({ color: 0x8b93b8 });
++  // exhaust: flickering plume
++  const f = 0.75 + fxHash(tick, id, 3) * 0.5;
++  const [ex, ey] = P(-4.2, 0);
++  const [tx, ty] = P(-4.2 - 6.5 * f, 0);
++  glow.moveTo(ex, ey).lineTo(tx, ty).stroke({ color: tint, width: 2.4, alpha: 0.55, cap: 'round' });
++  glow.circle(ex, ey, 1.6).fill({ color: 0xffffff, alpha: 0.9 });
++}
++
++/** plasma/AM torpedo: pulsing energy orb with crackle */
++export function drawTorpedo(glow: Graphics, x: number, y: number, tint: number, tick: number, frac: number, id: number): void {
++  const pulse = 0.85 + 0.3 * Math.sin((tick + frac) * 1.1 + id * 2.4);
++  glow.circle(x, y, 6.5 * pulse).fill({ color: tint, alpha: 0.16 });
++  glow.circle(x, y, 3.6 * pulse).fill({ color: tint, alpha: 0.5 });
++  glow.circle(x, y, 1.8).fill({ color: 0xffffff, alpha: 0.95 });
++  for (let i = 0; i < 3; i++) {
++    const a = fxHash(tick, id, i) * Math.PI * 2;
++    const r = 4.5 * pulse;
++    glow.moveTo(x + Math.cos(a) * r * 0.4, y + Math.sin(a) * r * 0.4)
++      .lineTo(x + Math.cos(a + 0.6) * r, y + Math.sin(a + 0.6) * r)
++      .stroke({ color: tint, width: 1, alpha: 0.65 });
++  }
++}
++
++/** strike craft: a tiny wedge fighter with an engine spark */
++export function drawFighter(fx: Graphics, glow: Graphics, x: number, y: number, angle: number, color: number, shuttle: boolean): void {
++  const ca = Math.cos(angle);
++  const sa = Math.sin(angle);
++  const P = (px: number, py: number): [number, number] => [x + px * ca - py * sa, y + px * sa + py * ca];
++  if (shuttle) {
++    fx.poly([...P(3, 0), ...P(1, -2), ...P(-3, -2), ...P(-3, 2), ...P(1, 2)]).fill({ color, alpha: 0.95 });
++  } else {
++    fx.poly([...P(3.6, 0), ...P(-2.6, -2.2), ...P(-1.2, 0), ...P(-2.6, 2.2)]).fill({ color, alpha: 0.95 });
++  }
++  const [ex, ey] = P(-2.6, 0);
++  glow.circle(ex, ey, 1.1).fill({ color: 0xffffff, alpha: 0.8 });
++}
++
++/** fading trail behind a projectile */
++export function drawTrail(glow: Graphics, pts: Array<[number, number]>, color: number, width: number): void {
++  for (let i = 1; i < pts.length; i++) {
++    const a = (i / pts.length) * 0.4;
++    glow.moveTo(pts[i - 1]![0], pts[i - 1]![1]).lineTo(pts[i]![0], pts[i]![1]).stroke({ color, width: width * (i / pts.length), alpha: a, cap: 'round' });
++  }
++}
++
++// ---- engine flames ----
++export function drawFlame(
++  glow: Graphics,
++  x: number,
++  y: number,
++  angle: number, // ship heading; flame streams opposite
++  len: number,
++  width: number,
++  color: number,
++  tick: number,
++  frac: number,
++  seed: number,
++  sputter: boolean,
++): void {
++  const back = angle + Math.PI;
++  const ca = Math.cos(back);
++  const sa = Math.sin(back);
++  if (sputter) {
++    // knocked-out drive: intermittent red backfires
++    if (fxHash(tick, seed, 77) < 0.45) {
++      const d = 2 + fxHash(tick, seed, 78) * 3;
++      glow.circle(x + ca * d, y + sa * d, 1.6).fill({ color: 0xff6b5e, alpha: 0.7 });
++    }
++    return;
++  }
++  const flick = 0.8 + 0.4 * fxHash(tick, seed, Math.floor(frac * 3));
++  const L = len * flick;
++  const nx = -sa;
++  const ny = ca;
++  const tip: [number, number] = [x + ca * L, y + sa * L];
++  const w = width;
++  // outer plume, inner tongue, white-hot core
++  glow.poly([x + nx * w, y + ny * w, tip[0] + ca * 1, tip[1] + sa * 1, x - nx * w, y - ny * w]).fill({ color, alpha: 0.26 });
++  glow.poly([x + nx * w * 0.55, y + ny * w * 0.55, x + ca * L * 0.66, y + sa * L * 0.66, x - nx * w * 0.55, y - ny * w * 0.55]).fill({ color, alpha: 0.5 });
++  glow.circle(x + ca * 1.2, y + sa * 1.2, w * 0.65).fill({ color: 0xffffff, alpha: 0.85 });
++}
++
++// ---- shields ----
++
++/** faint standing bubble (alpha scales with remaining shield) */
++export function drawShieldBubble(glow: Graphics, x: number, y: number, r: number, pct: number, tick: number, frac: number): void {
++  const breathe = 1 + 0.02 * Math.sin((tick + frac) * 0.6);
++  glow.circle(x, y, r * breathe).stroke({ color: 0x4da3ff, width: 1.2, alpha: 0.05 + (pct / 100) * 0.16 });
++}
++
++/** impact fizzle: bright arc facing the hit + crackling sparks, decays over ~4 ticks */
++export function drawShieldHit(
++  glow: Graphics,
++  x: number,
++  y: number,
++  r: number,
++  bearing: number,
++  age: number, // 0..1 progress of the fizzle
++  mag: number, // absorbed damage scale 0..1
++  color: number,
++  seed: number,
++  tick: number,
++): void {
++  const fade = Math.max(0, 1 - age);
++  const spread = 0.7 + mag * 0.7 + age * 0.5;
++  // moveTo the arc start first: pixi otherwise pens a line in from the origin
++  glow.moveTo(x + Math.cos(bearing - spread) * r, y + Math.sin(bearing - spread) * r)
++    .arc(x, y, r, bearing - spread, bearing + spread)
++    .stroke({ color, width: 2.6 * fade + 0.6, alpha: 0.75 * fade });
++  glow.moveTo(x + Math.cos(bearing - spread * 0.7) * (r + 1.5), y + Math.sin(bearing - spread * 0.7) * (r + 1.5))
++    .arc(x, y, r + 1.5, bearing - spread * 0.7, bearing + spread * 0.7)
++    .stroke({ color: 0xffffff, width: 1.1 * fade, alpha: 0.5 * fade });
++  // fizz: short radial static sparks dancing on the bubble
++  const n = 3 + Math.round(mag * 5);
++  for (let i = 0; i < n; i++) {
++    const a = bearing + (fxHash(seed, i, tick) - 0.5) * spread * 2.4;
++    const r0 = r + (fxHash(seed, i, 5) - 0.3) * 3;
++    const r1 = r0 + 2 + fxHash(seed, i, 6) * 4 * fade;
++    glow.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0)
++      .lineTo(x + Math.cos(a + 0.15) * r1, y + Math.sin(a + 0.15) * r1)
++      .stroke({ color, width: 0.9, alpha: 0.8 * fade });
++  }
++  const ix = x + Math.cos(bearing) * r;
++  const iy = y + Math.sin(bearing) * r;
++  glow.circle(ix, iy, 2.2 + mag * 2.5).fill({ color: 0xffffff, alpha: 0.5 * fade });
++}
++
++/** whole-bubble flash when the shield generator dies or the pool collapses */
++export function drawShieldCollapse(glow: Graphics, x: number, y: number, r: number, age: number): void {
++  const fade = Math.max(0, 1 - age);
++  glow.circle(x, y, r * (1 + age * 0.5)).stroke({ color: 0x4da3ff, width: 2.5 * fade, alpha: 0.8 * fade });
++  glow.circle(x, y, r * (1 + age * 0.5)).fill({ color: 0x4da3ff, alpha: 0.12 * fade });
++}
++
++// ---- deaths ----
++
++/** staged ship death: flash -> fireball + shock ring -> debris + embers */
++export function drawExplosion(
++  fx: Graphics,
++  glow: Graphics,
++  x: number,
++  y: number,
++  size: number, // hull visual radius in screen px
++  age: number, // frames since death (0..)
++  frac: number,
++  seed: number,
++): void {
++  const t = age + frac;
++  const life = 14 + size * 0.5;
++  if (t > life) return;
++  const p = t / life;
++  // initial white flash
++  if (t < 2.2) glow.circle(x, y, size * (1.4 + t * 1.2)).fill({ color: 0xffffff, alpha: 0.85 - t * 0.32 });
++  // fireball: a hot core with noisy overlapping blobs, cooling white -> yellow -> red
++  if (t < life * 0.62) {
++    const heat = 1 - t / (life * 0.62);
++    glow.circle(x, y, size * (0.75 + p * 0.9)).fill({ color: 0xff8a4d, alpha: 0.28 + heat * 0.25 });
++    const blobs = 7;
++    for (let i = 0; i < blobs; i++) {
++      const a = fxHash(seed, i, 21) * Math.PI * 2;
++      const d = (0.1 + fxHash(seed, i, 22) * 0.55) * size * (0.4 + p * 1.5);
++      const br = size * (0.4 + fxHash(seed, i, 23) * 0.4) * (1 - p * 0.5);
++      const color = heat > 0.66 ? 0xfff3c9 : heat > 0.33 ? 0xffb066 : 0xff7d4e;
++      glow.circle(x + Math.cos(a) * d, y + Math.sin(a) * d, br).fill({ color, alpha: 0.5 + heat * 0.3 });
++    }
++    glow.circle(x, y, size * 0.55 * (1 - p * 0.8)).fill({ color: 0xffffff, alpha: 0.35 + heat * 0.55 });
++  }
++  // expanding shock ring
++  glow.circle(x, y, size * 0.8 + t * (2.6 + size * 0.12)).stroke({
++    color: 0xffc9a1,
++    width: Math.max(0.8, 3.4 - t * 0.28),
++    alpha: Math.max(0, 0.75 - p * 0.9),
++  });
++  // tumbling debris chunks decelerating outward
++  const chunks = Math.min(14, 5 + Math.round(size * 0.5));
++  for (let i = 0; i < chunks; i++) {
++    const a = fxHash(seed, i, 31) * Math.PI * 2;
++    const v = (1.4 + fxHash(seed, i, 32) * 2.4) * (0.4 + size * 0.05);
++    const d = v * t * (1 - p * 0.45);
++    const cx = x + Math.cos(a) * d;
++    const cy = y + Math.sin(a) * d;
++    const s = 1 + fxHash(seed, i, 33) * 2.2 * (1 - p * 0.6);
++    fx.rect(cx - s / 2, cy - s / 2, s, s).fill({ color: i % 3 === 0 ? 0x59628c : 0x2e364f, alpha: Math.max(0, 1 - p * 1.1) });
++    if (i % 2 === 0) glow.circle(cx, cy, 0.9).fill({ color: 0xffa15e, alpha: Math.max(0, 0.9 - p * 1.3) });
++  }
++  // lingering smoke
++  if (t > 3) {
++    for (let i = 0; i < 3; i++) {
++      const a = fxHash(seed, i, 41) * Math.PI * 2;
++      const d = 2 + fxHash(seed, i, 42) * size * 0.8;
++      fx.circle(x + Math.cos(a) * d, y + Math.sin(a) * d - t * 0.3, size * 0.4 + t * 0.35).fill({ color: 0x11141f, alpha: Math.max(0, 0.5 - p * 0.6) });
++    }
++  }
++}
++
++// ---- misc ----
++
++/** damaged hull: sparks + drifting smoke puffs */
++export function drawDamageSmoke(fx: Graphics, glow: Graphics, x: number, y: number, size: number, structPct: number, tick: number, seed: number): void {
++  if (structPct > 55) return;
++  const bad = 1 - structPct / 55;
++  for (let i = 0; i < 2; i++) {
++    const h = fxHash(tick - i * 2, seed, i);
++    if (h > 0.3 + bad * 0.4) continue;
++    const a = fxHash(seed, i, 51) * Math.PI * 2;
++    const d = size * 0.5 * fxHash(seed, i, 52);
++    fx.circle(x + Math.cos(a) * d + i, y + Math.sin(a) * d - i * 1.5, 1.6 + i * 1.4).fill({ color: 0x0d1017, alpha: 0.4 * bad });
++  }
++  if (structPct < 30 && fxHash(tick, seed, 53) < 0.25) {
++    const a = fxHash(tick, seed, 54) * Math.PI * 2;
++    glow.circle(x + Math.cos(a) * size * 0.4, y + Math.sin(a) * size * 0.4, 1.1).fill({ color: 0xffe9b0, alpha: 0.9 });
++  }
++}
++
++/** retreat warp-out: light streaks stretching along the escape heading */
++export function drawWarpStreak(glow: Graphics, x: number, y: number, angle: number, age: number, color: number): void {
++  const fade = Math.max(0, 1 - age);
++  if (fade <= 0) return;
++  const ca = Math.cos(angle);
++  const sa = Math.sin(angle);
++  const L = 14 + age * 30;
++  for (const off of [-3, 0, 3]) {
++    const nx = -sa * off;
++    const ny = ca * off;
++    glow.moveTo(x + nx, y + ny).lineTo(x + nx + ca * L, y + ny + sa * L).stroke({ color, width: off === 0 ? 2 : 1, alpha: (off === 0 ? 0.8 : 0.4) * fade, cap: 'round' });
++  }
++  glow.circle(x, y, 3 * fade).fill({ color: 0xffffff, alpha: 0.6 * fade });
++}
++
++/** lightning_field special: stray arcs crawling over the hull */
++export function drawLightningAura(glow: Graphics, x: number, y: number, r: number, tick: number, seed: number): void {
++  if (fxHash(tick, seed, 61) > 0.3) return;
++  const a0 = fxHash(tick, seed, 62) * Math.PI * 2;
++  let px = x + Math.cos(a0) * r;
++  let py = y + Math.sin(a0) * r;
++  glow.moveTo(px, py);
++  for (let i = 1; i <= 4; i++) {
++    const a = a0 + i * 0.5;
++    const rr = r * (0.85 + fxHash(tick, seed, 63 + i) * 0.4);
++    px = x + Math.cos(a) * rr;
++    py = y + Math.sin(a) * rr;
++    glow.lineTo(px, py);
++  }
++  glow.stroke({ color: 0x9dff5e, width: 1, alpha: 0.7 });
++}
++
++/** automated_repair_unit special: little drones orbiting the hull */
++export function drawRepairDrones(glow: Graphics, x: number, y: number, r: number, tick: number, frac: number, seed: number): void {
++  for (let i = 0; i < 2; i++) {
++    const a = (tick + frac) * 0.22 + i * Math.PI + fxHash(seed, i, 71) * 6.28;
++    const dx = x + Math.cos(a) * r;
++    const dy = y + Math.sin(a) * r * 0.7;
++    glow.circle(dx, dy, 1.2).fill({ color: 0xffe9b0, alpha: 0.9 });
++    glow.moveTo(dx, dy).lineTo(x + Math.cos(a) * r * 0.55, y + Math.sin(a) * r * 0.4).stroke({ color: 0xffe9b0, width: 0.5, alpha: 0.25 });
++  }
++}
++
++/** warp_dissipater special: a violet interdiction wake behind the ship */
++export function drawDissipaterWake(glow: Graphics, x: number, y: number, angle: number, size: number, tick: number, frac: number): void {
++  const back = angle + Math.PI;
++  const ca = Math.cos(back);
++  const sa = Math.sin(back);
++  for (let i = 1; i <= 3; i++) {
++    const d = size * 0.8 + i * 5 + ((tick + frac) * 1.4) % 5;
++    const acx = x + ca * d;
++    const acy = y + sa * d;
++    const ar = size * 0.5 + i;
++    glow.moveTo(acx + Math.cos(back - 0.9) * ar, acy + Math.sin(back - 0.9) * ar)
++      .arc(acx, acy, ar, back - 0.9, back + 0.9)
++      .stroke({ color: 0xb98cff, width: 1.1, alpha: 0.4 - i * 0.1 });
++  }
++}
++
++/** point-defense intercept pop */
++export function drawPdPop(glow: Graphics, x: number, y: number, age: number): void {
++  const fade = Math.max(0, 1 - age);
++  glow.circle(x, y, 2 + age * 5).stroke({ color: 0xffe9b0, width: 1.4 * fade, alpha: 0.8 * fade });
++  glow.circle(x, y, 1.5).fill({ color: 0xffffff, alpha: 0.85 * fade });
++}
+diff --git a/src/ui/battle/shipart.ts b/src/ui/battle/shipart.ts
+new file mode 100644
+index 0000000..e08477f
+--- /dev/null
++++ b/src/ui/battle/shipart.ts
+@@ -0,0 +1,1237 @@
++// Procedural 2D pixel-art warship sprites (original art, generated in code).
++//
++// Every empire picks one of the SHIP_STYLES silhouette families (engine
++// shipstyles.ts); within a style each hull class has a handful of model
++// variants a design can choose between. Models are tiny role-indexed pixel
++// grids: the texture layer (shiptex.ts) maps roles to a palette so one model
++// serves every player color. Grids also carry gameplay-relevant *visual*
++// metadata: engine nozzle mounts (flames), gun muzzles (beam origins), and
++// glow pixels (blinking lights). Everything is deterministic — same
++// (style, class, variant) in, same sprite out — so replay scrubbing is stable.
++//
++// Ships face +x (nose right, engines left); the viewer rotates sprites to the
++// sim heading. Monsters and Antarans get bespoke models keyed by their kind.
++
++// ---- pixel roles ----
++export const R_EMPTY = 0;
++export const R_HULL = 1; // mid hull tone
++export const R_SHADE = 2; // hull shadow
++export const R_LIGHT = 3; // hull highlight
++export const R_ACCENT = 4; // player color trim
++export const R_GLOW = 5; // lit windows / canopy / energized parts
++export const R_TRIM = 6; // near-black structural dark
++export const R_NOZZLE = 7; // engine aperture
++
++export interface Mount {
++  x: number;
++  y: number;
++}
++
++export interface ShipModel {
++  w: number;
++  h: number;
++  px: Uint8Array;
++  /** rear engine nozzles: flame plumes anchor here (empty for stations) */
++  engines: Mount[];
++  /** forward gun muzzles: beams originate here */
++  guns: Mount[];
++  /** half-diagonal in art px — the shield bubble radius */
++  radius: number;
++}
++
++// ---- deterministic tiny RNG (UI-side; never touches the sim) ----
++function hashStr(s: string): number {
++  let h = 2166136261 >>> 0;
++  for (let i = 0; i < s.length; i++) {
++    h ^= s.charCodeAt(i);
++    h = Math.imul(h, 16777619);
++  }
++  return h >>> 0;
++}
++
++function mulberry(seed: number): () => number {
++  let a = seed >>> 0;
++  return () => {
++    a |= 0;
++    a = (a + 0x6d2b79f5) | 0;
++    let t = Math.imul(a ^ (a >>> 15), 1 | a);
++    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
++    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
++  };
++}
++
++class Rnd {
++  private f: () => number;
++  constructor(seed: string) {
++    this.f = mulberry(hashStr(seed));
++  }
++  next(): number {
++    return this.f();
++  }
++  int(n: number): number {
++    return Math.floor(this.f() * n);
++  }
++  range(a: number, b: number): number {
++    return a + this.f() * (b - a);
++  }
++  chance(p: number): boolean {
++    return this.f() < p;
++  }
++  pick<T>(arr: readonly T[]): T {
++    return arr[this.int(arr.length)]!;
++  }
++}
++
++// ---- symmetric grid painter ----
++class G {
++  w: number;
++  h: number;
++  cy: number;
++  px: Uint8Array;
++  engines: Mount[] = [];
++  guns: Mount[] = [];
++  constructor(w: number, h: number) {
++    this.w = w;
++    this.h = h;
++    this.cy = (h - 1) >> 1;
++    this.px = new Uint8Array(w * h);
++  }
++  set(x: number, y: number, v: number): void {
++    x = Math.round(x);
++    y = Math.round(y);
++    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return;
++    this.px[y * this.w + x] = v;
++  }
++  get(x: number, y: number): number {
++    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return R_EMPTY;
++    return this.px[y * this.w + x]!;
++  }
++  /** paint at cy±dy (both halves) */
++  sym(x: number, dy: number, v: number): void {
++    this.set(x, this.cy - dy, v);
++    if (dy !== 0) this.set(x, this.cy + dy, v);
++  }
++  /** vertical band centered on the spine: dy in [d0..d1] */
++  band(x: number, d0: number, d1: number, v: number): void {
++    for (let d = Math.max(0, Math.round(d0)); d <= Math.round(d1); d++) this.sym(x, d, v);
++  }
++  /** symmetric box: x in [x0..x1], dy in [d0..d1] */
++  box(x0: number, x1: number, d0: number, d1: number, v: number): void {
++    for (let x = Math.round(x0); x <= Math.round(x1); x++) this.band(x, d0, d1, v);
++  }
++  /** spine-centered wedge: halfwidth tapers hw0 -> hw1 across [x0..x1] */
++  wedge(x0: number, x1: number, hw0: number, hw1: number, v: number): void {
++    const n = Math.max(1, Math.round(x1) - Math.round(x0));
++    for (let x = Math.round(x0); x <= Math.round(x1); x++) {
++      const t = (x - Math.round(x0)) / n;
++      this.band(x, 0, hw0 + (hw1 - hw0) * t, v);
++    }
++  }
++  /** solid symmetric ellipse centered (cx, spine) */
++  ellipse(cx: number, rx: number, ry: number, v: number): void {
++    for (let x = Math.round(cx - rx); x <= Math.round(cx + rx); x++) {
++      const t = (x - cx) / rx;
++      if (t * t > 1) continue;
++      this.band(x, 0, ry * Math.sqrt(1 - t * t), v);
++    }
++  }
++  /** erase an ellipse (carve crescents / notches) — symmetric */
++  carve(cx: number, rx: number, ry: number): void {
++    for (let x = Math.round(cx - rx); x <= Math.round(cx + rx); x++) {
++      const t = (x - cx) / rx;
++      if (t * t > 1) continue;
++      const hw = ry * Math.sqrt(1 - t * t);
++      for (let d = 0; d <= Math.round(hw); d++) this.sym(x, d, R_EMPTY);
++    }
++  }
++  /** twin discs at spine offset ±dyC (pods, nacelle caps) */
++  discPair(cx: number, dyC: number, r: number, v: number): void {
++    for (let x = Math.round(cx - r); x <= Math.round(cx + r); x++) {
++      for (let d = Math.round(dyC - r); d <= Math.round(dyC + r); d++) {
++        if ((x - cx) * (x - cx) + (d - dyC) * (d - dyC) <= r * r + 0.3) {
++          this.set(x, this.cy - d, v);
++          this.set(x, this.cy + d, v);
++        }
++      }
++    }
++  }
++  /** twin boxes at ±[d0..d1] (off-spine hulls: nacelles, pods, radiators) */
++  boxPair(x0: number, x1: number, d0: number, d1: number, v: number): void {
++    for (let x = Math.round(x0); x <= Math.round(x1); x++) {
++      for (let d = Math.round(d0); d <= Math.round(d1); d++) {
++        this.set(x, this.cy - d, v);
++        this.set(x, this.cy + d, v);
++      }
++    }
++  }
++  /** twin straight lines (pylons, struts) from (x0,±d0) to (x1,±d1) */
++  linePair(x0: number, d0: number, x1: number, d1: number, v: number): void {
++    const steps = Math.max(Math.abs(Math.round(x1 - x0)), Math.abs(Math.round(d1 - d0)), 1);
++    for (let i = 0; i <= steps; i++) {
++      const x = x0 + ((x1 - x0) * i) / steps;
++      const d = d0 + ((d1 - d0) * i) / steps;
++      this.set(Math.round(x), Math.round(this.cy - d), v);
++      this.set(Math.round(x), Math.round(this.cy + d), v);
++    }
++  }
++  /** ring / annulus centered on the spine */
++  ring(cx: number, rOut: number, rIn: number, v: number): void {
++    for (let x = Math.round(cx - rOut); x <= Math.round(cx + rOut); x++) {
++      for (let d = 0; d <= Math.round(rOut); d++) {
++        const q = (x - cx) * (x - cx) + d * d;
++        if (q <= rOut * rOut + 0.5 && q >= rIn * rIn - 0.5) this.sym(x, d, v);
++      }
++    }
++  }
++  /** record an engine nozzle pair (or single when dy=0) + paint the aperture */
++  eng(x: number, dy: number): void {
++    this.sym(x, dy, R_NOZZLE);
++    this.engines.push({ x, y: this.cy - dy });
++    if (dy !== 0) this.engines.push({ x, y: this.cy + dy });
++  }
++  /** engine pair anchored to the rearmost hull cell of row cy±dy */
++  engAuto(dy: number): void {
++    dy = Math.round(dy);
++    for (let x = 0; x < this.w; x++) {
++      if (this.get(x, this.cy - dy) !== R_EMPTY) {
++        this.eng(x, dy);
++        return;
++      }
++    }
++  }
++  /** record a gun muzzle pair (or single when dy=0) */
++  gun(x: number, dy: number): void {
++    this.guns.push({ x, y: this.cy - dy });
++    if (dy !== 0) this.guns.push({ x, y: this.cy + dy });
++  }
++  /** gun pair anchored to the foremost hull cell of row cy±dy */
++  gunAuto(dy: number): void {
++    dy = Math.round(dy);
++    for (let x = this.w - 1; x >= 0; x--) {
++      if (this.get(x, this.cy - dy) !== R_EMPTY) {
++        this.gun(x, dy);
++        return;
++      }
++    }
++  }
++  /** top-lit bevel: hull cells get a light top edge and a shaded bottom edge */
++  bevel(): void {
++    const out = new Uint8Array(this.px);
++    for (let y = 0; y < this.h; y++) {
++      for (let x = 0; x < this.w; x++) {
++        const v = this.get(x, y);
++        if (v !== R_HULL) continue;
++        if (this.get(x, y - 1) === R_EMPTY) out[y * this.w + x] = R_LIGHT;
++        else if (this.get(x, y + 1) === R_EMPTY) out[y * this.w + x] = R_SHADE;
++      }
++    }
++    this.px = out;
++  }
++  /** sprinkle detail dots onto existing hull pixels */
++  greeble(r: Rnd, count: number, roles: number[]): void {
++    for (let i = 0; i < count; i++) {
++      const x = r.int(this.w);
++      const y = r.int(this.h);
++      if (this.get(x, y) === R_HULL) {
++        const v = roles[r.int(roles.length)]!;
++        this.set(x, y, v);
++        this.set(x, this.h - 1 - y, v); // keep it symmetric
++      }
++    }
++  }
++  toModel(): ShipModel {
++    return {
++      w: this.w,
++      h: this.h,
++      px: this.px,
++      engines: this.engines,
++      guns: this.guns.length ? this.guns : [{ x: this.w - 1, y: this.cy }],
++      radius: Math.max(this.w, this.h) / 2,
++    };
++  }
++}
++
++// ---- classes ----
++export type ArtClass =
++  | 'scout'
++  | 'frigate'
++  | 'destroyer'
++  | 'cruiser'
++  | 'battleship'
++  | 'titan'
++  | 'doomstar'
++  | 'star_base'
++  | 'battlestation'
++  | 'star_fortress';
++
++export const ART_CLASSES: readonly ArtClass[] = [
++  'scout', 'frigate', 'destroyer', 'cruiser', 'battleship', 'titan', 'doomstar',
++  'star_base', 'battlestation', 'star_fortress',
++];
++
++interface ClassSpec {
++  w: number;
++  h: number;
++  tier: number; // 0 scout .. 6 doomstar; stations 3..5
++  base: boolean;
++}
++
++const CLASS_SPECS: Record<ArtClass, ClassSpec> = {
++  scout: { w: 11, h: 7, tier: 0, base: false },
++  frigate: { w: 15, h: 9, tier: 1, base: false },
++  destroyer: { w: 19, h: 11, tier: 2, base: false },
++  cruiser: { w: 24, h: 13, tier: 3, base: false },
++  battleship: { w: 29, h: 17, tier: 4, base: false },
++  titan: { w: 35, h: 21, tier: 5, base: false },
++  doomstar: { w: 37, h: 37, tier: 6, base: false },
++  star_base: { w: 21, h: 21, tier: 3, base: true },
++  battlestation: { w: 25, h: 25, tier: 4, base: true },
++  star_fortress: { w: 31, h: 31, tier: 5, base: true },
++};
++
++/** how many model variants a class offers within a style */
++export function variantsFor(cls: ArtClass): number {
++  if (cls === 'doomstar') return 1; // the doom star is singular
++  if (cls === 'titan') return 3;
++  if (CLASS_SPECS[cls].base) return 1; // stations: one look per style
++  return 4;
++}
++
++export function wrapVariant(cls: ArtClass, idx: number | undefined): number {
++  const n = variantsFor(cls);
++  const i = Math.abs(Math.trunc(idx ?? 0));
++  return i % n;
++}
++
++/** resolve the art class the viewer should draw for a combat ship */
++export function artClassOf(init: { hull: string; hullIdx: number; isBase: boolean; modelKind?: string }): ArtClass | string {
++  if (init.modelKind === 'scout') return 'scout';
++  if ((ART_CLASSES as readonly string[]).includes(init.hull)) return init.hull as ArtClass;
++  if (MONSTER_KINDS.includes(init.hull)) return init.hull; // monsters key art by kind
++  if (init.isBase) return init.hullIdx >= 9 ? 'star_fortress' : init.hullIdx === 8 ? 'battlestation' : 'star_base';
++  const ships: ArtClass[] = ['frigate', 'frigate', 'destroyer', 'cruiser', 'battleship', 'titan', 'doomstar'];
++  return ships[Math.max(1, Math.min(6, init.hullIdx))]!;
++}
++
++export const MONSTER_KINDS = [
++  'amoeba', 'hydra', 'eel', 'crystal', 'dragon', 'guardian',
++  'antaran_raider', 'antaran_marauder', 'antaran_intruder', 'antaran_fortress',
++];
++
++// ---- per-style flavor (flame + glow + station shape live with the plans) ----
++export interface StyleArt {
++  flame: string; // engine plume color
++  glow: string; // window/canopy color
++}
++
++export const STYLE_ART: Record<string, StyleArt> = {
++  raptor: { flame: '#ffc46b', glow: '#bfe6ff' },
++  saucer: { flame: '#7db8ff', glow: '#ffe9b0' },
++  lattice: { flame: '#9dff5e', glow: '#8dffb0' },
++  orbital: { flame: '#ffa94d', glow: '#fff3c9' },
++  crescent: { flame: '#c9a2ff', glow: '#e6d5ff' },
++  gemini: { flame: '#7de8ff', glow: '#bfe6ff' },
++  needle: { flame: '#cfe8ff', glow: '#bfe6ff' },
++  manta: { flame: '#7dffc8', glow: '#d0ffe8' },
++  bulwark: { flame: '#ff9a4d', glow: '#ffd9a1' },
++  halo: { flame: '#a2c9ff', glow: '#cfe0ff' },
++};
++
++export const NPC_ART: StyleArt = { flame: '#b6ff9d', glow: '#eaffd0' };
++
++// =====================================================================
++// style plans — each draws a full class family + its station variant
++// =====================================================================
++
++type Plan = (g: G, cls: ArtClass, k: ClassSpec, r: Rnd, variant: number) => void;
++
++/** raptor: swept-wing wedge darts */
++const planRaptor: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    // pinwheel of swept vanes around a core
++    const c = (L - 1) / 2;
++    g.ellipse(c, HH * 0.42, HH * 0.42, R_HULL);
++    g.boxPair(c - HH * 0.9, c - HH * 0.2, 1, 2, R_HULL);
++    g.boxPair(c + HH * 0.2, c + HH * 0.9, 1, 2, R_HULL);
++    g.linePair(c - HH * 0.8, 2, c - HH * 0.1, HH - 1, R_HULL);
++    g.linePair(c - HH * 0.7, 2, c, HH - 1, R_HULL);
++    g.linePair(c + HH * 0.1, HH - 1, c + HH * 0.8, 2, R_HULL);
++    g.linePair(c + HH * 0.2, HH - 1, c + HH * 0.9, 2, R_HULL);
++    g.bevel();
++    g.ring(c, HH * 0.45, HH * 0.3, R_ACCENT);
++    g.sym(c, 0, R_GLOW);
++    g.sym(c - HH * 0.55, HH - 1, R_GLOW);
++    g.sym(c + HH * 0.55, HH - 1, R_GLOW);
++    g.gun(c, HH * 0.4);
++    return;
++  }
++  const tail = variant === 2 ? 2 : 1; // rear fin depth
++  const fus = Math.max(1, Math.round(HH * (variant === 1 ? 0.42 : 0.34)));
++  const nose = L - 1;
++  // fuselage: rear body tapering to a needle nose
++  g.wedge(1, Math.round(L * 0.55), fus, Math.max(1, fus - 1), R_HULL);
++  g.wedge(Math.round(L * 0.55), nose, Math.max(1, fus - 1), 0, R_HULL);
++  // swept delta wings: tip trails at the rear
++  const rootX = Math.round(L * (variant === 3 ? 0.7 : 0.6));
++  const tipX = Math.round(L * (variant === 1 ? 0.1 : 0.16));
++  for (let x = tipX; x <= rootX; x++) {
++    const t = (x - tipX) / Math.max(1, rootX - tipX);
++    const outer = HH - (HH - fus - 0.5) * t;
++    if (outer > fus) g.band(x, fus, outer, R_HULL);
++  }
++  // rear stabilizer fins
++  g.box(0, tail, 0, fus + (variant === 2 ? 2 : 1), R_HULL);
++  if (k.tier >= 3) {
++    // canards near the nose on capital raptors
++    g.linePair(Math.round(L * 0.78), fus, Math.round(L * 0.68), fus + 2, R_HULL);
++  }
++  g.bevel();
++  // wing leading-edge accent + cockpit glow
++  g.linePair(rootX, fus, tipX + 1, HH - 1, R_ACCENT);
++  g.band(Math.round(L * 0.72), 0, 0, R_GLOW);
++  if (k.tier >= 1) g.sym(Math.round(L * 0.62), 0, R_GLOW);
++  if (k.tier >= 4) {
++    g.sym(Math.round(L * 0.3), Math.round(HH * 0.55), R_GLOW);
++    g.greeble(r, k.tier * 2, [R_SHADE, R_TRIM]);
++  }
++  // engines between the wing roots
++  if (k.tier <= 1) g.eng(0, 0);
++  else if (k.tier <= 3) g.eng(0, 1);
++  else {
++    g.eng(0, 1);
++    g.eng(1, Math.min(HH - 1, fus + 1));
++  }
++  g.gun(nose, 0);
++  if (k.tier >= 2) g.gun(tipX + 1, HH - 1);
++};
++
++/** saucer: circular primary hull + outrigger nacelles */
++const planSaucer: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    g.ellipse(c, HH * 0.75, HH * 0.75, R_HULL); // the big mushroom disc
++    g.band(c - 1, 0, 2, R_SHADE);
++    g.boxPair(c - 1, c + 1, HH * 0.75, HH - 1, R_HULL); // dock pylons
++    g.box(c - HH * 0.2, c + HH * 0.2, 0, 1, R_LIGHT);
++    g.bevel();
++    g.ring(c, HH * 0.78, HH * 0.62, R_ACCENT);
++    for (let i = -2; i <= 2; i++) g.sym(c + i * 2, Math.round(HH * 0.4), R_GLOW);
++    g.sym(c, 0, R_GLOW);
++    g.gun(c, HH * 0.7);
++    return;
++  }
++  const discR = Math.max(2, Math.round(HH * (variant === 1 ? 0.82 : 0.72)));
++  const discX = Math.round(L * (variant === 3 ? 0.6 : variant === 1 ? 0.62 : 0.66));
++  const nacDy = HH - 1;
++  const nacLen = Math.round(L * (variant === 2 ? 0.55 : 0.42));
++  // secondary hull along the spine
++  g.box(1, discX, 0, Math.max(1, Math.round(discR * 0.35)), R_HULL);
++  // primary saucer
++  g.ellipse(discX, discR + (variant === 1 ? 1 : 0), discR, R_HULL);
++  // nacelle pair + pylons
++  const nacX0 = variant === 3 ? 0 : 1;
++  g.boxPair(nacX0, nacX0 + nacLen, nacDy - 1, nacDy, R_HULL);
++  g.linePair(Math.round(L * 0.3), 1, nacX0 + Math.round(nacLen * 0.4), nacDy - 1, R_SHADE);
++  g.bevel();
++  // bussard glow on the nacelle front caps + player ring on the saucer
++  g.sym(nacX0 + nacLen, nacDy - 1, R_ACCENT);
++  g.sym(nacX0 + nacLen, nacDy, R_GLOW);
++  g.ring(discX, discR - 0.5, discR - 1.6, R_ACCENT);
++  g.sym(discX, 0, R_GLOW); // bridge
++  if (k.tier >= 2) {
++    g.sym(discX - 2, Math.round(discR * 0.5), R_GLOW);
++    g.sym(discX + 2, Math.round(discR * 0.5), R_GLOW);
++  }
++  if (k.tier >= 4) {
++    // capital saucers run four nacelles
++    g.boxPair(2, 2 + Math.round(nacLen * 0.8), Math.round(HH * 0.55), Math.round(HH * 0.55) + 1, R_HULL);
++    g.eng(2, Math.round(HH * 0.55));
++    g.greeble(r, k.tier, [R_SHADE, R_GLOW]);
++  }
++  g.eng(nacX0, nacDy - 1);
++  if (k.tier >= 1) g.eng(0, 0);
++  g.gun(discX + discR, 0);
++  if (k.tier >= 3) g.gun(discX, discR);
++};
++
++/** lattice: greebled machine cubes */
++const planLattice: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    const s = HH - 1;
++    g.box(c - s, c + s, 0, s, R_HULL); // one perfect cube
++    g.bevel();
++    for (let x = -s; x <= s; x += 2) g.band(c + x, 0, s, x % 4 === 0 ? R_SHADE : R_HULL);
++    for (let d = 1; d <= s; d += 2) for (let x = -s; x <= s; x++) if ((x + d) % 3 === 0) g.sym(c + x, d, R_TRIM);
++    g.ring(c, 2.2, 1.2, R_GLOW);
++    for (let i = 0; i < 6 + k.tier * 2; i++) g.sym(c - s + r.int(2 * s), r.int(s), r.chance(0.5) ? R_GLOW : R_ACCENT);
++    g.linePair(c - s - 1, 0, c - s - 2, 0, R_TRIM);
++    g.linePair(c + s + 1, 0, c + s + 2, 0, R_TRIM);
++    g.gun(c, s);
++    return;
++  }
++  const long = variant % 2 === 0;
++  const bh = Math.max(2, HH - (long ? 2 : 1));
++  const x0 = 1;
++  const x1 = L - 2;
++  g.box(x0, x1, 0, bh, R_HULL);
++  if (variant >= 2) {
++    // offset secondary block: broken silhouette
++    g.box(Math.round(L * 0.35), Math.round(L * 0.75), bh, Math.min(HH, bh + 2), R_HULL);
++  }
++  // carve notches so it's not a brick
++  g.box(x1 - 1, x1, Math.max(1, bh - 1), bh, R_EMPTY);
++  if (k.tier >= 2) g.box(Math.round(L * 0.2), Math.round(L * 0.28), bh, bh, R_EMPTY);
++  g.bevel();
++  // circuit greebles: seams + node lights
++  for (let x = x0 + 1; x < x1; x += 3) g.band(x, 0, bh - 1, R_SHADE);
++  for (let x = x0 + 2; x < x1; x += 3) if ((x & 1) === 0) g.sym(x, Math.min(bh - 1, 1 + (x % Math.max(2, bh)))!, R_TRIM);
++  const eyes = 2 + k.tier;
++  for (let i = 0; i < eyes; i++) g.sym(x0 + 2 + r.int(Math.max(1, x1 - x0 - 3)), r.int(bh), r.chance(0.6) ? R_GLOW : R_ACCENT);
++  g.box(x1 - 2, x1, 0, 0, R_ACCENT); // forward emitter strip
++  g.sym(x1, 0, R_GLOW);
++  // antenna spikes
++  g.linePair(Math.round(L * 0.55), bh, Math.round(L * 0.55), Math.min(HH, bh + 2), R_TRIM);
++  if (k.tier >= 4) g.linePair(Math.round(L * 0.3), bh + (variant >= 2 ? 2 : 0), Math.round(L * 0.26), HH, R_TRIM);
++  // a wall of small nozzles across the stern
++  g.eng(x0 - 1, 0);
++  if (k.tier >= 1) g.eng(x0 - 1, Math.max(1, bh - 1));
++  if (k.tier >= 4) g.eng(x0 - 1, 1);
++  g.gunAuto(0);
++  if (k.tier >= 2) g.gunAuto(bh - 1);
++};
++
++/** orbital: near-future trusses, tanks and radiators */
++const planOrbital: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    // ISS-style: long truss + module stack + panel wings
++    g.box(c - HH + 1, c + HH - 1, 0, 0, R_SHADE);
++    g.box(c - 2, c + 2, 0, 1, R_HULL);
++    g.discPair(c, 0, 1.6, R_HULL);
++    g.boxPair(c - HH + 1, c - 3, 2, 3, R_ACCENT); // port panels
++    g.boxPair(c + 3, c + HH - 1, 2, 3, R_ACCENT);
++    g.linePair(c - HH + 2, 2, c - HH + 2, 0, R_TRIM);
++    g.linePair(c + HH - 2, 2, c + HH - 2, 0, R_TRIM);
++    g.bevel();
++    for (let x = -HH + 2; x <= HH - 2; x += 2) g.sym(c + x, 2, R_TRIM); // panel gridlines
++    g.sym(c, 0, R_GLOW);
++    g.sym(c - 1, 1, R_GLOW);
++    g.discPair(c + HH - 1, 0, 1, R_LIGHT); // docked capsule
++    g.gun(c, 1);
++    return;
++  }
++  const spineD = 0;
++  // truss spine
++  g.box(2, L - 4, spineD, spineD, R_SHADE);
++  // command module + dish at the bow
++  g.wedge(L - 5, L - 1, 1, 0, R_HULL);
++  g.sym(L - 3, 0, R_GLOW);
++  // tanks amidships
++  const tanks = 1 + (variant % 2);
++  for (let i = 0; i < tanks; i++) {
++    const cx = Math.round(L * (0.42 + i * 0.16));
++    g.ellipse(cx, 2.2, Math.min(HH - 2, 1.6), R_LIGHT);
++  }
++  // radiators / solar wings
++  const panX = Math.round(L * (variant >= 2 ? 0.3 : 0.5));
++  const panW = variant >= 2 ? 2 : 0;
++  g.boxPair(panX - panW, panX + panW, 2, HH - 1, R_ACCENT);
++  for (let d = 2; d <= HH - 1; d += 2) {
++    g.set(panX, g.cy - d, R_TRIM);
++    g.set(panX, g.cy + d, R_TRIM);
++  }
++  if (variant === 1 || k.tier >= 4) {
++    const pan2 = Math.round(L * 0.66);
++    g.boxPair(pan2 - 1, pan2 + 1, 2, Math.max(3, HH - 2), R_ACCENT);
++  }
++  // dish antenna
++  g.discPair(Math.round(L * 0.72), Math.min(HH - 1, 2.5), 1.1, R_SHADE);
++  // engine block: bell nozzles on a thrust plate
++  g.box(1, 2, 0, 1, R_HULL);
++  g.bevel();
++  g.eng(0, 0);
++  if (k.tier >= 2) g.eng(0, 1);
++  if (k.tier >= 5) g.eng(1, 2);
++  g.greeble(r, k.tier, [R_TRIM, R_GLOW]);
++  g.gun(L - 1, 0);
++};
++
++/** crescent: flowing curved blades */
++const planCrescent: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    // two opposed crescents cupping a core
++    g.ellipse(c - 2, HH - 1, HH - 1, R_HULL);
++    g.carve(c - 2 - Math.round(HH * 0.7), HH - 1, HH - 2);
++    g.ellipse(c + 2 + Math.round(HH * 0.2), HH * 0.55, HH * 0.55, R_HULL);
++    g.carve(c + 2 + Math.round(HH * 0.2) + Math.round(HH * 0.5), HH * 0.55, HH * 0.45);
++    g.bevel();
++    g.ellipse(c, 2, 2, R_HULL);
++    g.sym(c, 0, R_GLOW);
++    g.ring(c, 2.4, 1.4, R_ACCENT);
++    g.sym(c - 2, HH - 2, R_GLOW);
++    g.sym(c + 1, Math.round(HH * 0.5), R_GLOW);
++    g.gun(c, 2);
++    return;
++  }
++  // main blade: ellipse with a rear carve -> forward-swept crescent
++  const bx = Math.round(L * 0.45);
++  const brx = Math.round(L * 0.4);
++  g.ellipse(bx, brx, HH, R_HULL);
++  const depth = variant === 1 ? 0.55 : variant === 2 ? 0.75 : 0.65;
++  g.carve(bx - Math.round(brx * depth), brx, HH - 1);
++  // center dagger to the nose
++  g.wedge(bx - 2, L - 1, Math.max(1, Math.round(HH * 0.28)), 0, R_HULL);
++  if (variant === 3 && k.tier >= 2) {
++    // double blade: smaller inner crescent
++    g.ellipse(bx - 3, Math.round(brx * 0.5), Math.round(HH * 0.55), R_HULL);
++    g.carve(bx - 3 - Math.round(brx * 0.35), Math.round(brx * 0.5), Math.round(HH * 0.45));
++  }
++  g.bevel();
++  // luminous blade edge
++  for (let d = 1; d <= HH - 1; d++) {
++    // find the leading (rightmost) hull cell in this row pair and edge it
++    for (let x = L - 1; x >= 0; x--) {
++      if (g.get(x, g.cy - d) !== R_EMPTY) {
++        g.sym(x, d, R_ACCENT);
++        break;
++      }
++    }
++  }
++  g.sym(0 + 1, 0, R_SHADE);
++  g.band(Math.round(L * 0.52), 0, 0, R_GLOW);
++  g.sym(bx, HH - 1, R_GLOW); // blade tip lights
++  if (k.tier >= 3) g.greeble(r, k.tier, [R_SHADE, R_GLOW]);
++  g.engAuto(Math.round(HH * 0.45));
++  if (k.tier >= 4) g.engAuto(HH - 2);
++  g.gun(L - 1, 0);
++  g.gunAuto(HH - 1);
++};
++
++/** gemini: twin-pod catamarans */
++const planGemini: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    // H-station: two habitat bars + crossdock
++    g.boxPair(c - HH + 2, c + HH - 2, HH - 2, HH - 1, R_HULL);
++    g.box(c - 1, c + 1, 0, HH - 2, R_HULL);
++    g.bevel();
++    g.boxPair(c - 1, c + 1, HH - 2, HH - 1, R_ACCENT);
++    for (let x = -HH + 3; x <= HH - 3; x += 2) g.sym(c + x, HH - 2, R_GLOW);
++    g.sym(c, 0, R_GLOW);
++    g.gun(c, HH - 1);
++    return;
++  }
++  const podD = Math.max(2, HH - 2); // pod centerline offset
++  const podHw = Math.max(1, Math.round(HH * 0.28));
++  const podLen = L - 3;
++  // two hull pods with tapered noses
++  for (let x = 1; x <= podLen; x++) {
++    const t = x / podLen;
++    const hw = t > 0.75 ? Math.max(0, Math.round(podHw * (1 - (t - 0.75) * 4))) : podHw;
++    for (let d = podD - hw; d <= podD + hw; d++) {
++      g.set(x, g.cy - d, R_HULL);
++      g.set(x, g.cy + d, R_HULL);
++    }
++  }
++  // cross spars
++  const spar1 = Math.round(L * (variant === 1 ? 0.3 : 0.42));
++  g.box(spar1 - 1, spar1 + 1, 0, podD, R_HULL);
++  if (variant >= 2) {
++    const spar2 = Math.round(L * 0.68);
++    g.box(spar2, spar2 + 1, 0, podD, R_SHADE);
++  }
++  // centerline bridge
++  g.ellipse(spar1 + (variant === 3 ? 3 : 0), 2, 1.4, R_HULL);
++  if (k.tier >= 4) {
++    // capital gemini: a third spine hull between the pods
++    g.wedge(2, L - 2, 1, 0, R_HULL);
++    g.eng(1, 0);
++  }
++  g.bevel();
++  g.sym(spar1 + (variant === 3 ? 3 : 0), 0, R_GLOW);
++  // pod nose rings + engine glow
++  g.linePair(podLen - 1, podD - podHw, podLen - 1, podD + podHw, R_ACCENT);
++  g.linePair(Math.round(L * 0.55), podD - podHw, Math.round(L * 0.55), podD + podHw, R_ACCENT);
++  const eyes = 1 + (k.tier >> 1);
++  for (let i = 0; i < eyes; i++) g.sym(3 + r.int(Math.max(1, podLen - 5)), podD, R_GLOW);
++  g.eng(0, podD);
++  g.gun(podLen + 1, podD);
++  if (k.tier >= 3) g.gun(spar1, 0);
++};
++
++/** needle: spinal lances */
++const planNeedle: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    // urchin: radial spikes from an armored core
++    g.ellipse(c, 3, 3, R_HULL);
++    g.band(c - HH + 1, 0, 0, R_SHADE);
++    g.box(c - HH + 1, c + HH - 1, 0, 0, R_SHADE);
++    g.linePair(c - 2, 2, c - HH + 1, HH - 1, R_SHADE);
++    g.linePair(c + 2, 2, c + HH - 1, HH - 1, R_SHADE);
++    g.band(c, 3, HH - 1, R_SHADE);
++    g.bevel();
++    g.sym(c, 0, R_GLOW);
++    g.ring(c, 3.2, 2.2, R_ACCENT);
++    g.sym(c - HH + 1, 0, R_GLOW);
++    g.sym(c + HH - 1, 0, R_GLOW);
++    g.sym(c, HH - 1, R_GLOW);
++    g.gun(c, 3);
++    return;
++  }
++  const hw = 1;
++  const taperX = Math.round(L * (variant === 2 ? 0.55 : 0.7));
++  // the lance
++  g.wedge(2, taperX, hw, hw, R_HULL);
++  g.wedge(taperX, L - 1, hw, 0, R_HULL);
++  g.sym(L - 1, 0, R_ACCENT);
++  g.sym(L - 2, 0, R_LIGHT);
++  // rear fins: v0 swept back, v1 swept forward, v2 straight cross, v3 twin-boom
++  const finX = Math.round(L * (variant === 1 ? 0.08 : 0.16));
++  if (variant === 1) {
++    g.linePair(finX, hw, finX + 4, HH - 1, R_HULL);
++    g.linePair(finX + 1, hw, finX + 5, HH - 1, R_HULL);
++  } else if (variant === 2) {
++    g.linePair(finX + 2, hw, finX + 2, HH - 1, R_HULL);
++    g.linePair(finX + 3, hw, finX + 3, HH - 1, R_HULL);
++  } else {
++    g.linePair(finX, hw, Math.max(0, finX - 3), HH - 1, R_HULL);
++    g.linePair(finX + 1, hw, Math.max(1, finX - 2), HH - 1, R_HULL);
++  }
++  if (variant === 3 || k.tier >= 4) {
++    // twin outrigger booms riding beside the spine
++    const railD = Math.min(HH - 2, 3);
++    g.boxPair(Math.round(L * 0.25), Math.round(L * 0.72), railD, railD, R_HULL);
++    g.linePair(Math.round(L * 0.35), hw, Math.round(L * 0.35), railD, R_TRIM);
++    g.linePair(Math.round(L * 0.62), hw, Math.round(L * 0.62), railD, R_TRIM);
++    g.sym(Math.round(L * 0.72), railD, R_ACCENT);
++    g.eng(Math.round(L * 0.25) - 1, railD);
++  }
++  if (variant === 0 && k.tier >= 3) {
++    const midX = Math.round(L * 0.5);
++    g.linePair(midX, hw, midX - 2, Math.round(HH * 0.6), R_HULL);
++  }
++  g.bevel();
++  // bulkhead rings + running lights down the spine (cadence varies by model)
++  const step = variant === 2 ? 4 : 3;
++  for (let x = 4; x < taperX; x += step) g.band(x, 0, hw, x % (step * 2) === step + 1 ? R_SHADE : R_HULL);
++  for (let x = 5; x < taperX; x += step + 1) g.sym(x, 0, R_GLOW);
++  g.linePair(Math.max(0, finX - 2), HH - 1, Math.max(0, finX - 3), HH - 1, R_ACCENT);
++  g.eng(1, 0);
++  g.gun(L - 1, 0);
++};
++
++/** manta: smooth biomorphic rays */
++const planManta: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    g.ellipse(c, HH - 1, HH - 2, R_HULL); // rounded reef
++    g.carve(c - HH, HH * 0.6, HH * 0.5);
++    g.bevel();
++    g.ring(c, HH * 0.5, HH * 0.5 - 1, R_ACCENT);
++    g.sym(c + 2, 0, R_GLOW);
++    g.sym(c - 1, Math.round(HH * 0.55), R_GLOW);
++    g.gun(c + HH - 1, 0);
++    return;
++  }
++  const bodyX = Math.round(L * 0.42);
++  const bodyR = Math.round(L * 0.38);
++  // lifting body + rounded nose
++  g.ellipse(bodyX, bodyR, HH, R_HULL);
++  const noseX = Math.round(L * 0.68);
++  g.ellipse(noseX, Math.round(L * 0.22), Math.max(1, Math.round(HH * 0.42)), R_HULL);
++  // sweep the wingtips back: carve the outboard corners fore and aft
++  for (let d = Math.max(2, Math.round(HH * 0.45)); d <= HH; d++) {
++    const cut = Math.round((d - HH * 0.45) * (variant === 2 ? 1.8 : 1.2));
++    for (let x = 0; x <= cut; x++) g.sym(bodyX + bodyR - x, d, R_EMPTY);
++    for (let x = 0; x < Math.max(0, cut - 2); x++) g.sym(Math.max(0, bodyX - bodyR + x), d, R_EMPTY);
++  }
++  // tail spine
++  const tailLen = Math.round(L * (variant === 3 ? 0.3 : 0.2));
++  g.box(Math.max(0, bodyX - bodyR - tailLen), bodyX - bodyR + 2, 0, 0, R_HULL);
++  g.bevel();
++  // eyes, gill vents and a short dorsal stripe
++  g.sym(noseX + Math.round(L * 0.1), Math.max(1, Math.round(HH * 0.2)), R_GLOW);
++  for (let i = 0; i < 3; i++) g.linePair(bodyX - 1 - i * 2, 1, bodyX - 2 - i * 2, Math.round(HH * 0.5), R_SHADE);
++  g.box(Math.round(L * 0.34), Math.round(L * 0.58), 0, 0, R_ACCENT);
++  g.sym(bodyX, HH - 1, R_ACCENT); // wingtips
++  if (variant === 1) g.sym(bodyX + 2, HH - 2, R_ACCENT);
++  if (k.tier >= 3) g.greeble(r, k.tier, [R_SHADE, R_GLOW]);
++  g.engAuto(0);
++  g.engAuto(Math.round(HH * 0.45));
++  g.gunAuto(0);
++  if (k.tier >= 2) g.gunAuto(Math.round(HH * 0.5));
++};
++
++/** bulwark: brutalist armored slabs */
++const planBulwark: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    const s = HH - 1;
++    g.box(c - s, c + s, 0, s - 1, R_HULL); // the keep
++    g.box(c - s + 2, c + s - 2, 0, s, R_HULL); // parapet overhang
++    g.bevel();
++    g.box(c - s + 1, c + s - 1, s - 3, s - 3, R_TRIM);
++    g.box(c - 2, c + 2, 0, 1, R_LIGHT);
++    g.sym(c, 0, R_GLOW);
++    g.box(c - s, c - s, 0, s - 1, R_ACCENT);
++    g.box(c + s, c + s, 0, s - 1, R_ACCENT);
++    // corner gun bastions
++    g.discPair(c - s + 1, s - 1, 1, R_SHADE);
++    g.discPair(c + s - 1, s - 1, 1, R_SHADE);
++    g.gun(c + s - 1, s - 1);
++    g.gun(c - s + 1, s - 1);
++    return;
++  }
++  const bh = HH - 1;
++  // slab with a blunt chamfered prow
++  g.box(1, Math.round(L * 0.82), 0, bh, R_HULL);
++  g.wedge(Math.round(L * 0.82), L - 1, bh, Math.max(1, Math.round(bh * 0.4)), R_HULL);
++  // deck steps
++  if (variant % 2 === 0) g.box(Math.round(L * 0.25), Math.round(L * 0.6), bh, Math.min(HH, bh + 1), R_HULL);
++  g.bevel();
++  // armor plate seams + rivets
++  for (let x = 3; x < L - 3; x += 4) g.band(x, 0, bh - 1, R_SHADE);
++  for (let x = 5; x < L - 4; x += 4) g.sym(x, Math.max(1, bh - 1), R_TRIM);
++  // citadel tower
++  const cit = Math.round(L * (variant === 3 ? 0.55 : 0.4));
++  g.box(cit - 1, cit + 1, 0, 1, R_LIGHT);
++  g.sym(cit, 0, R_GLOW);
++  g.sym(cit + 1, 1, R_GLOW);
++  // hazard stripe at the prow + bastion turrets
++  g.band(Math.round(L * 0.8), 0, Math.max(1, Math.round(bh * 0.6)), R_ACCENT);
++  if (k.tier >= 2) {
++    g.discPair(Math.round(L * 0.68), bh, 1, R_SHADE);
++    g.gun(Math.round(L * 0.7), bh);
++  }
++  if (k.tier >= 4) {
++    g.discPair(Math.round(L * 0.3), bh, 1, R_SHADE);
++    g.gun(Math.round(L * 0.32), bh);
++  }
++  g.eng(0, Math.max(1, Math.round(bh * 0.5)));
++  if (k.tier >= 3) g.eng(0, 0);
++  g.gun(L - 1, 0);
++};
++
++/** halo: annular ring ships */
++const planHalo: Plan = (g, cls, k, r, variant) => {
++  const L = k.w;
++  const HH = (k.h - 1) >> 1;
++  if (k.base) {
++    const c = (L - 1) / 2;
++    g.ring(c, HH - 1, HH - 3, R_HULL);
++    g.ellipse(c, 2.4, 2.4, R_HULL);
++    g.linePair(c - HH + 2, 0, c - 2, 0, R_SHADE);
++    g.linePair(c + 2, 0, c + HH - 2, 0, R_SHADE);
++    g.band(c, 3, HH - 2, R_SHADE);
++    g.bevel();
++    g.ring(c, HH - 1, HH - 1.8, R_ACCENT);
++    g.sym(c, 0, R_GLOW);
++    for (let i = 0; i < 4; i++) g.sym(c - HH + 2 + i * Math.max(2, Math.round((2 * HH - 4) / 3)), HH - 2, R_GLOW);
++    g.gun(c, HH - 1);
++    return;
++  }
++  const ringX = Math.round(L * (variant === 1 ? 0.52 : 0.62));
++  const rOut = HH;
++  const rIn = Math.max(2, HH - (variant === 2 ? 2 : 3));
++  // stern block + spine through the ring
++  g.wedge(1, ringX, Math.max(1, Math.round(HH * 0.3)), 1, R_HULL);
++  g.box(ringX, Math.min(L - 1, ringX + rOut + 1), 0, 0, R_HULL);
++  g.ring(ringX, rOut, rIn, R_HULL);
++  // hub
++  g.ellipse(ringX, Math.max(1.6, rIn * 0.5), Math.max(1.6, rIn * 0.5), R_HULL);
++  // spokes
++  g.band(ringX, 0, rOut - 1, R_SHADE);
++  if (variant >= 2) g.linePair(ringX - rIn + 1, 1, ringX - 1, 1, R_SHADE);
++  if (k.tier >= 4) {
++    // second ring astern on capitals
++    const r2 = Math.max(2, Math.round(rOut * 0.55));
++    g.ring(Math.round(L * 0.18), r2, r2 - 1.6, R_HULL);
++  }
++  g.bevel();
++  g.ring(ringX, rOut, rOut - 1, R_ACCENT); // rim light
++  g.sym(ringX, 0, R_GLOW);
++  g.sym(Math.min(L - 1, ringX + rOut + 1), 0, R_GLOW); // bow beacon
++  for (let i = 1; i <= 2 + (k.tier >> 1); i++) g.sym(ringX + (i % 2 === 0 ? i : -i), rOut - 1, R_GLOW);
++  g.eng(0, Math.max(1, Math.round(HH * 0.22)));
++  if (k.tier >= 3) g.eng(0, 0);
++  g.gun(Math.min(L - 1, ringX + rOut + 1), 0);
++  if (k.tier >= 2) g.gun(ringX, rOut);
++};
++
++const PLANS: Record<string, Plan> = {
++  raptor: planRaptor,
++  saucer: planSaucer,
++  lattice: planLattice,
++  orbital: planOrbital,
++  crescent: planCrescent,
++  gemini: planGemini,
++  needle: planNeedle,
++  manta: planManta,
++  bulwark: planBulwark,
++  halo: planHalo,
++};
++
++/** doomstars are singular per style: a planet-cracker sphere with a
++ * superlaser dish, plus a small style-flavored flourish */
++function planDoomstar(g: G, style: string, r: Rnd): void {
++  const c = (g.w - 1) / 2;
++  const R = c - 1;
++  g.ellipse(c, R, R, R_HULL);
++  g.bevel();
++  // curvature shading: lower-right limb in shadow, upper-left lit
++  for (let x = 0; x < g.w; x++) {
++    for (let y = 0; y < g.h; y++) {
++      if (g.get(x, y) !== R_HULL) continue;
++      const dx = (x - c) / R;
++      const dy = (y - c) / R;
++      const d2 = dx * dx + dy * dy;
++      if (d2 > 0.62 && dx + dy > 0.45) g.set(x, y, R_SHADE);
++      else if (d2 > 0.7 && dx + dy < -0.5) g.set(x, y, R_LIGHT);
++    }
++  }
++  // equatorial trench
++  for (let x = 2; x < g.w - 2; x++) if (g.get(x, g.cy + 4) !== R_EMPTY) g.set(x, g.cy + 4, R_TRIM);
++  // superlaser dish, offset toward the bow
++  const dx = c + Math.round(R * 0.52);
++  const dyOff = -Math.round(R * 0.3);
++  for (let x = dx - 4; x <= dx + 4; x++) {
++    for (let y = g.cy + dyOff - 4; y <= g.cy + dyOff + 4; y++) {
++      const q = (x - dx) * (x - dx) + (y - (g.cy + dyOff)) * (y - (g.cy + dyOff));
++      if (q <= 17) g.set(x, y, q <= 3 ? R_GLOW : q <= 9 ? R_TRIM : R_SHADE);
++    }
++  }
++  g.guns.push({ x: dx, y: g.cy + dyOff });
++  // city lights
++  for (let i = 0; i < 26; i++) {
++    const x = 2 + r.int(g.w - 4);
++    const y = 2 + r.int(g.h - 4);
++    if (g.get(x, y) === R_HULL || g.get(x, y) === R_SHADE) g.set(x, y, r.chance(0.75) ? R_GLOW : R_ACCENT);
++  }
++  // style flourish
++  if (style === 'raptor' || style === 'crescent') {
++    g.linePair(1, 2, 3, Math.round(R * 0.55), R_HULL); // rear fins
++  } else if (style === 'lattice' || style === 'bulwark') {
++    g.box(c - 2, c + 2, R - 2, R - 1, R_HULL); // pole blocks
++  } else if (style === 'halo' || style === 'saucer') {
++    g.ring(c, R + 0.7, R - 0.3, R_ACCENT); // equator halo
++  } else if (style === 'needle') {
++    g.box(g.w - 3, g.w - 1, 0, 0, R_ACCENT); // bow spike
++  }
++  g.eng(1, 2);
++  g.eng(1, 0);
++}
++
++// ---- monsters & Antarans ----
++function monsterPlan(kind: string, g: G, r: Rnd): void {
++  const L = g.w;
++  const HH = (g.h - 1) >> 1;
++  const c = (L - 1) / 2;
++  switch (kind) {
++    case 'amoeba': {
++      g.ellipse(c, c - 1, HH - 1, R_HULL);
++      for (let i = 0; i < 7; i++) g.discPair(2 + r.int(L - 4), r.int(HH), 1 + r.next() * 1.6, R_HULL); // lumpy membrane
++      g.bevel();
++      g.ellipse(c + 1, 2.4, 2.2, R_SHADE);
++      g.sym(c + 1, 0, R_GLOW); // nucleus
++      g.sym(c, 1, R_GLOW);
++      for (let i = 0; i < 6; i++) g.sym(2 + r.int(L - 4), r.int(HH - 1), R_ACCENT); // vacuoles
++      g.gun(L - 2, 0);
++      break;
++    }
++    case 'hydra': {
++      g.ellipse(c - 2, Math.round(L * 0.3), HH - 2, R_HULL); // body
++      for (const d of [0, HH - 2]) {
++        // three necks forward, heads with glowing eyes
++        g.linePair(c, d === 0 ? 0 : d - 1, L - 4, d, R_HULL);
++        g.linePair(c, d === 0 ? 1 : d - 2, L - 4, d === 0 ? 1 : d - 1, R_HULL); // thicken
++        g.discPair(L - 3, d, 1.4, R_HULL);
++        g.sym(L - 3, d, R_GLOW);
++      }
++      g.bevel();
++      g.linePair(2, 1, 0, Math.round(HH * 0.6), R_HULL); // tails
++      for (let i = 0; i < 4; i++) g.sym(c - 3 + r.int(6), r.int(HH - 2), R_ACCENT);
++      g.gun(L - 2, HH - 2);
++      g.gun(L - 2, 0);
++      break;
++    }
++    case 'eel': {
++      // sinuous body: offset from the spine by a sine wave (asymmetric on purpose)
++      for (let x = 0; x < L - 2; x++) {
++        const off = Math.round(Math.sin(x * 0.55) * (HH - 3));
++        for (let d = -1; d <= 1; d++) g.set(x, g.cy + off + d, R_HULL);
++        if (x % 3 === 0) g.set(x, g.cy + off - 2, R_SHADE); // dorsal spines
++      }
++      const headOff = Math.round(Math.sin((L - 2) * 0.55) * (HH - 3));
++      g.discPair(L - 3, 0, 0, R_HULL);
++      for (let d = -2; d <= 2; d++) for (let x = L - 4; x <= L - 1; x++) g.set(x, g.cy + headOff + Math.round(d * 0.6), R_HULL);
++      g.set(L - 2, g.cy + headOff - 1, R_GLOW);
++      g.set(L - 2, g.cy + headOff + 1, R_GLOW);
++      g.bevel();
++      for (let x = 2; x < L - 4; x += 4) g.set(x, g.cy + Math.round(Math.sin(x * 0.55) * (HH - 3)), R_ACCENT);
++      g.guns.push({ x: L - 1, y: g.cy + headOff });
++      break;
++    }
++    case 'crystal': {
++      // radial shard star
++      const arms: Array<[number, number]> = [[c + HH - 1, 0], [c - HH + 1, 0], [c, HH - 1], [c + Math.round(HH * 0.6), Math.round(HH * 0.6)], [c - Math.round(HH * 0.6), Math.round(HH * 0.6)]];
++      for (const [ax, ad] of arms) {
++        g.linePair(c, 0, ax, ad, R_LIGHT);
++        g.linePair(c, 1, ax, Math.max(0, ad - 1), R_HULL); // shard body
++        g.linePair(c + Math.sign(ax - c), 0, ax, Math.max(0, ad - 1), R_HULL);
++      }
++      g.ellipse(c, 2.6, 2.6, R_LIGHT);
++      g.ring(c, 2.6, 1.6, R_HULL);
++      g.sym(c, 0, R_GLOW);
++      for (const [ax, ad] of arms) g.sym(ax, ad, R_GLOW);
++      break;
++    }
++    case 'dragon': {
++      g.ellipse(c - 1, Math.round(L * 0.26), Math.max(2, HH - 4), R_HULL); // torso
++      // bat wings swept back
++      for (let i = 0; i < HH - 1; i++) {
++        const x0 = c + 1 - Math.round(i * 1.2);
++        g.linePair(x0, i, x0 - Math.max(2, Math.round(HH * 0.5)), i + 1, R_HULL);
++      }
++      g.linePair(c + 1, 1, L - 3, 1, R_HULL); // neck
++      g.discPair(L - 3, 1, 1.4, R_HULL); // head
++      g.set(L - 2, g.cy - 2, R_GLOW);
++      g.set(L - 2, g.cy, R_GLOW);
++      g.wedge(0, c - Math.round(L * 0.26) + 1, 1, 0, R_HULL); // tail
++      g.bevel();
++      for (let i = 1; i < HH - 1; i += 2) g.sym(c - Math.round(i * 1.2), i, R_ACCENT); // wing veins
++      g.guns.push({ x: L - 2, y: g.cy - 1 });
++      break;
++    }
++    case 'guardian': {
++      // mythic warden: armored core, radial blades, orbiting lights
++      g.ring(c, HH - 1, HH - 3, R_HULL);
++      g.ellipse(c, HH * 0.45, HH * 0.45, R_HULL);
++      for (let i = 0; i < 4; i++) {
++        const a = (i / 4) * Math.PI;
++        const ex = Math.cos(a) * (HH - 1);
++        const ed = Math.sin(a) * (HH - 1);
++        g.linePair(c - ex, Math.abs(ed), c + ex, Math.abs(ed), i === 0 ? R_SHADE : R_SHADE);
++      }
++      g.bevel();
++      g.ring(c, HH - 1, HH - 1.8, R_ACCENT);
++      g.ring(c, HH * 0.45, HH * 0.45 - 1, R_TRIM);
++      g.sym(c, 0, R_GLOW); // the eye
++      g.sym(c - 1, 0, R_GLOW);
++      g.sym(c + 1, 0, R_GLOW);
++      for (let i = 0; i < 8; i++) {
++        const a = (i / 8) * Math.PI * 2;
++        g.set(Math.round(c + Math.cos(a) * (HH - 2)), Math.round(g.cy + Math.sin(a) * (HH - 2)), R_GLOW);
++      }
++      g.gun(c, HH - 1);
++      g.gun(c + HH - 1, 0);
++      break;
++    }
++    default: {
++      // antaran_*: crystalline angular warships, ghost-pale
++      const fortress = kind === 'antaran_fortress';
++      if (fortress) {
++        for (let i = 0; i < 6; i++) {
++          const a = (i / 6) * Math.PI;
++          g.linePair(c - Math.cos(a) * (HH - 1), Math.abs(Math.sin(a) * (HH - 1)), c + Math.cos(a) * (HH - 1), Math.abs(Math.sin(a) * (HH - 1)), R_LIGHT);
++        }
++        g.ellipse(c, HH * 0.55, HH * 0.55, R_HULL);
++        g.ring(c, HH * 0.55, HH * 0.55 - 1.2, R_LIGHT);
++        g.sym(c, 0, R_GLOW);
++        g.ring(c, HH - 1, HH - 1.9, R_ACCENT);
++        g.gun(c, HH - 1);
++      } else {
++        // shard dart: a hull prism flanked by luminous crystal blades
++        g.wedge(2, L - 1, Math.max(1, HH - 2), 0, R_HULL);
++        g.carve(0, 2, HH);
++        g.bevel();
++        const bd = Math.max(1, HH - 2);
++        g.linePair(3, bd, Math.round(L * 0.55), HH - 1, R_LIGHT); // side shards
++        g.linePair(4, bd, Math.round(L * 0.55) + 1, HH - 1, R_LIGHT);
++        g.linePair(Math.round(L * 0.55), HH - 1, Math.round(L * 0.7), Math.round(HH * 0.4), R_LIGHT);
++        g.box(Math.round(L * 0.4), Math.round(L * 0.85), 0, 0, R_GLOW); // energy vein
++        g.sym(Math.round(L * 0.55), HH - 1, R_GLOW);
++        g.sym(Math.round(L * 0.25), bd, R_ACCENT);
++        g.engAuto(0);
++        g.engAuto(bd);
++        g.gun(L - 1, 0);
++      }
++      break;
++    }
++  }
++}
++
++const MONSTER_DIMS: Record<string, [number, number]> = {
++  amoeba: [23, 19],
++  hydra: [25, 19],
++  eel: [27, 15],
++  crystal: [21, 21],
++  dragon: [27, 21],
++  guardian: [33, 33],
++  antaran_raider: [17, 11],
++  antaran_marauder: [21, 13],
++  antaran_intruder: [25, 15],
++  antaran_fortress: [31, 31],
++};
++
++// ---- specials -> baked visual attachments (the add-ons change the look) ----
++export const VISUAL_SPECIALS = [
++  'battle_pods', 'heavy_armor', 'shield_capacitor', 'ecm_jammer', 'multi_wave_ecm_jammer',
++  'wide_area_jammer', 'high_energy_focus', 'warp_dissipater', 'hyper_x_capacitors', 'fast_missile_racks',
++] as const;
++
++function bakeAttachments(g: G, specials: string[], heavyBeams: boolean, missileTubes: number): void {
++  const cy = g.cy;
++  const midX = Math.round(g.w * 0.45);
++  const topEdgeAt = (x: number): number => {
++    for (let y = 0; y < g.h; y++) if (g.get(x, y) !== R_EMPTY) return y;
++    return cy;
++  };
++  if (specials.includes('battle_pods')) {
++    const y = topEdgeAt(midX);
++    g.set(midX, y - 1, R_ACCENT);
++    g.set(midX + 1, y - 1, R_ACCENT);
++    g.set(midX, g.h - y, R_ACCENT);
++    g.set(midX + 1, g.h - y, R_ACCENT);
++  }
++  const jammers = ['ecm_jammer', 'multi_wave_ecm_jammer', 'wide_area_jammer'].filter((s) => specials.includes(s)).length;
++  if (jammers > 0) {
++    // sensor mast(s) with a lit tip
++    for (let i = 0; i < Math.min(2, jammers + (specials.includes('wide_area_jammer') ? 1 : 0)); i++) {
++      const x = Math.round(g.w * (0.55 + i * 0.12));
++      const y = topEdgeAt(x);
++      g.set(x, y - 1, R_TRIM);
++      g.set(x, y - 2, R_TRIM);
++      g.set(x, y - 3, R_GLOW);
++    }
++  }
++  if (specials.includes('shield_capacitor')) {
++    // energized studs around the midsection
++    const y = topEdgeAt(midX + 2);
++    g.set(midX + 2, y, R_GLOW);
++    g.set(midX + 2, g.h - 1 - y, R_GLOW);
++    g.set(midX - 2, topEdgeAt(midX - 2), R_GLOW);
++    g.set(midX - 2, g.h - 1 - topEdgeAt(midX - 2), R_GLOW);
++  }
++  if (specials.includes('high_energy_focus')) {
++    // prominent focusing lens at the first muzzle
++    const m = g.guns[0];
++    if (m) {
++      g.set(m.x, m.y, R_GLOW);
++      g.set(m.x - 1, m.y, R_GLOW);
++    }
++  }
++  if (specials.includes('warp_dissipater')) {
++    // trailing interdiction tines
++    g.sym(0, 2, R_ACCENT);
++    g.set(0, cy - 3, R_ACCENT);
++    g.set(0, cy + 3, R_ACCENT);
++  }
++  if (specials.includes('hyper_x_capacitors')) {
++    // charged spine conduit
++    for (let x = Math.round(g.w * 0.3); x < Math.round(g.w * 0.7); x += 2) {
++      if (g.get(x, cy) !== R_EMPTY) g.set(x, cy, R_GLOW);
++    }
++  }
++  if (specials.includes('fast_missile_racks') || missileTubes >= 6) {
++    // visible silo row
++    const y = topEdgeAt(Math.round(g.w * 0.35));
++    for (let i = 0; i < 3; i++) {
++      const x = Math.round(g.w * 0.3) + i * 2;
++      if (g.get(x, y + 1) !== R_EMPTY) g.set(x, y + 1, R_TRIM);
++    }
++  }
++  if (heavyBeams) {
++    // heavy-mount barrels protruding past the bow
++    const m = g.guns[0];
++    if (m) {
++      g.set(Math.min(g.w - 1, m.x + 1), Math.max(0, m.y - 1), R_TRIM);
++      g.set(Math.min(g.w - 1, m.x + 1), Math.min(g.h - 1, m.y + 1), R_TRIM);
++    }
++  }
++  if (specials.includes('heavy_armor')) {
++    // plating outline: hull edge cells go dark and dense
++    for (let y = 0; y < g.h; y++) {
++      for (let x = 0; x < g.w; x++) {
++        const v = g.get(x, y);
++        if ((v === R_LIGHT || v === R_SHADE) && (x + y) % 2 === 0) g.set(x, y, R_TRIM);
++      }
++    }
++  }
++}
++
++// ---- public builders (memoized) ----
++const modelCache = new Map<string, ShipModel>();
++
++export interface ModelRequest {
++  style: string;
++  cls: ArtClass;
++  variant: number;
++  /** visual add-ons (subset of VISUAL_SPECIALS is what matters) */
++  specials?: string[];
++  /** any heavy-mount beams on the design (barrel bake) */
++  heavyBeams?: boolean;
++  /** total missile tube count (silo bake) */
++  missileTubes?: number;
++}
++
++export function getShipModel(req: ModelRequest): ShipModel {
++  const specials = (req.specials ?? []).filter((s) => (VISUAL_SPECIALS as readonly string[]).includes(s)).sort();
++  const variant = wrapVariant(req.cls, req.variant);
++  const key = `${req.style}|${req.cls}|${variant}|${specials.join(',')}|${req.heavyBeams ? 1 : 0}|${Math.min(9, req.missileTubes ?? 0)}`;
++  const hit = modelCache.get(key);
++  if (hit) return hit;
++  const spec = CLASS_SPECS[req.cls];
++  const g = new G(spec.w, spec.h);
++  const r = new Rnd(`${req.style}/${req.cls}/${variant}`);
++  const plan = PLANS[req.style] ?? planRaptor;
++  if (req.cls === 'doomstar') planDoomstar(g, req.style, r);
++  else plan(g, req.cls, spec, r, variant);
++  if (!spec.base && req.cls !== 'doomstar') bakeAttachments(g, specials, req.heavyBeams ?? false, req.missileTubes ?? 0);
++  const model = g.toModel();
++  modelCache.set(key, model);
++  return model;
++}
++
++export function getMonsterModel(kind: string): ShipModel {
++  const key = `npc|${kind}`;
++  const hit = modelCache.get(key);
++  if (hit) return hit;
++  const [w, h] = MONSTER_DIMS[kind] ?? [21, 15];
++  const g = new G(w, h);
++  monsterPlan(kind, g, new Rnd(`npc/${kind}`));
++  const model = g.toModel();
++  modelCache.set(key, model);
++  return model;
++}
++
++/** glow-role pixels of a model (blinking nav lights, window shimmer) */
++export function glowPixels(model: ShipModel): Mount[] {
++  const out: Mount[] = [];
++  for (let y = 0; y < model.h; y++) {
++    for (let x = 0; x < model.w; x++) {
++      if (model.px[y * model.w + x] === R_GLOW) out.push({ x, y });
++    }
++  }
++  return out;
++}
+diff --git a/src/ui/battle/shiptex.ts b/src/ui/battle/shiptex.ts
+new file mode 100644
+index 0000000..2b1f5be
+--- /dev/null
++++ b/src/ui/battle/shiptex.ts
+@@ -0,0 +1,92 @@
++// Palette + rasterization for the procedural pixel ships (shipart.ts).
++// Role-indexed grids become canvases (for DOM previews) and pixi textures
++// (for the battle viewer), tinted per player color. Nearest-neighbor all the
++// way down so the art stays crisp and chunky.
++
++import { Texture } from 'pixi.js';
++import { NPC_ART, STYLE_ART, type ShipModel } from './shipart';
++
++export interface Palette {
++  hull: string;
++  shade: string;
++  light: string;
++  accent: string;
++  glow: string;
++  trim: string;
++  nozzle: string;
++}
++
++function hexToRgb(hex: string): [number, number, number] {
++  const h = hex.replace('#', '');
++  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
++}
++
++function rgbToHex(r: number, g: number, b: number): string {
++  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
++  return `#${c(r)}${c(g)}${c(b)}`;
++}
++
++function mix(a: string, b: string, t: number): string {
++  const [ar, ag, ab] = hexToRgb(a);
++  const [br, bg, bb] = hexToRgb(b);
++  return rgbToHex(ar + (br - ar) * t, ag + (bg - ag) * t, ab + (bb - ab) * t);
++}
++
++function scale(hex: string, f: number): string {
++  const [r, g, b] = hexToRgb(hex);
++  return rgbToHex(r * f, g * f, b * f);
++}
++
++export function cssToNum(hex: string): number {
++  return parseInt(hex.replace('#', ''), 16);
++}
++
++/** hull palette for a (style, player color) pair; NPCs tint far harder */
++export function paletteFor(styleId: string, playerHex: string, npc = false): Palette {
++  const art = STYLE_ART[styleId] ?? NPC_ART;
++  const base = mix('#8d96ad', playerHex, npc ? 0.5 : 0.22);
++  return {
++    hull: base,
++    shade: scale(base, 0.58),
++    light: mix(scale(base, 1.45), '#ffffff', 0.12),
++    accent: playerHex,
++    glow: npc ? NPC_ART.glow : art.glow,
++    trim: '#12151f',
++    nozzle: '#1f2433',
++  };
++}
++
++export function flameColorFor(styleId: string, npc = false): string {
++  return npc ? NPC_ART.flame : (STYLE_ART[styleId] ?? NPC_ART).flame;
++}
++
++const ROLE_KEYS: Array<keyof Palette | null> = [null, 'hull', 'shade', 'light', 'accent', 'glow', 'trim', 'nozzle'];
++
++/** rasterize a model at integer scale (1 art px = `px` canvas px) */
++export function renderModelToCanvas(model: ShipModel, pal: Palette, px = 1): HTMLCanvasElement {
++  const canvas = document.createElement('canvas');
++  canvas.width = model.w * px;
++  canvas.height = model.h * px;
++  const ctx = canvas.getContext('2d')!;
++  for (let y = 0; y < model.h; y++) {
++    for (let x = 0; x < model.w; x++) {
++      const role = ROLE_KEYS[model.px[y * model.w + x]!];
++      if (!role) continue;
++      ctx.fillStyle = pal[role];
++      ctx.fillRect(x * px, y * px, px, px);
++    }
++  }
++  return canvas;
++}
++
++const texCache = new Map<string, Texture>();
++
++/** pixi texture for a model (cached by caller-provided key) */
++export function textureForModel(key: string, model: ShipModel, pal: Palette): Texture {
++  const hit = texCache.get(key);
++  if (hit) return hit;
++  const tex = Texture.from(renderModelToCanvas(model, pal, 1));
++  tex.source.scaleMode = 'nearest';
++  texCache.set(key, tex);
++  return tex;
++}
+diff --git a/src/ui/screens/BattleLab.svelte b/src/ui/screens/BattleLab.svelte
+index f960ffa..03ff075 100644
+--- a/src/ui/screens/BattleLab.svelte
++++ b/src/ui/screens/BattleLab.svelte
+@@ -18,8 +18,12 @@
+     type GameState,
+   } from '@engine/index';
+   import { rngFor } from '@engine/rng';
++  import { SHIP_STYLES } from '@engine/index';
+   import { APPLICATION_ROWS, FIELD_ROWS, WEAPON_ROWS, hullById } from '@engine/data/index';
+   import BattleViewer from '../battle/BattleViewer.svelte';
++  import ShipPreview from '../battle/ShipPreview.svelte';
++  import { variantsFor, wrapVariant, type ArtClass } from '../battle/shipart';
++  import { playerColor } from '../colors';
+   import { takeLabSeed } from '../labSeed';
+   import type { ReplayEntry } from '../state.svelte';
+ 
+@@ -56,10 +60,14 @@
+     specials: string[];
+     weapons: Array<{ weapon: string; count: number; mods: string[]; arc: 'F' | 'FX' | 'R' | '360' }>;
+     count: number;
++    /** cosmetic model variant within the side's ship style */
++    model?: number;
+   }
+   interface LabSide {
+     groups: LabGroup[];
+     orders: BattleOrders;
++    /** cosmetic fleet style for this side's sprites */
++    style: string;
+   }
+ 
+   const weaponChoices = WEAPON_ROWS.filter((w) => w.techId !== 0 && w.classId <= 2);
+@@ -93,8 +101,8 @@
+       : null;
+ 
+   let sides = $state<[LabSide, LabSide]>([
+-    { groups: seedGroups(seeded?.a) ?? [newGroup()], orders: { ...DEFAULT_ORDERS } },
+-    { groups: seedGroups(seeded?.d) ?? [newGroup()], orders: { ...DEFAULT_ORDERS, stance: 'hold_range' } },
++    { groups: seedGroups(seeded?.a) ?? [newGroup()], orders: { ...DEFAULT_ORDERS }, style: 'raptor' },
++    { groups: seedGroups(seeded?.d) ?? [newGroup()], orders: { ...DEFAULT_ORDERS, stance: 'hold_range' }, style: 'lattice' },
+   ]);
+   const fromGame = seeded !== null;
+   let seed = $state('battle-lab-0001');
+@@ -112,7 +120,7 @@
+     });
+   }
+ 
+-  function toCombat(side: 0 | 1, g: LabGroup, idx: number, n: number): CombatShipInit | string {
++  function toCombat(side: 0 | 1, g: LabGroup, idx: number, n: number, style: string): CombatShipInit | string {
+     const stats = groupStats(side, g);
+     if (typeof stats === 'string') return stats;
+     // armor class override: the lab empire knows xentronium (x10); rescale
+@@ -149,6 +157,8 @@
+       startingStructure: structureHp,
+       startingArmor: armorHp,
+       specials: g.specials,
++      style,
++      modelIdx: g.model ?? 0,
+     };
+   }
+ 
+@@ -160,7 +170,7 @@
+     for (const side of [0, 1] as const) {
+       snap[side].groups.forEach((g, gi) => {
+         for (let n = 0; n < Math.min(g.count, 12); n++) {
+-          const cs = toCombat(side, g, gi, n);
++          const cs = toCombat(side, g, gi, n, snap[side].style);
+           if (typeof cs === 'string') {
+             error = `side ${side === 0 ? 'A' : 'B'} group ${gi + 1}: ${cs}`;
+             return;
+@@ -242,6 +252,13 @@
+       <section class:red={side === 1}>
+         <h3>{side === 0 ? '🔵 Side A — attacker' : '🔴 Side B — defender'}</h3>
+         <div class="orders">
++          <label>ship style
++            <select bind:value={s.style} data-testid="lab-style-{side}">
++              {#each SHIP_STYLES as st (st.id)}
++                <option value={st.id}>{st.name}</option>
++              {/each}
++            </select>
++          </label>
+           <label>stance
+             <select bind:value={s.orders.stance}>
+               <option value="charge">charge</option>
+@@ -269,6 +286,21 @@
+           {@const st = groupStats(side, g)}
+           <div class="group">
+             <div class="row">
++              <ShipPreview
++                style={s.style}
++                cls={g.hull as ArtClass}
++                variant={g.model ?? 0}
++                color={playerColor(side)}
++                specials={[...g.specials]}
++                heavyBeams={g.weapons.some((w) => w.mods.includes('hv'))}
++                missileTubes={g.weapons.reduce((t, w) => t + ((weaponChoices.find((wc) => wc.id === w.weapon)?.classId ?? 0) === 1 ? w.count : 0), 0)}
++                px={2}
++              />
++              <button
++                class="mini"
++                title="cycle this group's model variant"
++                onclick={() => (g.model = (wrapVariant(g.hull as ArtClass, g.model ?? 0) + 1) % variantsFor(g.hull as ArtClass))}
++              >model {wrapVariant(g.hull as ArtClass, g.model ?? 0) + 1}/{variantsFor(g.hull as ArtClass)}</button>
+               <input type="number" min="1" max="12" bind:value={g.count} title="ships in this group" />×
+               <select bind:value={g.hull}>
+                 {#each HULLS_BUILDABLE as h (h)}<option value={h}>{h} ({maxHullSpace(h)} space)</option>{/each}
+diff --git a/src/ui/screens/Designer.svelte b/src/ui/screens/Designer.svelte
+index 9692919..22e4f1c 100644
+--- a/src/ui/screens/Designer.svelte
++++ b/src/ui/screens/Designer.svelte
+@@ -7,13 +7,19 @@
+     designStats,
+     modUnlocked,
+     knownWeapons,
++    shipStyleOf,
+     HULLS_BUILDABLE,
++    SHIP_STYLES,
+     SPECIALS,
+     type DesignStats,
+     type EmpireDesign,
+     type WeaponArc,
+   } from '@engine/index';
++  import { weaponById } from '@engine/data/index';
+   import { app, getActive } from '../state.svelte';
++  import { playerColor } from '../colors';
++  import ShipPreview from '../battle/ShipPreview.svelte';
++  import { variantsFor, wrapVariant, type ArtClass } from '../battle/shipart';
+   import { enemySeedsFromReplays, setLabSeed, type LabSeedGroup } from '../labSeed';
+ 
+   const ARCS: Array<{ id: WeaponArc; label: string; help: string }> = [
+@@ -55,6 +61,34 @@
+   let weapons = $state<Array<{ weapon: string; count: number; mods: string[]; arc: WeaponArc }>>([
+     { weapon: 'laser_cannon', count: 2, mods: [], arc: 'F' },
+   ]);
++  /** cosmetic model variant within the hull class (scroll with ◀ ▶) */
++  let modelIdx = $state(0);
++
++  // ---- fleet appearance (cosmetic; visible to everyone in battle replays) ----
++  const myColor = $derived(playerColor(session().playerId));
++  const currentStyle = $derived(empire ? shipStyleOf(empire) : SHIP_STYLES[0]!.id);
++  let styleSel = $state<string | null>(null); // null = the applied style
++  const shownStyle = $derived(styleSel ?? currentStyle);
++  const shownStyleInfo = $derived(SHIP_STYLES.find((s) => s.id === shownStyle) ?? SHIP_STYLES[0]!);
++  const PREVIEW_CLASSES: ArtClass[] = ['scout', 'frigate', 'destroyer', 'cruiser', 'battleship', 'titan', 'doomstar', 'star_base'];
++  function cycleStyle(dir: 1 | -1) {
++    const i = SHIP_STYLES.findIndex((s) => s.id === shownStyle);
++    styleSel = SHIP_STYLES[(i + dir + SHIP_STYLES.length) % SHIP_STYLES.length]!.id;
++  }
++  function applyStyle() {
++    if (shownStyle === currentStyle) return;
++    const res = session().submit('set_ship_style', { style: shownStyle });
++    if (!res.error) styleSel = null;
++  }
++  // model previews bake in the fit: heavy mounts and missile racks show on the hull
++  const previewHeavy = $derived(weapons.some((w) => w.mods.includes('hv')));
++  const previewMissiles = $derived(
++    weapons.reduce((n, w) => n + ((weaponById.get(w.weapon)?.classId ?? 0) === 1 ? w.count : 0), 0),
++  );
++  function cycleModel(dir: 1 | -1) {
++    const n = variantsFor(hull as ArtClass);
++    modelIdx = (wrapVariant(hull as ArtClass, modelIdx) + dir + n) % n;
++  }
+ 
+   const maxComputer = $derived(empire ? bestComputer(empire) : 0);
+   const maxShield = $derived(empire ? bestShield(empire) : 0);
+@@ -84,7 +118,10 @@
+     specials = specials.includes(sp) ? specials.filter((s) => s !== sp) : [...specials, sp];
+   }
+   function save() {
+-    const res = session().submit('save_design', { name, hull, computer, shield, specials, weapons });
++    const res = session().submit('save_design', {
++      name, hull, computer, shield, specials, weapons,
++      modelIdx: wrapVariant(hull as ArtClass, modelIdx),
++    });
+     if (!res.error) name = 'New Design';
+   }
+ 
+@@ -130,6 +167,7 @@
+     shield = d.shield;
+     specials = [...d.specials];
+     weapons = d.weapons.map((w) => ({ weapon: w.weapon, count: w.count, mods: [...w.mods], arc: w.arc ?? 'F' }));
++    modelIdx = wrapVariant(d.hull as ArtClass, d.modelIdx ?? d.id);
+   }
+   function statsOf(d: EmpireDesign): DesignStats | string | null {
+     if (!gs || !empire) return null;
+@@ -138,6 +176,29 @@
+ </script>
+ 
+ {#if gs && empire}
++  <div class="appearance" data-testid="fleet-style-panel">
++    <div class="stylebar">
++      <h3>Fleet style</h3>
++      <button class="mini" data-testid="style-prev" onclick={() => cycleStyle(-1)} title="previous style">◀</button>
++      <b class="stylename">{shownStyleInfo.name}</b>
++      <button class="mini" data-testid="style-next" onclick={() => cycleStyle(1)} title="next style">▶</button>
++      <span class="dim">{shownStyleInfo.blurb}</span>
++      {#if shownStyle !== currentStyle}
++        <button data-testid="style-apply" onclick={applyStyle}>Adopt this style</button>
++      {:else}
++        <span class="current">✓ your fleet's style</span>
++      {/if}
++    </div>
++    <div class="stylestrip">
++      {#each PREVIEW_CLASSES as pc (pc)}
++        <span class="cell">
++          <ShipPreview style={shownStyle} cls={pc} variant={0} color={myColor} px={2} title={pc.replaceAll('_', ' ')} />
++          <small>{pc === 'star_base' ? 'base' : pc}</small>
++        </span>
++      {/each}
++    </div>
++    <p class="dim finePrint">Cosmetic only — this is how your warships appear to everyone in battle replays. Each design also picks a model of its class below.</p>
++  </div>
+   <div class="wrap">
+     <div class="form">
+       <h3>New warship design</h3>
+@@ -151,6 +212,22 @@
+           {/each}
+         </select>
+       </label>
++      <div class="modelpick" data-testid="model-picker">
++        <span>Model</span>
++        <button class="mini" data-testid="model-prev" onclick={() => cycleModel(-1)} disabled={variantsFor(hull as ArtClass) < 2}>◀</button>
++        <ShipPreview
++          style={shownStyle}
++          cls={hull as ArtClass}
++          variant={modelIdx}
++          color={myColor}
++          specials={[...specials]}
++          heavyBeams={previewHeavy}
++          missileTubes={previewMissiles}
++          px={3}
++        />
++        <button class="mini" data-testid="model-next" onclick={() => cycleModel(1)} disabled={variantsFor(hull as ArtClass) < 2}>▶</button>
++        <span class="dim">{wrapVariant(hull as ArtClass, modelIdx) + 1}/{variantsFor(hull as ArtClass)}</span>
++      </div>
+       <label>Computer (tier ≤ {maxComputer})
+         <input type="number" min="0" max={maxComputer} bind:value={computer} />
+       </label>
+@@ -222,6 +299,14 @@
+       <ul>
+         {#each empire.designs as d (d.id)}
+           <li class:obsolete={d.obsolete} data-testid="design-{d.id}">
++            <ShipPreview
++              style={currentStyle}
++              cls={d.hull as ArtClass}
++              variant={d.modelIdx ?? d.id}
++              color={myColor}
++              specials={[...d.specials]}
++              px={1}
++            />
+             <button class="linklike" onclick={() => inspect(d)}>{inspecting === d.id ? '▾' : '▸'} <b>{d.name}</b></button>
+             ({d.hull}) — {d.weapons.map((w) => `${w.count}×${w.weapon.replaceAll('_', ' ')}${w.arc && w.arc !== 'F' ? `⟨${w.arc}⟩` : ''}${w.mods.length ? ` [${w.mods.join(',')}]` : ''}`).join(', ') || 'unarmed'}
+             {#if !d.obsolete}
+@@ -254,6 +339,62 @@
+ {/if}
+ 
+ <style>
++  .appearance {
++    border: 1px solid #26304f;
++    border-radius: 10px;
++    padding: 0.5rem 0.9rem 0.2rem;
++    margin-bottom: 1rem;
++    background: linear-gradient(180deg, rgba(15, 21, 48, 0.65), rgba(10, 14, 34, 0.65));
++  }
++  .stylebar {
++    display: flex;
++    align-items: center;
++    gap: 0.6rem;
++    flex-wrap: wrap;
++  }
++  .stylebar h3 {
++    margin: 0;
++  }
++  .stylename {
++    min-width: 5.5rem;
++    text-align: center;
++    color: var(--accent-soft);
++  }
++  .current {
++    color: var(--good, #5ee08a);
++    font-size: 0.85rem;
++  }
++  .stylestrip {
++    display: flex;
++    gap: 1.1rem;
++    align-items: center;
++    padding: 0.55rem 0.2rem 0.25rem;
++    flex-wrap: wrap;
++  }
++  .stylestrip .cell {
++    display: inline-flex;
++    flex-direction: column;
++    align-items: center;
++    gap: 0.15rem;
++  }
++  .stylestrip small {
++    color: var(--text-dim);
++    font-size: 0.68rem;
++  }
++  .finePrint {
++    margin: 0.1rem 0 0.4rem;
++    font-size: 0.78rem;
++  }
++  .modelpick {
++    display: flex;
++    align-items: center;
++    gap: 0.5rem;
++    margin: 0.35rem 0;
++    min-height: 45px;
++  }
++  .mini {
++    padding: 0.1rem 0.45rem;
++  }
+   .mod.locked {
+     opacity: 0.45;
+   }
+diff --git a/src/ui/screens/Fleets.svelte b/src/ui/screens/Fleets.svelte
+index 5495b6f..32522c3 100644
+--- a/src/ui/screens/Fleets.svelte
++++ b/src/ui/screens/Fleets.svelte
+@@ -1,6 +1,9 @@
+ <script lang="ts">
+-  import { selectors } from '@engine/index';
++  import { selectors, shipStyleOf, type EmpireDesign } from '@engine/index';
+   import { app, getActive } from '../state.svelte';
++  import { playerColor } from '../colors';
++  import ShipPreview from '../battle/ShipPreview.svelte';
++  import type { ArtClass } from '../battle/shipart';
+ 
+   const session = () => getActive()!.session;
+   const gs = $derived.by(() => {
+@@ -8,6 +11,10 @@
+     return session().getPlanned();
+   });
+   const fleets = $derived.by(() => (gs ? selectors.fleetRows(gs, session().playerId) : []));
++  const empire = $derived(gs?.empires.find((e) => e.id === session().playerId) ?? null);
++  const myStyle = $derived(empire ? shipStyleOf(empire) : 'raptor');
++  const myColor = $derived(playerColor(session().playerId));
++  const designOf = (id: number | null): EmpireDesign | null => empire?.designs.find((d) => d.id === id) ?? null;
+ 
+   let note = $state('');
+   function submit(kind: string, payload: unknown) {
+@@ -44,7 +51,14 @@
+     <tbody>
+       {#each fleets as f (f.ship.id)}
+         <tr data-testid="fleet-{f.ship.id}">
+-          <td class="shipname">{f.name} <span class="dim">#{f.ship.id}</span></td>
++          <td class="shipname">
++            {#if f.ship.shipKind === 'design' && designOf(f.ship.designId)}
++              {@const d = designOf(f.ship.designId)!}
++              <ShipPreview style={myStyle} cls={d.hull as ArtClass} variant={d.modelIdx ?? d.id} color={myColor} specials={[...d.specials]} px={1} />
++            {:else if f.ship.shipKind === 'scout'}
++              <ShipPreview style={myStyle} cls="scout" variant={f.ship.id} color={myColor} px={1} />
++            {/if}
++            {f.name} <span class="dim">#{f.ship.id}</span></td>
+           <td class="dim">{f.kind === 'design' ? 'warship' : f.kind.replaceAll('_', ' ')}</td>
+           <td>
+             {#if f.transit}
+diff --git a/tests/unit/shipstyle.test.ts b/tests/unit/shipstyle.test.ts
+new file mode 100644
+index 0000000..c3adadc
+--- /dev/null
++++ b/tests/unit/shipstyle.test.ts
+@@ -0,0 +1,116 @@
++import { describe, expect, it } from 'vitest';
++import { gameEngine, SHIP_STYLES, shipStyleOf, detectBattles, buildBattleInput } from '@engine/index';
++import { applyCommand, validateCommand } from '@engine/commands';
++import type { GameState } from '@engine/types';
++
++const SEED = 'aaaabbbbccccddddeeeeffff00001111';
++
++function newGame(): GameState {
++  return gameEngine.init({
++    seed: SEED,
++    settings: {
++      galaxySize: 'small',
++      startMode: 'average',
++      playerCount: 2,
++      modes: { creativeVariant: false, pickBidding: false, stickyBuild: false, antarans: false, randomEvents: false },
++      battleOrdersTimeoutMs: 1000,
++      debugCommands: true,
++    },
++    players: [
++      { id: 0, name: 'A', raceJson: JSON.stringify({ presetId: 'solari' }) },
++      { id: 1, name: 'B', raceJson: JSON.stringify({ presetId: 'solari' }) },
++    ],
++    dataVersion: 'test',
++  });
++}
++
++function cmd(state: GameState, playerId: number, kind: string, payload: unknown) {
++  return { turn: state.turn, playerId, kind, payload };
++}
++
++describe('set_ship_style (cosmetic fleet appearance)', () => {
++  it('applies a valid style and rejects unknown ones', () => {
++    const state = newGame();
++    const c = cmd(state, 0, 'set_ship_style', { style: 'crescent' });
++    expect(validateCommand(state, c)).toBeNull();
++    applyCommand(state, c);
++    expect(state.empires.find((e) => e.id === 0)!.shipStyle).toBe('crescent');
++    expect(validateCommand(state, cmd(state, 0, 'set_ship_style', { style: 'flying_toaster' }))).toContain('unknown ship style');
++    expect(validateCommand(state, cmd(state, 0, 'set_ship_style', {}))).toContain('unknown ship style');
++  });
++
++  it('defaults to a stable per-empire style when unset', () => {
++    const state = newGame();
++    for (const e of state.empires) {
++      const def = shipStyleOf(e);
++      expect(SHIP_STYLES.some((s) => s.id === def)).toBe(true);
++      expect(shipStyleOf(e)).toBe(def); // stable
++    }
++    // chosen style wins over the default
++    applyCommand(state, cmd(state, 1, 'set_ship_style', { style: 'halo' }));
++    expect(shipStyleOf(state.empires.find((e) => e.id === 1)!)).toBe('halo');
++  });
++
++  it('round-trips through serialize/deserialize', () => {
++    const state = newGame();
++    applyCommand(state, cmd(state, 0, 'set_ship_style', { style: 'bulwark' }));
++    const back = gameEngine.deserialize(gameEngine.serialize(state));
++    expect(gameEngine.hash(back)).toBe(gameEngine.hash(state));
++    expect(back.empires.find((e) => e.id === 0)!.shipStyle).toBe('bulwark');
++  });
++});
++
++describe('save_design modelIdx (cosmetic model variant)', () => {
++  const design = (modelIdx?: number) => ({
++    name: 'Testbed',
++    hull: 'frigate',
++    computer: 0,
++    shield: 0,
++    specials: [],
++    weapons: [{ weapon: 'laser_cannon', count: 1, mods: [] }],
++    ...(modelIdx !== undefined ? { modelIdx } : {}),
++  });
++
++  it('persists a chosen variant and leaves it absent when not sent', () => {
++    const state = newGame();
++    applyCommand(state, cmd(state, 0, 'save_design', design(2)));
++    applyCommand(state, cmd(state, 0, 'save_design', design()));
++    const designs = state.empires.find((e) => e.id === 0)!.designs;
++    expect(designs.at(-2)!.modelIdx).toBe(2);
++    expect('modelIdx' in designs.at(-1)!).toBe(false);
++  });
++
++  it('rejects out-of-range variants', () => {
++    const state = newGame();
++    expect(validateCommand(state, cmd(state, 0, 'save_design', design(-1)))).toContain('bad model variant');
++    expect(validateCommand(state, cmd(state, 0, 'save_design', design(99)))).toContain('bad model variant');
++    expect(validateCommand(state, cmd(state, 0, 'save_design', design(3)))).toBeNull();
++  });
++});
++
++describe('battle input snapshots fleet appearance', () => {
++  it('carries style + modelIdx per combat ship', () => {
++    const state = newGame();
++    applyCommand(state, cmd(state, 0, 'set_ship_style', { style: 'gemini' }));
++    applyCommand(state, cmd(state, 0, 'declare_war', { target: 1 }));
++    const bHome = state.colonies.find((c) => c.owner === 1)!;
++    const starId = state.planets.find((p) => p.id === bHome.planetId)!.starId;
++    const designId = (owner: number) => state.empires.find((e) => e.id === owner)!.designs[0]!.id;
++    applyCommand(state, cmd(state, 0, 'debug_spawn_ships', { starId, designId: designId(0), count: 2 }));
++    applyCommand(state, cmd(state, 1, 'debug_spawn_ships', { starId, designId: designId(1), count: 1 }));
++    const battles = detectBattles(state);
++    expect(battles.length).toBe(1);
++    const built = buildBattleInput(state, battles[0]!);
++    const a = built.input.ships.filter((s) => s.side === 0 && !s.isBase);
++    const d = built.input.ships.filter((s) => s.side === 1 && !s.isBase);
++    expect(a.length).toBeGreaterThan(0);
++    for (const s of a) {
++      expect(s.style).toBe('gemini');
++      expect(typeof s.modelIdx).toBe('number');
++    }
++    // defender never chose: falls back to their per-empire default
++    for (const s of d.filter((x) => x.shipId < 1_000_000)) {
++      expect(s.style).toBe(shipStyleOf(state.empires.find((e) => e.id === 1)!));
++    }
++  });
++});
