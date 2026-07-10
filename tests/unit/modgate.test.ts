@@ -15,7 +15,7 @@ function newGame(): GameState {
     seed: SEED,
     settings: {
       galaxySize: 'small',
-      startMode: 'average',
+      startMode: 'pre_warp', // base fields only: nothing deeper is known yet
       playerCount: 2,
       modes: { creativeVariant: false, pickBidding: false, stickyBuild: false, antarans: false, randomEvents: false },
       battleOrdersTimeoutMs: 1000,
