@@ -347,6 +347,35 @@ function advancedStart(state: GameState, homePlanets: number[], traits: RaceTrai
   }
   state.colonies.sort((a, b) => a.id - b.id);
 
+  // --- feed the empire: half-farmed worlds rarely cover the hostile mining
+  // colonies, so promote workers to farmers on the best farm worlds until the
+  // empire-wide food net is non-negative (freighters can only move SURPLUS) ---
+  for (const empire of state.empires) {
+    const mine = state.colonies.filter((c) => c.owner === empire.id);
+    const empireNet = () => mine.reduce((sum, c) => sum + colonyOutput(state, c).foodNet, 0);
+    let guard = 0;
+    while (empireNet() < 0 && guard++ < 1000) {
+      let best: { colony: Colony; gain: number } | null = null;
+      for (const c of mine) {
+        const g = c.groups[0];
+        if (!g || g.workers < 1 || !farmingViable(state, c)) continue;
+        const before = colonyOutput(state, c).foodNet;
+        g.workers--;
+        g.farmers++;
+        const after = colonyOutput(state, c).foodNet;
+        g.workers++;
+        g.farmers--;
+        const gain = after - before;
+        if (gain > 0 && (!best || gain > best.gain || (gain === best.gain && c.id < best.colony.id))) {
+          best = { colony: c, gain };
+        }
+      }
+      if (!best) break; // nothing left to convert: the region cannot self-feed
+      best.colony.groups[0]!.workers--;
+      best.colony.groups[0]!.farmers++;
+    }
+  }
+
   // --- freighters: enough to feed the whole empire from turn one ---
   for (const empire of state.empires) {
     let deficit = 0;
