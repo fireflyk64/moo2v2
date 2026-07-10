@@ -31,5 +31,13 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 180_000, // first run downloads the Go toolchain
     },
+    {
+      // the PRODUCTION bundle served statically — solo.spec proves the game
+      // runs from it with no lobby/PBM server at all
+      command: 'npm run build && npm run preview',
+      url: 'http://localhost:4173',
+      reuseExistingServer: true,
+      timeout: 120_000,
+    },
   ],
 });
