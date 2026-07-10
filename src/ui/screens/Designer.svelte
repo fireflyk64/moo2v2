@@ -13,6 +13,7 @@
     type WeaponArc,
   } from '@engine/index';
   import { app, getActive } from '../state.svelte';
+  import { enemySeedsFromReplays, setLabSeed, type LabSeedGroup } from '../labSeed';
 
   const ARCS: Array<{ id: WeaponArc; label: string; help: string }> = [
     { id: 'F', label: 'F', help: 'forward 180° (standard mount)' },
@@ -84,6 +85,25 @@
   function save() {
     const res = session().submit('save_design', { name, hull, computer, shield, specials, weapons });
     if (!res.error) name = 'New Design';
+  }
+
+  /** try the design on the battlefield BEFORE saving it: opens the Battle Lab
+   * with the work-in-progress fit vs every enemy type met in battle (or a
+   * mirror of itself when nothing has been encountered yet) */
+  function simulate() {
+    const wip: LabSeedGroup = {
+      label: name || 'WIP design',
+      hull,
+      computer,
+      shield,
+      specials: [...specials],
+      weapons: weapons.map((w) => ({ weapon: w.weapon, count: w.count, mods: [...w.mods], arc: w.arc })),
+      count: 3,
+    };
+    let enemies = enemySeedsFromReplays(app.replays, session().playerId);
+    if (!enemies.length) enemies = [{ ...wip, label: `mirror ${wip.label}` }];
+    setLabSeed([wip], enemies);
+    location.hash = '#battle-lab';
   }
   function obsolete(designId: number) {
     session().submit('obsolete_design', { designId });
@@ -187,6 +207,12 @@
         </p>
       {/if}
       <button data-testid="design-save" disabled={typeof stats === 'string'} onclick={save}>Save design</button>
+      <button
+        data-testid="design-simulate"
+        disabled={typeof stats === 'string'}
+        onclick={simulate}
+        title="open the Battle Lab with this exact fit (unsaved is fine) vs every enemy type you have met — sandbox only"
+      >⚗ Simulate</button>
     </div>
 
     <div class="list">
