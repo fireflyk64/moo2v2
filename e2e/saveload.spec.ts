@@ -78,6 +78,26 @@ test('host saves a binary file, re-hosts it in a new room, client rejoins', asyn
   await expect(b.getByTestId('turn')).toHaveText('Turn 3');
   await expect.poll(() => hashOf(b), { timeout: 10_000 }).toBe(await hashOf(a));
 
+  // --- ANY player can save, not just the host: the client downloads a save
+  // mid-game and re-hosts it — name matching hands them their own empire ---
+  const hashT3 = await hashOf(b);
+  const bDownload = b.waitForEvent('download');
+  await b.getByTestId('save-game').click();
+  const bSave = await bDownload;
+  expect(bSave.suggestedFilename()).toMatch(/turn3\.moo2save$/);
+  const bSavePath = join(downloadDir, `client-${bSave.suggestedFilename()}`);
+  await bSave.saveAs(bSavePath);
+  await expect(b.getByTestId('save-note')).toContainText('saved', { timeout: 10_000 });
+  await b.goto(`/?server=${encodeURIComponent(SERVER)}`);
+  await b.getByTestId('name').fill('Bob');
+  await b.getByTestId('room').fill(`SV4${stamp}`);
+  await b.getByTestId('load-file').setInputFiles(bSavePath);
+  await expect(b.getByTestId('save-preview')).toContainText('turn 3', { timeout: 15_000 });
+  await b.getByTestId('confirm-load').click();
+  await expect(b.getByTestId('turn')).toHaveText('Turn 3', { timeout: 30_000 });
+  await expect.poll(() => hashOf(b), { timeout: 15_000 }).toBe(hashT3);
+  await expect(b.getByTestId('my-seat')).toContainText('Bob'); // his empire, seat 1
+
   // --- a corrupted file is rejected with a clear error ---
   const badPath = join(downloadDir, 'corrupt.moo2save');
   const { readFileSync, writeFileSync } = await import('node:fs');

@@ -39,6 +39,13 @@ test('solo vs bot runs from the production bundle with zero network', async ({ b
   await page.getByTestId('commit').click();
   await expect(page.getByTestId('turn')).toHaveText('Turn 3', { timeout: 20_000 });
 
+  // --- save works in solo too, and waiting for it guarantees the async
+  // persistence queue has flushed before we reload ---
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByTestId('save-game').click();
+  await downloadPromise;
+  await expect(page.getByTestId('save-note')).toContainText('saved', { timeout: 15_000 });
+
   // --- reload: the campaign resumes from the browser database ---
   await page.reload();
   await page.getByTestId('name').fill('Solo');
