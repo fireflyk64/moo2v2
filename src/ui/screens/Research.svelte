@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { selectors, traitsOf } from '@engine/index';
+  import { appPickableBy, selectors, traitsOf } from '@engine/index';
   import { applicationsOfField, applicationById, fieldByNum, fieldById } from '@engine/data/index';
   import { EFFECTS, EFFECT_ALIASES } from '@engine/data/effectsMap';
   import { app, getActive } from '../state.svelte';
@@ -69,6 +69,7 @@
       if (!field) continue;
       for (const a of applicationsOfField(field.id)) {
         if (empire.knownApps.includes(a.id) || empire.research.extraQueue.includes(a.id)) continue;
+        if (!appPickableBy(empire, a.id)) continue; // dead pick (Unification)
         out.push({ id: a.id, name: a.name, fieldId: field.id, cost: fieldById.get(field.id)?.cost ?? 0 });
       }
     }
@@ -153,7 +154,8 @@
                 {/each}
               </ul>
             {:else}
-              {#each choice.apps as appRow (appRow.id)}
+              <!-- dead picks (morale tech under Unification) stay off the list -->
+              {#each choice.apps.filter((a) => !a.dead) as appRow (appRow.id)}
                 <label class:known={appRow.known} title={appTitle(appRow.id)}>
                   <input
                     type="radio"
@@ -178,7 +180,9 @@
                   choice.field.num,
                   choice.grantsAll
                     ? null
-                    : (pendingTarget[choice.field.num] ?? choice.apps.find((a) => !a.known)?.id ?? null),
+                    : (pendingTarget[choice.field.num] ??
+                      (choice.apps.find((a) => !a.known && !a.dead) ?? choice.apps.find((a) => !a.known))?.id ??
+                      null),
                 )}
             >
               {isCurrent ? (choice.grantsAll ? 'Researching…' : 'Change target') : 'Research this'}

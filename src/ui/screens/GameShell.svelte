@@ -99,6 +99,35 @@
   });
   /** labs idle: no field selected and nothing queued — RP is being banked */
   const researchIdle = $derived(summary !== null && summary.researching === null);
+  // ---- fast start (async turns until contact) ----
+  const fastActive = $derived.by(() => {
+    void app.version;
+    return session().fastPhaseActive();
+  });
+  const fastAhead = $derived.by(() => {
+    void app.version;
+    return session().fastAheadTurns();
+  });
+  const fastBlind = $derived.by(() => {
+    void app.version;
+    return session().fastBlind();
+  });
+  const syncedTurn = $derived.by(() => {
+    void app.version;
+    const auth = session().getState();
+    return auth ? gameEngine.turnOf(auth) : 0;
+  });
+  /** slowest player's committed-through turn (fast phase status line) */
+  const slowestInfo = $derived.by(() => {
+    void app.version;
+    if (!fastActive) return null;
+    const turns = session().getFastTurns();
+    const behind = roster
+      .filter((p) => p.id !== session().playerId)
+      .map((p) => ({ name: p.name, through: turns[String(p.id)] ?? syncedTurn - 1 }))
+      .sort((x, y) => x.through - y.through);
+    return behind[0] ?? null;
+  });
   /** commit urgency: red = everyone else committed and they are waiting on you;
    * green = others have started committing. Latched one-way per turn so an
    * opponent cycling commit/uncommit cannot flash the screen. */
@@ -143,36 +172,6 @@
     if (!gs) return 0;
     const me = session().playerId;
     return gs.leaderOffers.filter((o) => o.empireId === me && o.expiresTurn > gs.turn).length;
-  });
-
-  // ---- fast start (async turns until contact) ----
-  const fastActive = $derived.by(() => {
-    void app.version;
-    return session().fastPhaseActive();
-  });
-  const fastAhead = $derived.by(() => {
-    void app.version;
-    return session().fastAheadTurns();
-  });
-  const fastBlind = $derived.by(() => {
-    void app.version;
-    return session().fastBlind();
-  });
-  const syncedTurn = $derived.by(() => {
-    void app.version;
-    const auth = session().getState();
-    return auth ? gameEngine.turnOf(auth) : 0;
-  });
-  /** slowest player's committed-through turn (fast phase status line) */
-  const slowestInfo = $derived.by(() => {
-    void app.version;
-    if (!fastActive) return null;
-    const turns = session().getFastTurns();
-    const behind = roster
-      .filter((p) => p.id !== session().playerId)
-      .map((p) => ({ name: p.name, through: turns[String(p.id)] ?? syncedTurn - 1 }))
-      .sort((x, y) => x.through - y.through);
-    return behind[0] ?? null;
   });
   function endTurn() {
     flushTelemetry();

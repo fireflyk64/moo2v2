@@ -273,11 +273,17 @@
               {/each}
             </select>
             <input type="number" min="1" max="50" bind:value={w.count} />
-            <select class="arc" bind:value={w.arc} title={ARCS.find((a) => a.id === w.arc)?.help}>
-              {#each ARCS as a (a.id)}
-                <option value={a.id} title={a.help}>{a.label}</option>
-              {/each}
-            </select>
+            {#if weaponChoices.find((wc) => wc.id === w.weapon)?.classId === 5}
+              <!-- point defense tracks all around regardless of mount: fixed
+                   360° coverage at standard-mount space (no arc premium) -->
+              <span class="arc pd360" title="point defense tracks 360° — full coverage at standard-mount space">360°</span>
+            {:else}
+              <select class="arc" bind:value={w.arc} title={ARCS.find((a) => a.id === w.arc)?.help}>
+                {#each ARCS as a (a.id)}
+                  <option value={a.id} title={a.help}>{a.label}</option>
+                {/each}
+              </select>
+            {/if}
             {#each weaponChoices.find((wc) => wc.id === w.weapon)?.availableMods ?? [] as mod (mod)}
               {@const locked = empire ? !modUnlocked(empire, w.weapon, mod) : false}
               <label class="mod" class:locked title={locked ? `${mod}: requires research ${mod === 'pd' ? 'one level' : 'two levels'} deeper in this weapon's field` : ''}>
@@ -455,6 +461,13 @@
   }
   .arc {
     width: 4rem;
+  }
+  .pd360 {
+    display: inline-block;
+    text-align: center;
+    color: var(--accent-soft);
+    font-size: 0.8rem;
+    opacity: 0.9;
   }
   .battlestats {
     color: var(--accent-soft);
