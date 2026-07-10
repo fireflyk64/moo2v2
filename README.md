@@ -100,6 +100,25 @@ the full log + snapshots per room in their own browser database, so the host
 can reload mid-game and resume, and any player can download a verified
 `.moo2save` and re-host it in a fresh room.
 
+## Play by mail
+
+For games where nobody can agree on a time: the lobbylink server, started with
+`--pbm-config <file>` (JSON: `{"password", "data_dir", "lock_ttl_seconds"}`),
+also stores one authoritative save per room code under `/pbm/` and hands out a
+single expiring lock so one player at a time hosts. Flow: log in once with the
+shared password (remembered as a token), take the room lock, the latest save
+downloads and re-hosts locally over the same server; every commit re-uploads
+the save together with who-has-committed, so the game advances whenever the
+last outstanding player mails in their turn. "📬 mail in & leave" does a final
+upload and releases the lock (a vanished player's lock simply times out). If
+someone is playing right now, your PBM login joins their live game instead —
+and any 💾 save of a PBM game resumes as a normal serverless game, so play can
+move freely between the two modes. Seats can carry an optional protect
+password; like everything here past the shared password, that is coordination
+for friends on the honor system, not a security barrier. The dev/e2e server
+(`scripts/run-lobby-server.sh`) enables PBM with password `moo2` and data under
+`/tmp/moo2v2-pbm-dev`.
+
 ## Optional modes
 
 - **Creative variant** — Creative races buy field applications individually.

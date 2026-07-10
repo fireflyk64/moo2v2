@@ -400,6 +400,7 @@
         <li><b>☠ stars</b> are guarded by monsters — clear the keeper to colonize. Orion holds the Guardian and the best worlds in the galaxy.</li>
         <li><b>Leaders</b> offer their services on the Empires tab; colony leaders boost one colony, ship officers the whole fleet.</li>
         <li><b>Victory</b>: conquer everyone, win the council vote (⅔ of population), or build the dimensional portal and beat the Antarans at home.</li>
+        <li><b>Play by mail</b> (📬 on the home screen): one player at a time takes the room, plays, commits and "mails in" — progress uploads on every commit and the turn advances when the last player commits. If a friend is online at the same time, you simply join their live game.</li>
       </ul>
     </div>
   {/if}

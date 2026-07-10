@@ -68,3 +68,14 @@ Follow-up round (2026-07-09, after reboot):
 - [x] non-cheating AI: bot mode select on the home screen — "parity bot" (visible logged grants, as before) or "fair bot" (no debug commands at all: researches on its own, builds and sails real colony ships, spends its own money).
 
 Verification (2026-07-09, post-reboot): `npm test` (boundaries + 285 vitest tests incl. new seatmatch/fair-bot suites), `svelte-check` (0 errors), `npm run build`, and — now that the sandbox pid limit was reset by the reboot — the full Playwright e2e suite (6/6 specs, incl. save → re-host → client rejoin) all pass.
+
+---
+Play by mail (2026-07-10):
+
+- [x] the lobbylink server (started with `--pbm-config`, see ~/dev/lobbylink deploy/pbm-config.example.json) stores one authoritative save per room code under /pbm/, gated by a shared password from the config file (logged in once, token remembered; also set as a cookie for same-origin use). Optional per-seat protect passwords, honor-system beyond the shared one.
+- [x] flow: 📬 on the home screen → take the room's lock → download → re-host locally over the same server (name matching returns your empire); every commit re-uploads the save together with who-has-committed, so partial turns persist and the turn advances when the LAST player mails in. "📬 mail in & leave" = final upload + lock release; a vanished player's lock times out (180s default) and the server keeps turn-stamped history copies.
+- [x] two players online at once: the first holds the lock and hosts; a later PBM login is told who is playing and simply joins their live lobbylink game (verified in e2e, incl. the crashed-holder case which errors instead of forking the game).
+- [x] a 💾 save of a PBM game resumes as a normal serverless game and vice versa (a loaded save can create a PBM room), so games move freely between modes.
+- Client changes were kept minimal as requested: HostCore gained getCommittedSeats/seedCommitted; everything else is one UI module (src/ui/pbm.ts) + the home-screen panel + auto-upload wiring; the engine is untouched.
+
+Verification (2026-07-10): `go test ./...` in lobbylink (new internal/pbm suite: auth, lock lifecycle incl. expiry, upload/download roundtrip, seat protection, room-code hygiene), `npm test` (288 vitest tests incl. tests/protocol/pbm.test.ts simulating three mail sessions), `svelte-check` 0 errors, `npm run build`, and the Playwright suite now at 7/7 with e2e/pbm.spec.ts driving the real Go server through create → mail turn → second player advances → live-join → wrong-password rejection.
