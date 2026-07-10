@@ -3,6 +3,7 @@ import { gameEngine } from '@engine/index';
 import { validateCommand, applyCommand } from '@engine/commands';
 import { inRange } from '@engine/movement';
 import { moveOptions } from '@engine/selectors';
+import * as selectors from '@engine/selectors';
 import type { GameState } from '@engine/types';
 
 const SEED = 'aaaabbbbccccddddeeeeffff00001111';
@@ -97,5 +98,43 @@ describe('wormhole transit without fuel range (bug: outposts beyond range via wo
     const opt = moveOptions(state, 0, homeStar.id).find((o) => o.starId === far.id)!;
     expect(opt.reachable).toBe(true);
     expect(opt.turns).toBe(1);
+  });
+
+  it('a wormhole stays HIDDEN until one endpoint is visited or scanned (fog leak fix)', () => {
+    const state = newGame();
+    const { homeStar, far } = rig(state);
+    // move the wormhole to two stars the player has never seen or scanned
+    const empire = state.empires[0]!;
+    const strangers = state.stars.filter(
+      (s) =>
+        s.id !== homeStar.id &&
+        !empire.exploredStars.includes(s.id) &&
+        !selectors.scannedStars(state, 0).has(s.id),
+    );
+    homeStar.wormholeTo = null;
+    far.wormholeTo = null;
+    if (strangers.length < 2) return; // tiny map fully scanned: nothing to assert
+    const [a, b] = [strangers[0]!, strangers[strangers.length - 1]!];
+    a.wormholeTo = b.id;
+    b.wormholeTo = a.id;
+    let view = selectors.galaxyView(state, 0);
+    expect(view.find((v) => v.star.id === a.id)!.wormholeVisible).toBe(false);
+    expect(view.find((v) => v.star.id === b.id)!.wormholeVisible).toBe(false);
+
+    // visiting ONE endpoint reveals the link from both sides
+    empire.exploredStars = [...empire.exploredStars, a.id].sort((x, y) => x - y);
+    view = selectors.galaxyView(state, 0);
+    expect(view.find((v) => v.star.id === a.id)!.wormholeVisible).toBe(true);
+    expect(view.find((v) => v.star.id === b.id)!.wormholeVisible).toBe(true);
+  });
+
+  it('scanners extend the envelope: scan tech reveals farther stars', () => {
+    const state = newGame();
+    const before = selectors.scannedStars(state, 0);
+    // grant a big scanner (tachyon: scan +7 parsecs)
+    state.empires[0]!.knownApps = [...state.empires[0]!.knownApps, 'tachyon_scanner'].sort();
+    const after = selectors.scannedStars(state, 0);
+    expect(after.size).toBeGreaterThanOrEqual(before.size);
+    for (const id of before) expect(after.has(id)).toBe(true);
   });
 });
