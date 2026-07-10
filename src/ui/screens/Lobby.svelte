@@ -253,7 +253,7 @@
         {#each ['small', 'medium', 'large', 'huge'] as g (g)}<option value={g}>{g}</option>{/each}
       </select>
     </label>
-    <label>
+    <label title="pre-warp: research the basics yourself (no starting colony ship). average: tech head start + a colony ship. advanced: everyone begins with an identical developed empire — the players' regions together cover ~1/3 of the map with identical worlds system-for-system, every planet half full, freighters covering the food runs, and 5 scouts at the frontier.">
       Start:
       <select
         data-testid="start-mode"
@@ -262,6 +262,7 @@
       >
         <option value="pre_warp">pre-warp</option>
         <option value="average">average</option>
+        <option value="advanced">advanced (big identical empires)</option>
       </select>
     </label>
     <label title="every player's home system gets the identical second world">
@@ -295,11 +296,14 @@
       />
       Mirror galaxy
     </label>
-    <label title="every player begins with a bubble of 10-20 colonies around their homeworld, each ~1/3-1/2 populated — a fast, sprawling start">
+    <label title={settings.startMode === 'advanced'
+      ? 'the advanced start already builds the big empires — this toggle is superseded'
+      : 'every player begins with a bubble of 10-20 colonies around their homeworld, each ~1/3-1/2 populated — a fast, sprawling start'}>
       <input
         type="checkbox"
         data-testid="mode-bigstart"
-        checked={settings.bigStart ?? false}
+        disabled={settings.startMode === 'advanced'}
+        checked={settings.startMode !== 'advanced' && (settings.bigStart ?? false)}
         onchange={(e) => updateSetting('bigStart', (e.target as HTMLInputElement).checked)}
       />
       Big empires start

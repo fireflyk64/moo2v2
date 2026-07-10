@@ -4,6 +4,7 @@
 import { canonicalParse, canonicalStringify, hashCanonical } from './canonical';
 import {
   applicationsOfField,
+  fieldById,
   fieldByNum,
   racePresetById,
   startingFieldNums,
@@ -12,12 +13,13 @@ import {
 } from './data/index';
 import { applyCommand, validateCommand, type EngineCommand } from './commands';
 import { generateGalaxy, starDistance } from './galaxy';
-import { colonyMaxPop } from './economy';
+import { colonyMaxPop, colonyOutput, farmingViable, maxPopulation } from './economy';
+import { ceilDiv, floorDiv } from './imath';
 import { seedMonsters } from './npc';
 import { rngFor } from './rng';
 import { empireContactPairs } from './selectors';
 import { advanceTurn, resolveCombat } from './pipeline';
-import { resolveTraits } from './race';
+import { resolveTraits, type RaceTraits } from './race';
 import type { Colony, GameState, GameStateSettings, PendingBattle, TurnEvent } from './types';
 
 /** Race configuration carried in game_start player entries (raceJson). */
@@ -85,10 +87,14 @@ export function initGame(start: EngineGameStart): GameState {
   // "average" is a HEAD START over pre-warp, so it must be a superset — the
   // generated table alone omits the tier-1 roots (colony_base, star_base,
   // lasers...), leaving an average empire knowing less basics than pre-warp.
+  // "advanced" plays the default (pre-warp) tech age plus Cold Fusion: the
+  // big developed empires need colony ships and freighters from day one.
   const startFieldNums =
     start.settings.startMode === 'average'
       ? [...new Set([...startingFieldNums('pre_warp'), ...startingFieldNums('average')])]
-      : startingFieldNums(start.settings.startMode);
+      : start.settings.startMode === 'advanced'
+        ? [...new Set([...startingFieldNums('pre_warp'), fieldById.get('cold_fusion')!.num])]
+        : startingFieldNums('pre_warp');
   const startApps = new Set<string>(ALWAYS_KNOWN_ITEMS);
   for (const num of startFieldNums) {
     const field = fieldByNum.get(num);
@@ -141,74 +147,239 @@ export function initGame(start: EngineGameStart): GameState {
     });
   }
 
-  // home colonies: 8 units, balanced jobs, starting buildings by mode
-  for (let i = 0; i < start.players.length; i++) {
-    const empire = state.empires[i]!;
-    const hwPlanetId = galaxy.homePlanets[i]!;
-    const planet = state.planets.find((p) => p.id === hwPlanetId)!;
-    const star = state.stars.find((s) => s.id === planet.starId)!;
-    const startPop = 8;
-    const t = traits[i]!;
-    const farmers = t.lithovore ? 0 : 4;
-    const colony: Colony = {
-      id: state.nextId++,
-      planetId: planet.id,
-      owner: empire.id,
-      name: star.name,
-      groups: [
-        {
-          race: empire.id,
-          popK: startPop * 1000,
-          farmers,
-          workers: startPop - farmers - 2,
-          scientists: 2,
-          unrest: false,
-        },
-      ],
-      buildings: start.settings.startMode === 'average' ? ['marine_barracks', 'star_base'] : ['marine_barracks'],
-      queue: [],
-      storedProd: 0,
-      stickyInvested: {},
-      boughtThisTurn: false,
-      foodLackPrev: 0,
-      prodLackPrev: 0,
-      housingPPPrev: 0,
-      outpost: false,
-    };
-    state.colonies.push(colony);
-    empire.exploredStars = [star.id];
-    // scout + colony ship, classic opening
-    state.ships.push({
-      id: state.nextId++,
-      owner: empire.id,
-      shipKind: 'scout',
-      designId: null,
-      location: { kind: 'star', starId: star.id },
-      cargoPopUnits: 0,
-      cargoRace: empire.id,
-      dmgStructure: 0,
-      dmgArmor: 0,
-    });
-    state.ships.push({
-      id: state.nextId++,
-      owner: empire.id,
-      shipKind: 'colony_ship',
-      designId: null,
-      location: { kind: 'star', starId: star.id },
-      cargoPopUnits: 0,
-      cargoRace: empire.id,
-      dmgStructure: 0,
-      dmgArmor: 0,
-    });
+  if (start.settings.startMode === 'advanced') {
+    // big identical developed empires (regions, half-full worlds, freighter
+    // pools, frontier scouts) — replaces the classic single-home opening
+    advancedStart(state, galaxy.homePlanets, traits);
+  } else {
+    // home colonies: 8 units, balanced jobs, starting buildings by mode
+    for (let i = 0; i < start.players.length; i++) {
+      const empire = state.empires[i]!;
+      const hwPlanetId = galaxy.homePlanets[i]!;
+      const planet = state.planets.find((p) => p.id === hwPlanetId)!;
+      const star = state.stars.find((s) => s.id === planet.starId)!;
+      const startPop = 8;
+      const t = traits[i]!;
+      const farmers = t.lithovore ? 0 : 4;
+      const colony: Colony = {
+        id: state.nextId++,
+        planetId: planet.id,
+        owner: empire.id,
+        name: star.name,
+        groups: [
+          {
+            race: empire.id,
+            popK: startPop * 1000,
+            farmers,
+            workers: startPop - farmers - 2,
+            scientists: 2,
+            unrest: false,
+          },
+        ],
+        buildings: start.settings.startMode === 'average' ? ['marine_barracks', 'star_base'] : ['marine_barracks'],
+        queue: [],
+        storedProd: 0,
+        stickyInvested: {},
+        boughtThisTurn: false,
+        foodLackPrev: 0,
+        prodLackPrev: 0,
+        housingPPPrev: 0,
+        outpost: false,
+      };
+      state.colonies.push(colony);
+      empire.exploredStars = [star.id];
+      // classic opening: a scout for everyone…
+      state.ships.push({
+        id: state.nextId++,
+        owner: empire.id,
+        shipKind: 'scout',
+        designId: null,
+        location: { kind: 'star', starId: star.id },
+        cargoPopUnits: 0,
+        cargoRace: empire.id,
+        dmgStructure: 0,
+        dmgArmor: 0,
+      });
+      // …but the free colony ship is the "average" head start only: a
+      // pre-warp empire researches Cold Fusion before it can settle out
+      // (bugs.md: the early start must not begin with a colony ship)
+      if (start.settings.startMode === 'average') {
+        state.ships.push({
+          id: state.nextId++,
+          owner: empire.id,
+          shipKind: 'colony_ship',
+          designId: null,
+          location: { kind: 'star', starId: star.id },
+          cargoPopUnits: 0,
+          cargoRace: empire.id,
+          dmgStructure: 0,
+          dmgArmor: 0,
+        });
+      }
+    }
   }
   state.colonies.sort((a, b) => a.id - b.id);
   state.ships.sort((a, b) => a.id - b.id);
 
   seedMonsters(state); // guarded systems + the Guardian's prize system (M1)
 
-  if (start.settings.bigStart) bigEmpireStart(state);
+  if (start.settings.bigStart && start.settings.startMode !== 'advanced') bigEmpireStart(state);
 
   return state;
+}
+
+/** Advanced start: every player begins with an identical developed empire.
+ *
+ * The players' regions together cover about a THIRD of the galaxy (split
+ * evenly), claimed nearest-first around each homeworld so they stay
+ * contiguous and disjoint. Within the regions, player i's k-th system is
+ * stamped with EXACTLY the worlds of player 0's k-th system — identical
+ * empires — while the free two-thirds of the map keeps its organic roll
+ * (deliberately NOT a mirror galaxy). Every colonized planet starts half
+ * full, the freighter pool covers the empire's whole food run from turn one,
+ * and five scouts wait at the frontier. Runs before seedMonsters, so no
+ * keeper ever spawns inside a starting region. */
+function advancedStart(state: GameState, homePlanets: number[], traits: RaceTraits[]): void {
+  const n = state.empires.length;
+  const perPlayer = Math.max(2, Math.round(state.stars.length / (3 * n)));
+  const homeStars = homePlanets.map((pid) => state.planets.find((p) => p.id === pid)!.starId);
+
+  // --- claim contiguous equal regions: home + nearest colonizable systems ---
+  const claimed: number[][] = homeStars.map((s) => [s]);
+  const takenHomes = new Set<number>(homeStars);
+  const ranked: Array<{ starId: number; owner: number; d: number }> = [];
+  for (const star of state.stars) {
+    if (takenHomes.has(star.id)) continue;
+    if (!state.planets.some((p) => p.starId === star.id && p.body === 'planet')) continue;
+    let owner = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < n; i++) {
+      const hs = state.stars.find((s) => s.id === homeStars[i])!;
+      const d = starDistance(hs, star);
+      if (d < bestD) {
+        bestD = d;
+        owner = i;
+      }
+    }
+    ranked.push({ starId: star.id, owner, d: bestD });
+  }
+  ranked.sort((a, b) => a.d - b.d || a.starId - b.starId);
+  for (const r of ranked) {
+    if (claimed[r.owner]!.length < perPlayer) claimed[r.owner]!.push(r.starId);
+  }
+  // identical sizes even on lopsided maps: everyone keeps their nearest few
+  const size = Math.min(...claimed.map((c) => c.length));
+  for (let i = 0; i < n; i++) claimed[i] = claimed[i]!.slice(0, size);
+
+  // --- stamp: player i's k-th system carries player 0's k-th system's worlds
+  // (k=0 is the home system, already made identical by placeHomeworlds) ---
+  for (let k = 1; k < size; k++) {
+    const template = state.planets
+      .filter((p) => p.starId === claimed[0]![k])
+      .sort((a, b) => a.orbit - b.orbit || a.id - b.id);
+    for (let i = 1; i < n; i++) {
+      const starId = claimed[i]![k]!;
+      state.planets = state.planets.filter((p) => p.starId !== starId);
+      for (const t of template) {
+        state.planets.push({
+          id: state.nextId++,
+          starId,
+          orbit: t.orbit,
+          body: t.body,
+          sizeClass: t.sizeClass,
+          climate: t.climate,
+          minerals: t.minerals,
+          gravity: t.gravity,
+          special: t.special,
+          homeworldOf: null,
+          terraformSteps: t.terraformSteps ?? 0,
+        });
+      }
+    }
+  }
+
+  // --- colonies: every world in a claimed system, half full, fed jobs ---
+  const romans = ['I', 'II', 'III', 'IV', 'V'];
+  for (let i = 0; i < n; i++) {
+    const empire = state.empires[i]!;
+    for (let k = 0; k < size; k++) {
+      const starId = claimed[i]![k]!;
+      const star = state.stars.find((s) => s.id === starId)!;
+      const worlds = state.planets
+        .filter((p) => p.starId === starId && p.body === 'planet')
+        .sort((a, b) => a.orbit - b.orbit || a.id - b.id);
+      for (const planet of worlds) {
+        if (state.colonies.some((c) => c.planetId === planet.id)) continue;
+        const cap = maxPopulation(planet, traits[i]!, 0);
+        const units = Math.max(1, floorDiv(cap, 2)); // each planet half full
+        const isHome = planet.id === homePlanets[i];
+        const colony: Colony = {
+          id: state.nextId++,
+          planetId: planet.id,
+          owner: empire.id,
+          name: isHome ? star.name : `${star.name} ${romans[planet.orbit - 1] ?? planet.orbit}`,
+          groups: [{ race: empire.id, popK: units * 1000, farmers: 0, workers: units, scientists: 0, unrest: false }],
+          buildings: isHome ? ['marine_barracks'] : [],
+          queue: [],
+          storedProd: 0,
+          stickyInvested: {},
+          boughtThisTurn: false,
+          foodLackPrev: 0,
+          prodLackPrev: 0,
+          housingPPPrev: 0,
+          outpost: false,
+        };
+        state.colonies.push(colony);
+        if (farmingViable(state, colony)) {
+          const g = colony.groups[0]!;
+          g.farmers = Math.min(units, ceilDiv(units, 2));
+          g.workers = units - g.farmers;
+        }
+        // founding salvages the wreck exactly like the colonize command does
+        if (planet.special === 'space_debris') {
+          empire.bc += 50;
+          planet.special = null;
+        }
+      }
+      if (!empire.exploredStars.includes(starId)) empire.exploredStars.push(starId);
+    }
+    empire.exploredStars.sort((a, b) => a - b);
+  }
+  state.colonies.sort((a, b) => a.id - b.id);
+
+  // --- freighters: enough to feed the whole empire from turn one ---
+  for (const empire of state.empires) {
+    let deficit = 0;
+    for (const c of state.colonies) {
+      if (c.owner !== empire.id || c.outpost) continue;
+      const net = colonyOutput(state, c).foodNet;
+      if (net < 0) deficit += -net;
+    }
+    empire.freighters = ceilDiv(deficit, 5) * 5; // whole fleets, never short
+  }
+
+  // --- five scouts at the frontier (farthest claimed systems from home) ---
+  for (let i = 0; i < n; i++) {
+    const empire = state.empires[i]!;
+    const home = state.stars.find((s) => s.id === homeStars[i])!;
+    const frontier = claimed[i]!
+      .map((id) => state.stars.find((s) => s.id === id)!)
+      .sort((a, b) => starDistance(home, b) - starDistance(home, a) || a.id - b.id)
+      .slice(0, 5);
+    for (let j = 0; j < 5; j++) {
+      state.ships.push({
+        id: state.nextId++,
+        owner: empire.id,
+        shipKind: 'scout',
+        designId: null,
+        location: { kind: 'star', starId: frontier[j % frontier.length]!.id },
+        cargoPopUnits: 0,
+        cargoRace: empire.id,
+        dmgStructure: 0,
+        dmgArmor: 0,
+      });
+    }
+  }
 }
 
 /** Matches the protocol layer's EngineAdapter interface structurally, plus a

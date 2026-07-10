@@ -220,7 +220,11 @@ export interface PendingBattle {
 
 export interface GameStateSettings {
   galaxySize: 'small' | 'medium' | 'large' | 'huge';
-  startMode: 'pre_warp' | 'average';
+  /** pre_warp: research the basics yourself (no starting colony ship);
+   * average: tech head start + a colony ship; advanced: pre-warp tech plus
+   * Cold Fusion and a big developed empire (identical per player, ~1/3 of the
+   * map colonized in total, half-full worlds, freighters, frontier scouts) */
+  startMode: 'pre_warp' | 'average' | 'advanced';
   playerCount: number;
   modes: {
     creativeVariant: boolean;

@@ -4,7 +4,7 @@
 // - No imports from outside src/engine (zero runtime dependencies).
 // - No sources of nondeterminism; randomness comes only from the seeded PRNG.
 
-export const ENGINE_VERSION = '0.9.0'; // fast-start groundwork: per-empire dynamic entity ids (ids.ts), freighter in-use upkeep (0.5 BC), settler runs on second-best drive, Unification skips morale tech, PD weapons mount as 360 at base space, colony_ship_arrived event
+export const ENGINE_VERSION = '0.9.0'; // fast-start groundwork: per-empire dynamic entity ids (ids.ts), freighter in-use upkeep (0.5 BC), settler runs on second-best drive, Unification skips morale tech, PD weapons mount as 360 at base space, colony_ship_arrived event; starts: pre-warp loses the free colony ship, new 'advanced' big-identical-empires mode
 
 export * from './types';
 export * from './ids';

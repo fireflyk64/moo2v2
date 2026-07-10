@@ -24,7 +24,9 @@ export interface PlayerRoster {
 
 export interface GameSettings {
   galaxySize: 'small' | 'medium' | 'large' | 'huge';
-  startMode: 'pre_warp' | 'average';
+  /** pre_warp: research the basics (no starting colony ship); average: tech
+   * head start + colony ship; advanced: big identical developed empires */
+  startMode: 'pre_warp' | 'average' | 'advanced';
   playerCount: number;
   modes: {
     creativeVariant: boolean;
