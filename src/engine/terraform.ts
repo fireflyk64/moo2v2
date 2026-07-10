@@ -1,7 +1,9 @@
 // Terraforming (T1 documented decision, mirroring the classic step chains):
 // - terraforming project: one climate step per completion —
-//   barren→desert, desert→arid, arid→terran, tundra→swamp, swamp→terran,
-//   ocean→terran. Cost rises 250 + 250 per prior step on the planet.
+//   barren→desert OR tundra (per the docs; deterministic by planet id),
+//   desert→arid, arid→terran, tundra→swamp, swamp→terran, ocean→terran.
+//   Both barren branches reach terran in three steps.
+//   Cost rises 250 + 250 per prior step on the planet.
 // - hostile planets cannot be terraformed, but a Stellar Safety Shield makes
 //   the colony live as if barren (economy uses effectiveClimate).
 // - energized (toxic-analog) planets can never be terraformed.
