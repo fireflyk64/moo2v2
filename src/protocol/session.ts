@@ -290,15 +290,12 @@ export class GameSession<S> {
   }
 
   /** First contact / rewind: authoritative history is already correct — just
-   * drop the preview. Orders for the now-current turn stay pending; orders
-   * for previewed future turns are void (that future was speculative). */
+   * drop the whole preview buffer. Anything the host actually sequenced
+   * arrives via cmd_accept and folds into the authoritative state regardless;
+   * keeping local copies would show phantom orders the host discarded. */
   private onContact(turn: number, pairs: Array<[number, number]>): void {
     if (this.contactSeen) return;
     this.contactSeen = { turn, pairs };
-    const auth = this.authState ? this.engine.turnOf(this.authState) : 0;
-    for (const c of this.fastCmds) {
-      if (c.turn === auth) this.pending.push(c);
-    }
     this.fastCmds = [];
     this.fastEndedThrough = -1;
     this.fastBlindThrough = -1;

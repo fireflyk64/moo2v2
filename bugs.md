@@ -18,4 +18,9 @@ Anti-missile rocket should be 360
 
 - [x] We should have an alert for the turn colony ship arrived at a colonizable planet in the map view like the research done alert in the research view.
 - [x] Colonies menu should have a notification if any colony is in a default "build" mode instead of actively constructing
-- [ ] Double check discovered_bugs.md to make sure all are solved correctly in light of the new feature set
+- [x] Double check discovered_bugs.md to make sure all are solved correctly in light of the new feature set
+  (verified 2026-07-10: the audit's regression locks in tests/unit/auditfixes.test.ts all pass on the new
+  engine; the fast-start pump reuses the same accept→fold path as lockstep so the finding-54 turn-hash
+  bookkeeping is untouched; fast buffers live OUTSIDE the log so no seq reuse (finding 56); the new
+  validators are pure reads per the validator-purity contract; freighter upkeep builds on the audit's
+  busyFreighters fix. Full suite: 375+ tests green, determinism/fuzz/soak included.)

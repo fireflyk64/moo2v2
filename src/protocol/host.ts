@@ -124,6 +124,9 @@ export class HostCore<S> {
       }
       this.checkBattlePhase(); // resumed mid battle-orders phase: restart the clock
       this.armAutoTurn(); // commits may already be one short of the table
+      // fast phase: a crash between advance_turn and resolve_combat leaves an
+      // NPC battle dangling — the pump resolves it immediately on resume
+      if (this.fastLive()) this.fastPump();
     }
 
     this.unsubs.push(this.transport.onMessage((from, msg) => this.route(from, msg as ClientToHost)));
