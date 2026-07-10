@@ -13,7 +13,7 @@ import {
   PICK_EXCLUSIVE_GROUPS,
 } from './data/index';
 import { areAtWar, relationKey, setRelation } from './battles';
-import { buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, freeFreighters, traitsOf } from './economy';
+import { buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, farmingViable, freeFreighters, traitsOf } from './economy';
 import { canQueue, itemCost } from './items';
 import { inRange, shipStar, travelTurns } from './movement';
 import { availableFields, fieldGrantsAll } from './research';
@@ -76,6 +76,9 @@ const validateSetJobs: Validator = (state, cmd) => {
     }
     if (g.farmers + g.workers + g.scientists !== units) {
       return `jobs must total ${units} for race ${g.race}`;
+    }
+    if (g.farmers > 0 && !farmingViable(state, c)) {
+      return 'nothing grows here — farmers would produce no food on this world';
     }
   }
   return null;

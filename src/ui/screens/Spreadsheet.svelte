@@ -271,8 +271,21 @@
 
   function setBuild(row: selectors.ColonyRow, item: string) {
     if (!item) return;
-    const items = row.queue.length ? [item, ...row.queue.slice(1)] : [item];
+    // choosing something already queued PROMOTES it to the active slot
+    // (nothing gets locked in); otherwise it replaces the active item
+    const items = row.queue.includes(item)
+      ? [item, ...row.queue.filter((x) => x !== item)]
+      : row.queue.length
+        ? [item, ...row.queue.slice(1)]
+        : [item];
     session().submit('set_build_queue', { colonyId: row.id, items });
+  }
+
+  function removeQueued(row: selectors.ColonyRow, index: number) {
+    session().submit('set_build_queue', {
+      colonyId: row.id,
+      items: row.queue.filter((_, i) => i !== index),
+    });
   }
 
   function appendBuild(row: selectors.ColonyRow, item: string) {
@@ -499,7 +512,7 @@
             class="jobs"
             class:dropping={dragOver?.colonyId === row.id && dragOver?.job === job}
             ondragover={(e) => {
-              if (drag?.colonyId === row.id || canDropColony(row)) {
+              if ((drag?.colonyId === row.id || canDropColony(row)) && (job !== 'farmers' || row.farmable)) {
                 e.preventDefault();
                 dragOver = { colonyId: row.id, job };
               }
@@ -519,7 +532,9 @@
               data-count={row.jobs[job]}
               title="{row.jobs[job]} {job} — click a citizen to grab them plus everyone to their right, then drag onto another job or a same-system colony"
             >
-              {#if row.jobs[job] === 0}
+              {#if job === 'farmers' && !row.farmable}
+                <span class="zero" title="nothing grows here — farming is impossible on this world">🚫</span>
+              {:else if row.jobs[job] === 0}
                 <span class="zero">0</span>
               {/if}
               {#each row.groups as grp (grp.race)}
@@ -564,6 +579,9 @@
             {#if row.activeItem && !row.buildable.includes(row.activeItem)}
               <option value={row.activeItem}>{label(row.activeItem)}</option>
             {/if}
+            {#each row.queue.slice(1).filter((q) => !row.buildable.includes(q)) as q (q)}
+              <option value={q}>{label(q)} (queued)</option>
+            {/each}
             {#each row.buildable as item (item)}
               <option value={item}>{label(item)}</option>
             {/each}
@@ -592,7 +610,14 @@
           {/if}
         </td>
         <td>
-          <span class="dim">{row.queue.slice(1).map(label).join(', ')}</span>
+          {#each row.queue.slice(1) as q, qi (qi)}
+            <button
+              class="queuechip"
+              data-testid="queued-{row.id}-{qi + 1}"
+              title="{label(q)} — click ✕ to remove, or pick it in the build column to build it now"
+              onclick={() => removeQueued(row, qi + 1)}
+            >{label(q)} ✕</button>
+          {/each}
           <select data-testid="queue-add-{row.id}" value="" onchange={(e) => { appendBuild(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}>
             <option value="">+ queue</option>
             {#each row.buildable as item (item)}
@@ -733,6 +758,18 @@
   .name.shipok {
     background: rgba(110, 168, 255, 0.16);
     outline: 1px dashed var(--accent);
+  }
+  .queuechip {
+    font-size: 0.72rem;
+    padding: 0 0.3rem;
+    margin-right: 0.15rem;
+    background: var(--panel-3);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    opacity: 0.85;
+  }
+  .queuechip:hover {
+    border-color: var(--bad);
   }
   .movenote {
     font-size: 0.8rem;

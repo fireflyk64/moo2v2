@@ -3,7 +3,7 @@
 // from here so alternate front ends and headless bots agree exactly.
 
 import { fieldByNum, applicationsOfField, FIELD_SUBJECTS, type FieldRow } from './data/index';
-import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, freeFreighters, groupGrowthK, type ColonyOutput } from './economy';
+import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, type ColonyOutput } from './economy';
 import { buildableItems, itemCost, refitCost, SHIPYARD_BASES } from './items';
 import { empireAccum } from './effects';
 import { isBlockaded } from './ground';
@@ -56,6 +56,8 @@ export interface ColonyRow {
   canSell: boolean;
   /** player-set organizational tags (subset of COLONY_TAGS) */
   tags: string[];
+  /** false when farmers can produce no food here (barren etc.) */
+  farmable: boolean;
 }
 
 /** Project this turn's food distribution (mirrors the pipeline: surpluses
@@ -189,6 +191,7 @@ export function colonyRow(state: GameState, colony: Colony, projectedFoodLack?: 
     })),
     canSell: !colony.soldThisTurn,
     tags: colony.tags ?? [],
+    farmable: !colony.outpost && farmingViable(state, colony),
   };
 }
 

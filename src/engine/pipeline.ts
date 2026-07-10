@@ -141,7 +141,10 @@ function s1_population(state: GameState, events: TurnEvent[]): void {
         g.popK += applied;
         colonyPopK += applied;
       } else if (inc < 0) {
-        const loss = Math.min(-inc, g.popK);
+        // starvation never wipes a settlement out: the last whole colonist
+        // unit survives on scraps (bug: "food should not starve below 1 pop")
+        const spare = Math.max(0, colonyPopK - 1000);
+        const loss = Math.min(-inc, g.popK, spare);
         g.popK -= loss;
         colonyPopK -= loss;
         if (loss > 0) {
