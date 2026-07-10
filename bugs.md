@@ -18,3 +18,4 @@ Anti-missile rocket should be 360
 
 - [ ] We should have an alert for the turn colony ship arrived at a colonizable planet in the map view like the research done alert in the research view.
 - [ ] Colonies menu should have a notification if any colony is in a default "build" mode instead of actively constructing
+- [ ] Double check discovered_bugs.md to make sure all are solved correctly in light of the new feature set
