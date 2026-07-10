@@ -37,6 +37,11 @@ export interface EngineAdapter<S = unknown> {
   phaseOf?(state: S): string;
   /** Optional: battles awaiting orders during the battle_orders phase. */
   pendingBattles?(state: S): Array<{ id: string; attacker: number; defender: number; ordersA: unknown; ordersD: unknown }>;
+  /** Optional (fast start): live empire pairs that have met. While empty the
+   * empires cannot interact, so the host may resolve turns asynchronously. */
+  contactPairs?(state: S): Array<[number, number]>;
+  /** Optional: winner of the game, if any (fast start ends on victory too). */
+  winnerOf?(state: S): number | null;
 }
 
 // ---------- Phase 2 stub: a lockstep counter game ----------

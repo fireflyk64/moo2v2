@@ -287,6 +287,11 @@ export function createGameEngine() {
     return empireContactPairs(state);
   },
 
+  /** protocol hook (fast-start): victory also ends the async phase */
+  winnerOf(state: GameState): number | null {
+    return state.winner;
+  },
+
   turnOf(state: GameState): number {
     return state.turn;
   },

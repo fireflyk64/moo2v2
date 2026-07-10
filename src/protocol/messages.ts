@@ -105,6 +105,16 @@ export type HostToClient =
       committed: number[];
       /** ms until the host force-advances (auto-turn timer armed) */
       autoTurnInMs?: number;
+      /** fast start: highest turn each seat has committed through (seat id as
+       * string key; absent for seats that have not committed anything) */
+      fastTurns?: Record<string, number>;
+    }
+  | {
+      t: 'contact_notice';
+      /** authoritative turn at which the empires stand after first contact */
+      turn: number;
+      /** the empire pairs that met */
+      pairs: Array<[number, number]>;
     }
   | { t: 'desync_notice'; turn: number; expected: string }
   | {
@@ -139,7 +149,9 @@ export const DEFAULT_SETTINGS: GameSettings = {
     creativeVariant: false,
     pickBidding: false,
     stickyBuild: false,
-    antarans: true,
+    // off by default: the raids hammer the leading empire hard enough to
+    // decide most games (bugs.md: "too devastating for most games")
+    antarans: false,
     randomEvents: true,
   },
   battleOrdersTimeoutMs: 60_000,
@@ -150,6 +162,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   bigStart: false,
   mirror: false,
   homeStart: 'good',
+  fastStart: false,
 };
 
 const TE = new TextEncoder();

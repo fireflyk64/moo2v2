@@ -8,6 +8,7 @@ import type { EngineAdapter, GameStartPayload } from './engineAdapter';
 import { findContested, resolveAuction, type AuctionOutcome } from './auction';
 import { LocalHostLink } from './link';
 import {
+  FAST_MAX_AHEAD,
   PROTOCOL_VERSION,
   type ClientToHost,
   type GameSettings,
@@ -60,6 +61,17 @@ export class HostCore<S> {
   private lastSeq = -1;
   private state: S | null = null;
   private committed = new Set<number>();
+  // ----- fast start (async turns until contact) -----
+  /** commands submitted for turns the authoritative sim has not reached yet,
+   * FIFO per turn (drained + validated when the sim arrives at that turn) */
+  private fastBuf = new Map<number, Array<{ seat: number; clientId: string; kind: string; payload: unknown }>>();
+  /** clientIds ever buffered — clients re-send their buffers after a host
+   * restart or reconnect; duplicates must not double-apply */
+  private fastBufIds = new Set<string>();
+  /** highest turn each seat has committed through */
+  private fastCommitted = new Map<number, number>();
+  /** guards the one-time CONTACT broadcast */
+  private contactAnnounced = false;
   // chat ids are namespaced per host session (epoch-second base): a resumed
   // host restarting at 0 would collide with persisted rows and the storage
   // layer's conflict handling silently dropped every post-restart message
@@ -103,6 +115,13 @@ export class HostCore<S> {
     if (opts.resumeLog?.length) {
       for (const cmd of opts.resumeLog) this.fold(cmd);
       this.battleOrdersTimeoutMs = this.settings.battleOrdersTimeoutMs || 60_000;
+      // a resumed fast game that already reached contact stays synchronous —
+      // mark it announced so the refold never re-flashes CONTACT
+      if (this.fastEnabled() && this.state) {
+        const pairs = this.engine.contactPairs?.(this.state) ?? [];
+        const winner = this.engine.winnerOf?.(this.state) ?? null;
+        if (pairs.length || winner !== null) this.contactAnnounced = true;
+      }
       this.checkBattlePhase(); // resumed mid battle-orders phase: restart the clock
       this.armAutoTurn(); // commits may already be one short of the table
     }
@@ -317,7 +336,7 @@ export class HostCore<S> {
     }
     this.broadcastLobby();
     if (this.started) {
-      this.sendTo(seatId, { t: 'commit_status', turn: this.currentTurn(), committed: [...this.committed] });
+      this.sendTo(seatId, this.commitStatusMsg());
     }
   }
 
@@ -487,6 +506,11 @@ export class HostCore<S> {
       this.sendTo(id, { t: 'cmd_accept', cmd, ...(id === submitter && clientId ? { clientId } : {}) });
     }
     this.checkBattlePhase();
+    // fast phase: any accepted command can create first contact (e.g. a
+    // colonize at a star the other empire explored)
+    if (this.fastEnabled() && !this.contactAnnounced && cmd.kind !== 'game_start') {
+      this.maybeAnnounceContact();
+    }
   }
 
   /** battle_orders sub-phase driver: when resolution paused for orders, emit
@@ -527,6 +551,11 @@ export class HostCore<S> {
     if (!this.started || !this.state) {
       return this.sendTo(from, { t: 'cmd_reject', clientId: msg.clientId, reason: 'not started' });
     }
+    // fast phase: commands for turns the sim has not reached wait in the
+    // buffer and are validated when their turn arrives
+    if (msg.turn > this.currentTurn() && this.fastLive()) {
+      return this.fastBuffer(from, msg);
+    }
     const cmd: LogCommand = {
       seq: -1,
       turn: msg.turn,
@@ -542,6 +571,10 @@ export class HostCore<S> {
   /** Seats currently committed for this turn (play-by-mail: persisted with
    * the save so commits survive between mail sessions). */
   getCommittedSeats(): number[] {
+    if (this.fastLive()) {
+      const turn = this.currentTurn();
+      return [...this.seats.keys()].filter((id) => (this.fastCommitted.get(id) ?? -1) >= turn).sort((a, b) => a - b);
+    }
     return [...this.committed].sort((a, b) => a - b);
   }
 
@@ -549,6 +582,14 @@ export class HostCore<S> {
    * earlier player's commit still counts. Advances if that completes the
    * table. */
   seedCommitted(seatIds: number[]): void {
+    if (this.fastLive()) {
+      const turn = this.currentTurn();
+      for (const id of seatIds) {
+        if (this.seats.has(id)) this.fastCommitted.set(id, Math.max(this.fastCommitted.get(id) ?? -1, turn));
+      }
+      this.fastPump();
+      return;
+    }
     for (const id of seatIds) {
       if (this.seats.has(id)) this.committed.add(id);
     }
@@ -557,7 +598,17 @@ export class HostCore<S> {
   }
 
   private onCommit(from: number, turn: number, committed: boolean): void {
-    if (!this.started || turn !== this.currentTurn()) return;
+    if (!this.started) return;
+    if (this.fastLive()) {
+      // fast phase: ending a turn is final (the player's preview already
+      // advanced past it) — uncommit has no meaning here
+      if (!committed) return;
+      if (turn > this.currentTurn() + FAST_MAX_AHEAD) return; // cap backstop
+      this.fastCommitted.set(from, Math.max(this.fastCommitted.get(from) ?? -1, turn));
+      this.fastPump();
+      return;
+    }
+    if (turn !== this.currentTurn()) return;
     // during battle_orders the turn counter hasn't advanced yet: a commit
     // accepted here would survive resolve_combat and pre-commit the player
     // for a turn they never planned
@@ -572,16 +623,28 @@ export class HostCore<S> {
   private broadcastCommitStatus(): void {
     this.armAutoTurn();
     const remaining = this.autoTurnTimer ? Math.max(0, this.autoTurnDeadline - Date.now()) : undefined;
-    this.broadcast({
+    this.broadcast(this.commitStatusMsg(remaining));
+  }
+
+  private commitStatusMsg(autoTurnInMs?: number): Extract<HostToClient, { t: 'commit_status' }> {
+    const fast = this.fastLive();
+    let fastTurns: Record<string, number> | undefined;
+    if (fast && this.fastCommitted.size) {
+      fastTurns = {};
+      for (const [seat, t] of this.fastCommitted) fastTurns[String(seat)] = t;
+    }
+    return {
       t: 'commit_status',
       turn: this.currentTurn(),
       committed: this.getCommittedSeats(),
-      ...(remaining !== undefined ? { autoTurnInMs: remaining } : {}),
-    });
+      ...(autoTurnInMs !== undefined ? { autoTurnInMs } : {}),
+      ...(fastTurns ? { fastTurns } : {}),
+    };
   }
 
   private maybeAdvance(): void {
     if (!this.state) return;
+    if (this.fastLive()) return; // the fast pump owns advancement pre-contact
     if (this.engine.phaseOf && this.engine.phaseOf(this.state) !== 'planning') return;
     const seated = [...this.seats.keys()];
     if (seated.length < 1) return;
@@ -597,6 +660,101 @@ export class HostCore<S> {
     this.broadcastCommitStatus();
   }
 
+  // ----- fast start: async turns until first contact -----
+
+  private fastEnabled(): boolean {
+    return !!this.settings.fastStart;
+  }
+
+  /** True while the fast phase is running: game started, nobody has won, and
+   * no two empires have met — the invariant that makes async turns sound. */
+  private fastLive(): boolean {
+    if (!this.fastEnabled() || !this.started || !this.state) return false;
+    if (this.contactAnnounced) return false;
+    if ((this.engine.winnerOf?.(this.state) ?? null) !== null) return false;
+    return (this.engine.contactPairs?.(this.state) ?? []).length === 0;
+  }
+
+  /** Buffer a command for a turn the authoritative sim has not reached. */
+  private fastBuffer(seat: number, msg: Extract<ClientToHost, { t: 'cmd_submit' }>): void {
+    if (msg.turn > this.currentTurn() + FAST_MAX_AHEAD + 2) {
+      return this.sendTo(seat, { t: 'cmd_reject', clientId: msg.clientId, reason: 'too far ahead of the slowest player' });
+    }
+    if (this.fastBufIds.has(msg.clientId)) return; // reconnect re-send
+    this.fastBufIds.add(msg.clientId);
+    const list = this.fastBuf.get(msg.turn) ?? [];
+    list.push({ seat, clientId: msg.clientId, kind: msg.kind, payload: msg.payload });
+    this.fastBuf.set(msg.turn, list);
+  }
+
+  /** Sequence the buffered commands for the turn the sim just reached, in
+   * arrival order. Validation runs against the authoritative state; a command
+   * that no longer applies (its player's preview diverged) is rejected back
+   * to its submitter, never folded. */
+  private drainFast(turn: number): void {
+    const list = this.fastBuf.get(turn);
+    if (!list || !this.state) return;
+    this.fastBuf.delete(turn);
+    for (const entry of list) {
+      this.fastBufIds.delete(entry.clientId);
+      const cmd: LogCommand = { seq: -1, turn, playerId: entry.seat, kind: entry.kind, payload: entry.payload };
+      const err = this.engine.validate(this.state, cmd);
+      if (err) {
+        this.sendTo(entry.seat, { t: 'cmd_reject', clientId: entry.clientId, reason: err });
+        continue;
+      }
+      this.accept({ turn, playerId: entry.seat, kind: entry.kind, payload: entry.payload }, entry.clientId, entry.seat);
+    }
+  }
+
+  /** The fast-phase engine room: advance the authoritative sim as far as the
+   * slowest player's commits allow, auto-resolving NPC battles, draining each
+   * turn's buffered commands as the sim arrives there, and stopping cold the
+   * moment two empires meet (or someone wins). */
+  private fastPump(): void {
+    if (!this.state) return;
+    let guard = 0;
+    while (guard++ < 1000) {
+      if (!this.fastLive()) break;
+      if (this.engine.phaseOf && this.engine.phaseOf(this.state) === 'battle_orders') {
+        // pre-contact battles only ever involve NPCs on one side: resolve
+        // immediately with default orders (the engine substitutes them)
+        this.accept({ turn: this.currentTurn(), playerId: -1, kind: 'resolve_combat', payload: {} });
+        continue; // re-check contact/victory after the resolution folds
+      }
+      const turn = this.currentTurn();
+      this.drainFast(turn);
+      if (!this.fastLive()) break; // a drained command can create contact
+      const seated = [...this.seats.keys()];
+      if (!seated.length || !seated.every((id) => (this.fastCommitted.get(id) ?? -1) >= turn)) break;
+      this.accept({
+        turn,
+        playerId: -1,
+        kind: 'advance_turn',
+        payload: this.engine.advancePayload(this.state),
+      });
+    }
+    this.maybeAnnounceContact();
+    this.broadcastCommitStatus();
+  }
+
+  /** One-time CONTACT transition: discard everything speculative (the rewind)
+   * and hand the table back to classic lockstep at the current turn. */
+  private maybeAnnounceContact(): void {
+    if (this.contactAnnounced || !this.fastEnabled() || !this.state || !this.started) return;
+    const pairs = this.engine.contactPairs?.(this.state) ?? [];
+    const winner = this.engine.winnerOf?.(this.state) ?? null;
+    if (!pairs.length && winner === null) return;
+    this.contactAnnounced = true;
+    this.fastBuf.clear();
+    this.fastBufIds.clear();
+    this.fastCommitted.clear();
+    this.committed.clear();
+    if (pairs.length) {
+      this.broadcast({ t: 'contact_notice', turn: this.currentTurn(), pairs });
+    }
+  }
+
   /** Auto-turn timer: once every seat except one has committed, the table
    * only waits settings.autoTurnSeconds for the laggard — then the host
    * advances the turn without them (their next-turn planning is unharmed;
@@ -607,6 +765,9 @@ export class HostCore<S> {
     const committed = seats.filter((id) => this.committed.has(id)).length;
     const eligible =
       secs > 0 &&
+      // fast phase: nobody waits on anybody, so force-advancing a laggard
+      // would only corrupt their own-turn planning
+      !this.fastLive() &&
       !!this.state &&
       (!this.engine.phaseOf || this.engine.phaseOf(this.state) === 'planning') &&
       seats.length >= 2 &&
