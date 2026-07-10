@@ -4,7 +4,7 @@
 // - No imports from outside src/engine (zero runtime dependencies).
 // - No sources of nondeterminism; randomness comes only from the seeded PRNG.
 
-export const ENGINE_VERSION = '0.6.0'; // ETA arrivals, freighter pop transits, starvation floor, armed scouts, combat mods/fighters, value-guarded monsters
+export const ENGINE_VERSION = '0.7.0'; // deadliest targeting + overkill spread, standoff strafe, ground-battle replays, bot personalities, big-empire start
 
 export * from './types';
 export * from './canonical';

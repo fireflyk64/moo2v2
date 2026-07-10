@@ -295,6 +295,15 @@
       />
       Mirror galaxy
     </label>
+    <label title="every player begins with a bubble of 10-20 colonies around their homeworld, each ~1/3-1/2 populated — a fast, sprawling start">
+      <input
+        type="checkbox"
+        data-testid="mode-bigstart"
+        checked={settings.bigStart ?? false}
+        onchange={(e) => updateSetting('bigStart', (e.target as HTMLInputElement).checked)}
+      />
+      Big empires start
+    </label>
     {#each MODE_HELP as m (m.key)}
       <label title={m.help}>
         <input
