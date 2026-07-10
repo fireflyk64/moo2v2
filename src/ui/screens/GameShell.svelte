@@ -46,9 +46,12 @@
     return roster.find((p) => p.id === me)?.name ?? `#${me}`;
   });
   const botOnSeat = (seatId: number) => getActive()?.bots.find((b) => b.seatId === seatId) ?? null;
+  // snapshot the fields: pbm.note mutates in place on a non-reactive object,
+  // so returning the object itself would never re-render the banner
   const pbmInfo = $derived.by(() => {
     void app.version;
-    return getActive()?.pbm ?? null;
+    const p = getActive()?.pbm;
+    return p ? { role: p.role, note: p.note } : null;
   });
   /** host view: seats a bot could take over, or is holding */
   const seatIssues = $derived.by(() => {
