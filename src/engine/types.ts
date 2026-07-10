@@ -168,6 +168,10 @@ export interface Empire {
   /** UI time-spent aggregates, seconds per screen (submitted with commits so
    * every player can see where the table's time goes; absent = none) */
   telemetry?: Record<string, number>;
+  /** per-empire dynamic entity-id counter (ids.ts block allocation; absent in
+   * older saves = starts at 1). Keeps a player's entity ids independent of
+   * other empires' allocations — required by fast-start command replay. */
+  nextEntityId?: number;
   eliminated: boolean;
 }
 
@@ -306,7 +310,10 @@ export interface GameState {
   turn: number; // 1-based once started
   seed: MasterSeed;
   settings: GameStateSettings;
+  /** init-time id counter (galaxy/setup); in-game allocation uses ids.ts */
   nextId: number;
+  /** world/NPC dynamic entity-id counter (ids.ts; absent in older saves) */
+  nextWorldId?: number;
   stars: Star[];
   planets: Planet[];
   empires: Empire[];

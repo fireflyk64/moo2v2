@@ -14,8 +14,9 @@ import {
 } from './data/index';
 import { areAtWar, relationKey, setRelation } from './battles';
 import { buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, farmingViable, freeFreighters, traitsOf } from './economy';
+import { allocId, allocWorldId } from './ids';
 import { canQueue, itemCost } from './items';
-import { inRange, shipStar, supportStars, travelTurns } from './movement';
+import { inRange, settlerTravelTurns, shipStar, supportStars, travelTurns } from './movement';
 import { starDistance } from './galaxy';
 import { availableFields, fieldGrantsAll } from './research';
 import { designStats, knownWeapons } from './shipdesign';
