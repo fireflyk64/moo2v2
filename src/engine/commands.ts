@@ -18,7 +18,7 @@ import { allocId, allocWorldId } from './ids';
 import { canQueue, itemCost } from './items';
 import { inRange, settlerTravelTurns, shipStar, supportStars, travelTurns } from './movement';
 import { starDistance } from './galaxy';
-import { availableFields, fieldGrantsAll } from './research';
+import { appPickableBy, availableFields, fieldGrantsAll } from './research';
 import { designStats, knownWeapons } from './shipdesign';
 import { isShipStyle } from './shipstyles';
 import type { BattleOrders, Stance, TargetPriority } from './combat';
@@ -201,6 +201,9 @@ const validateSetResearch: Validator = (state, cmd) => {
     const apps = applicationsOfField(field.id);
     if (!apps.some((a) => a.id === p.targetApp)) return `${p.targetApp} not in ${field.id}`;
     if (empire.knownApps.includes(p.targetApp)) return `${p.targetApp} already known`;
+    if (!appPickableBy(empire, p.targetApp)) {
+      return `${p.targetApp} is pointless under Unification (morale-immune)`;
+    }
   }
   const traits = traitsOf(empire);
   if (!traits.uncreative && !(traits.creative && !state.settings.modes.creativeVariant)) {
@@ -241,6 +244,7 @@ const validateExtraResearch: Validator = (state, cmd) => {
   if (!empire.completedFields.includes(field.num)) return `${field.id} not completed`;
   if (empire.knownApps.includes(p.appId)) return `${p.appId} already known`;
   if (empire.research.extraQueue.includes(p.appId)) return `${p.appId} already queued`;
+  if (!appPickableBy(empire, p.appId)) return `${p.appId} is pointless under Unification (morale-immune)`;
   return null;
 };
 

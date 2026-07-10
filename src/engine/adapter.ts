@@ -15,6 +15,7 @@ import { generateGalaxy, starDistance } from './galaxy';
 import { colonyMaxPop } from './economy';
 import { seedMonsters } from './npc';
 import { rngFor } from './rng';
+import { empireContactPairs } from './selectors';
 import { advanceTurn, resolveCombat } from './pipeline';
 import { resolveTraits } from './race';
 import type { Colony, GameState, GameStateSettings, PendingBattle, TurnEvent } from './types';
@@ -278,6 +279,12 @@ export function createGameEngine() {
    * all are filled or the order timeout expires) */
   pendingBattles(state: GameState): PendingBattle[] {
     return state.pendingBattles;
+  },
+
+  /** protocol hook (fast-start): live empire pairs that have met. While this
+   * is empty the empires cannot interact and turns may resolve async. */
+  contactPairs(state: GameState): Array<[number, number]> {
+    return empireContactPairs(state);
   },
 
   turnOf(state: GameState): number {

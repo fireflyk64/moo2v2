@@ -638,6 +638,24 @@ export function metEmpireIds(state: GameState, empireId: number): Set<number> {
   return met;
 }
 
+/** Pairs of live empires that have met, in either direction (one side seeing
+ * the other's colony counts). This is fast-start's contact tripwire: while it
+ * is empty the empires cannot interact, so turns may resolve asynchronously. */
+export function empireContactPairs(state: GameState): Array<[number, number]> {
+  const alive = state.empires.filter((e) => !e.eliminated).map((e) => e.id);
+  const met = new Map<number, Set<number>>();
+  for (const id of alive) met.set(id, metEmpireIds(state, id));
+  const pairs: Array<[number, number]> = [];
+  for (let i = 0; i < alive.length; i++) {
+    for (let j = i + 1; j < alive.length; j++) {
+      const a = alive[i]!;
+      const b = alive[j]!;
+      if (met.get(a)!.has(b) || met.get(b)!.has(a)) pairs.push([a, b]);
+    }
+  }
+  return pairs;
+}
+
 export interface MoveOption {
   starId: number;
   name: string;

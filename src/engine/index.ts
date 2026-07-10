@@ -4,9 +4,10 @@
 // - No imports from outside src/engine (zero runtime dependencies).
 // - No sources of nondeterminism; randomness comes only from the seeded PRNG.
 
-export const ENGINE_VERSION = '0.8.0'; // 2026-07-10 audit fixes: validator purity + payload hardening, classId-5 weapons fire, per-colony growth/starvation, CP/freighter/gravity/farming corrections, connectivity-safe monster seeding, planet specials, outpost razing, eliminated-empire scrub
+export const ENGINE_VERSION = '0.9.0'; // fast-start groundwork: per-empire dynamic entity ids (ids.ts), freighter in-use upkeep (0.5 BC), settler runs on second-best drive, Unification skips morale tech, PD weapons mount as 360 at base space, colony_ship_arrived event
 
 export * from './types';
+export * from './ids';
 export * from './canonical';
 export * from './hash';
 export * from './isqrt';

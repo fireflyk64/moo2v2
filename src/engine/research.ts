@@ -61,6 +61,18 @@ export function availableFields(empire: Empire): FieldRow[] {
   return out;
 }
 
+/** Buildings whose ONLY effect is colony morale (data/effectsMap.ts). A
+ * Unification government is immune to morale swings (economy.ts), so these
+ * applications are dead picks for it: they are dropped from its research
+ * choices (target pick, uncreative roll, default grant). Creative grant-all
+ * still includes them — no choice is being made there. */
+const MORALE_ONLY_APPS = ['holo_simulator', 'pleasure_dome', 'virtual_reality_network'];
+
+/** False when this application would be a dead research pick for the empire. */
+export function appPickableBy(empire: Empire, appId: string): boolean {
+  return !(empire.government === 'unification' && MORALE_ONLY_APPS.includes(appId));
+}
+
 export function grantApp(empire: Empire, appId: string): boolean {
   if (empire.knownApps.includes(appId)) return false;
   empire.knownApps.push(appId);
@@ -86,22 +98,26 @@ function completeField(
     granted.push(synthetic);
   } else {
     const unknown = apps.filter((a) => !empire.knownApps.includes(a.id));
+    // choice paths skip dead picks (morale tech under Unification); when a
+    // field somehow offers ONLY dead picks, fall back so it still grants
+    const pickableList = unknown.filter((a) => appPickableBy(empire, a.id));
+    const pickable = pickableList.length ? pickableList : unknown;
     if (fieldGrantsAll(field) || (traits.creative && !state.settings.modes.creativeVariant)) {
       for (const a of unknown) {
         grantApp(empire, a.id);
         granted.push(a.id);
       }
     } else if (traits.uncreative) {
-      if (unknown.length) {
-        const a = unknown[rng.int(unknown.length)]!;
+      if (pickable.length) {
+        const a = pickable[rng.int(pickable.length)]!;
         grantApp(empire, a.id);
         granted.push(a.id);
       }
     } else {
       const target =
-        empire.research.targetApp && unknown.some((a) => a.id === empire.research.targetApp)
+        empire.research.targetApp && pickable.some((a) => a.id === empire.research.targetApp)
           ? empire.research.targetApp
-          : (unknown[0]?.id ?? null);
+          : (pickable[0]?.id ?? null);
       if (target) {
         grantApp(empire, target);
         granted.push(target);

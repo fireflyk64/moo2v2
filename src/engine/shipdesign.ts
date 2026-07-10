@@ -222,11 +222,15 @@ export function fitWeapon(empire: Empire, dw: DesignWeapon): FittedWeapon | stri
     }
   }
   if (!Number.isSafeInteger(dw.count) || dw.count < 1 || dw.count > 200) return 'bad weapon count';
-  const arc = dw.arc ?? 'F';
+  let arc = dw.arc ?? 'F';
   if (!(arc in ARC_SPACE_PCT)) return `unknown arc ${arc}`;
+  // point-defense-class weapons (anti-missile rocket &co) track all around in
+  // combat regardless of mount, so they ARE 360 — shown as such and never
+  // charged the wide-arc mount premium (combat.ts: "point defense is always 360")
+  if (row.classId === 5) arc = '360';
   const mini = miniaturizationPct(empire, dw.weapon);
-  let spacePct = ARC_SPACE_PCT[arc];
-  let costPct = ARC_SPACE_PCT[arc];
+  let spacePct = row.classId === 5 ? ARC_SPACE_PCT['F'] : ARC_SPACE_PCT[arc];
+  let costPct = spacePct;
   for (const m of dw.mods) {
     spacePct += MOD_SPACE_PCT[m]!;
     costPct += MOD_SPACE_PCT[m]!;
