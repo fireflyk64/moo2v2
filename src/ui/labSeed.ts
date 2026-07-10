@@ -2,14 +2,16 @@
 // built or encountered". Set by the Empires tab (all designs) or the Designer
 // (the work-in-progress design), consumed once by BattleLab.
 
-import { HULLS_BUILDABLE, type BattleInput } from '@engine/index';
-import { weaponById } from '@engine/data/index';
+import { ARMOR_MULT, HULLS_BUILDABLE, type BattleInput } from '@engine/index';
+import { hullById, weaponById } from '@engine/data/index';
 
 export interface LabSeedGroup {
   label: string;
   hull: string;
   computer: number;
   shield: number;
+  /** armor tier 1..6 (inferred from observed hull points for enemies) */
+  armor?: number;
   specials: string[];
   weapons: Array<{ weapon: string; count: number; mods: string[]; arc: 'F' | 'FX' | 'R' | '360' }>;
   count: number;
@@ -56,11 +58,20 @@ export function enemySeedsFromReplays(
         existing.count += 1;
         continue;
       }
+      // read the armor class off the observed hull points (heavy_armor ×3)
+      const hullRow = hullById.get(s.hull);
+      const heavy = (s.specials ?? []).includes('heavy_armor') ? 3 : 1;
+      const observedMult = hullRow && hullRow.armorHp > 0 ? s.armorHp / (hullRow.armorHp * heavy) : 1;
+      let armor = 1;
+      for (let t = 0; t < ARMOR_MULT.length; t++) {
+        if (Math.abs(ARMOR_MULT[t]! - observedMult) < Math.abs(ARMOR_MULT[armor - 1]! - observedMult)) armor = t + 1;
+      }
       seen.set(key, {
         label: `encountered ${s.hull}`,
         hull: s.hull,
         computer: Math.max(0, Math.min(6, Math.round(s.beamAttack / 25))),
         shield: Math.max(0, SHIELD_FLAT_TIERS.findIndex((f) => f >= s.shieldFlat)),
+        armor,
         specials: [...(s.specials ?? [])],
         weapons,
         count: 1,

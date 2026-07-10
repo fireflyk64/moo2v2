@@ -3,6 +3,8 @@
   // sides with every technology unlocked, run the deterministic combat sim,
   // and watch the replay. Pure client-side — touches no game state.
   import {
+    ARMOR_MULT,
+    ARMOR_NAMES,
     designStats,
     runBattle,
     DEFAULT_ORDERS,
@@ -65,6 +67,7 @@
     hull: 'cruiser',
     computer: 3,
     shield: 3,
+    armor: 3,
     specials: [],
     weapons: [{ weapon: 'laser_cannon', count: 4, mods: [], arc: 'F' }],
     count: 2,
@@ -72,12 +75,17 @@
 
   // a live game can hand its ship types over (Empires tab -> battle simulator)
   const seeded = takeLabSeed();
-  const seedGroups = (list: { hull: string; computer: number; shield: number; specials: string[]; weapons: LabGroup['weapons']; count: number }[] | undefined): LabGroup[] | null =>
+  const seedGroups = (
+    list:
+      | { hull: string; computer: number; shield: number; armor?: number; specials: string[]; weapons: LabGroup['weapons']; count: number }[]
+      | undefined,
+  ): LabGroup[] | null =>
     list && list.length
       ? list.map((g) => ({
           hull: g.hull,
           computer: g.computer,
           shield: g.shield,
+          armor: g.armor ?? 6,
           specials: [...g.specials],
           weapons: g.weapons.map((w) => ({ ...w, mods: [...w.mods] })),
           count: g.count,
@@ -267,6 +275,13 @@
               </select>
               <label>comp <input type="number" min="0" max="6" bind:value={g.computer} /></label>
               <label>shield <input type="number" min="0" max="7" bind:value={g.shield} /></label>
+              <label>armor
+                <select bind:value={g.armor} title="armor class scales hull and structure points (observed enemies import with their real class)">
+                  {#each ARMOR_NAMES as an, ai (an)}
+                    <option value={ai + 1}>{an} ×{ARMOR_MULT[ai]}</option>
+                  {/each}
+                </select>
+              </label>
               <button class="mini" data-testid="clone-{side}-{gi}" title="clone this ship type" onclick={() => (s.groups = [...s.groups.slice(0, gi + 1), structuredClone($state.snapshot(g)) as typeof g, ...s.groups.slice(gi + 1)])}>⎘ clone</button>
               <button class="mini" onclick={() => (s.groups = s.groups.filter((_, x) => x !== gi))}>✕</button>
             </div>
