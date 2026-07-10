@@ -34,8 +34,8 @@ function stageInvasion(state: GameState, troops: number) {
   setRelation(state, 0, 1, 'war');
   const target = state.colonies.find((c) => c.owner === 1 && !c.outpost)!;
   const star = state.planets.find((p) => p.id === target.planetId)!.starId;
-  // remove the defender's warships so the landing is unopposed
-  state.ships = state.ships.filter((s) => !(s.owner === 1 && s.shipKind === 'design'));
+  // remove the defender's warships (armed scouts count too) so the landing is unopposed
+  state.ships = state.ships.filter((s) => !(s.owner === 1 && (s.shipKind === 'design' || s.shipKind === 'scout')));
   state.ships.push({
     id: state.nextId++,
     owner: 0,

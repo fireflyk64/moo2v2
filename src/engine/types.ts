@@ -281,6 +281,9 @@ export interface MonsterUnit {
   dmgStructure: number;
   /** Antaran raid bookkeeping: where + when the party attacked */
   raidStar?: number;
+  /** the empire the raid was aimed at (the raze must not land on whichever
+   * other empire happens to share the star with a lower id) */
+  raidTargetEmpire?: number;
   raidTurn?: number;
 }
 

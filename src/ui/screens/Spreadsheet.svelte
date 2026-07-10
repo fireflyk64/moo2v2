@@ -143,7 +143,7 @@
     for (const row of rows) {
       if (!selected.has(row.id) || !row.buildable.includes(item)) continue;
       const items = row.queue.length ? [item, ...row.queue.slice(1)] : [item];
-      session().submit('set_build_queue', { colonyId: row.id, items });
+      submitNoted('set_build_queue', { colonyId: row.id, items });
     }
   }
   /** queue an item on every selected colony: 'front' = right after the item
@@ -156,7 +156,7 @@
         where === 'back' || row.queue.length === 0
           ? [...row.queue, item]
           : [row.queue[0]!, item, ...row.queue.slice(1)];
-      session().submit('set_build_queue', { colonyId: row.id, items });
+      submitNoted('set_build_queue', { colonyId: row.id, items });
     }
   }
   const bulkOptions = $derived.by(() => {
@@ -262,6 +262,7 @@
       toColonyId: row.id,
       race: drag.race,
       count: n,
+      fromJob: drag.job, // the grabbed citizens leave THEIR job, not scientists
     });
     if (res.error) note(`⛔ ${res.error}`);
     else if (sameSystem) note(`🚚 ${n} colonist${n > 1 ? 's' : ''} shuttled ${src.name} → ${row.name}`);
@@ -272,20 +273,30 @@
     return allRows.some((r) => r.id === drag!.colonyId);
   };
 
+  /** every queue edit surfaces the engine's rejection — a silently ignored
+   * error leaves the dropdown face desynced from what is actually building */
+  function submitNoted(kind: string, payload: unknown) {
+    const res = session().submit(kind, payload);
+    if (res.error) note(`⛔ ${res.error}`);
+    return res;
+  }
+
   function setBuild(row: selectors.ColonyRow, item: string) {
     if (!item) return;
-    // choosing something already queued PROMOTES it to the active slot
-    // (nothing gets locked in); otherwise it replaces the active item
-    const items = row.queue.includes(item)
-      ? [item, ...row.queue.filter((x) => x !== item)]
-      : row.queue.length
-        ? [item, ...row.queue.slice(1)]
-        : [item];
-    session().submit('set_build_queue', { colonyId: row.id, items });
+    // choosing something already queued PROMOTES one instance of it to the
+    // active slot — repeats (ships, projects) are preserved, not collapsed
+    const idx = row.queue.indexOf(item);
+    const items =
+      idx >= 0
+        ? [item, ...row.queue.slice(0, idx), ...row.queue.slice(idx + 1)]
+        : row.queue.length
+          ? [item, ...row.queue.slice(1)]
+          : [item];
+    submitNoted('set_build_queue', { colonyId: row.id, items });
   }
 
   function removeQueued(row: selectors.ColonyRow, index: number) {
-    session().submit('set_build_queue', {
+    submitNoted('set_build_queue', {
       colonyId: row.id,
       items: row.queue.filter((_, i) => i !== index),
     });
@@ -293,15 +304,15 @@
 
   function appendBuild(row: selectors.ColonyRow, item: string) {
     if (!item) return;
-    session().submit('set_build_queue', { colonyId: row.id, items: [...row.queue, item] });
+    submitNoted('set_build_queue', { colonyId: row.id, items: [...row.queue, item] });
   }
 
   function buy(row: selectors.ColonyRow) {
-    session().submit('buy_production', { colonyId: row.id });
+    submitNoted('buy_production', { colonyId: row.id });
   }
 
   function sell(row: selectors.ColonyRow, buildingId: string) {
-    session().submit('sell_building', { colonyId: row.id, buildingId });
+    submitNoted('sell_building', { colonyId: row.id, buildingId });
   }
 
   let openBuildings = $state<Set<number>>(new Set());
@@ -533,7 +544,7 @@
               role="group"
               data-testid="{job}-{row.id}"
               data-count={row.jobs[job]}
-              title="{row.jobs[job]} {job} — click a citizen to grab them plus everyone to their right, then drag onto another job or a same-system colony"
+              title="{row.jobs[job]} {job} — click a citizen to grab them plus everyone to their right, then drag onto another job or any other colony (freighters carry them between systems)"
             >
               {#if job === 'farmers' && !row.farmable}
                 <span class="zero" title="nothing grows here — farming is impossible on this world">🚫</span>
@@ -582,7 +593,10 @@
             {#if row.activeItem && !row.buildable.includes(row.activeItem)}
               <option value={row.activeItem}>{label(row.activeItem)}</option>
             {/if}
-            {#each row.queue.slice(1).filter((q) => !row.buildable.includes(q)) as q (q)}
+            <!-- keyed by index: the same non-buildable item can legitimately
+                 appear twice (repeat refits, spy past the roster cap) and a
+                 duplicate string key crashes the whole table -->
+            {#each row.queue.slice(1).filter((q) => !row.buildable.includes(q)) as q, qi (qi)}
               <option value={q}>{label(q)} (queued)</option>
             {/each}
             {#each row.buildable as item (item)}
@@ -666,7 +680,7 @@
       <td></td>
       <td class="name">Σ {allRows.length} colonies{outpostCount > 0 ? ` · ${outpostCount} outpost${outpostCount > 1 ? 's' : ''} (map)` : ''}</td>
       <td></td>
-      <td>{totals.pop} <span class="growth">{growthLabel(totals.growthK)}</span></td>
+      <td>{totals.pop} <span class="growth" class:neg={totals.growthK < 0}>{growthLabel(totals.growthK)}</span></td>
       <td></td>
       <td colspan="3"></td>
       <td class:neg={totals.food < 0}>{totals.food >= 0 ? '+' : ''}{totals.food}</td>

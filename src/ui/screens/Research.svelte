@@ -1,6 +1,7 @@
 <script lang="ts">
   import { selectors, traitsOf } from '@engine/index';
   import { applicationsOfField, applicationById, fieldByNum, fieldById } from '@engine/data/index';
+  import { EFFECTS, EFFECT_ALIASES } from '@engine/data/effectsMap';
   import { app, getActive } from '../state.svelte';
 
   const session = () => getActive()!.session;
@@ -35,11 +36,28 @@
 
   let pendingTarget = $state<Record<number, string>>({});
 
+  let researchNote = $state('');
+  let researchNoteTimer: ReturnType<typeof setTimeout> | null = null;
   function start(fieldNum: number, target: string | null) {
-    session().submit('set_research', { fieldNum, targetApp: target });
+    const res = session().submit('set_research', { fieldNum, targetApp: target });
+    if (res.error) {
+      // a silently rejected pick leaves the UI face desynced from the engine
+      researchNote = `⛔ ${res.error}`;
+      if (researchNoteTimer) clearTimeout(researchNoteTimer);
+      researchNoteTimer = setTimeout(() => (researchNote = ''), 6000);
+    }
   }
 
   const pretty = (id: string) => id.replaceAll('_', ' ');
+
+  /** hover text for an application: its effect summary, with an honest
+   * "(not implemented yet)" tag for tracked stubs and a fallback for the few
+   * source rows whose summary is empty — a blank tooltip reads as a bug */
+  function appTitle(appId: string): string {
+    const summary = applicationById.get(appId)?.effectSummary || pretty(appId);
+    const spec = EFFECTS[EFFECT_ALIASES[appId] ?? appId];
+    return spec?.stub ? `${summary}\n⚠ not implemented yet: ${spec.stub}` : summary;
+  }
 
   // creative-variant: buy applications from completed fields, one at a time
   const creativeVariant = $derived(gs?.settings.modes.creativeVariant === true && !!empire && traitsOf(empire).creative);
@@ -62,6 +80,9 @@
 </script>
 
 {#if empire && summary}
+  {#if researchNote}
+    <div class="idlebanner" data-testid="research-note">{researchNote}</div>
+  {/if}
   {#if idle}
     <div class="idlebanner" data-testid="research-idle">
       ⚠ Your labs are idle! Pick a field below — research points are banking up unspent
@@ -128,12 +149,12 @@
               <p class="all" title="Basic fields deliver every application at once">✦ researches all applications</p>
               <ul class="applist">
                 {#each choice.apps as appRow (appRow.id)}
-                  <li class:known={appRow.known} title={applicationById.get(appRow.id)?.effectSummary ?? ''}>{appRow.name}{appRow.known ? ' ✓' : ''}</li>
+                  <li class:known={appRow.known} title={appTitle(appRow.id)}>{appRow.name}{appRow.known ? ' ✓' : ''}</li>
                 {/each}
               </ul>
             {:else}
               {#each choice.apps as appRow (appRow.id)}
-                <label class:known={appRow.known} title={applicationById.get(appRow.id)?.effectSummary ?? ''}>
+                <label class:known={appRow.known} title={appTitle(appRow.id)}>
                   <input
                     type="radio"
                     name="target-{choice.field.num}"

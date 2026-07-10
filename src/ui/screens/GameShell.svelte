@@ -75,13 +75,26 @@
     const auth = session().getState();
     if (!auth || auth.phase !== 'battle_orders') return null;
     const me = session().playerId;
-    return auth.pendingBattles.find((b) => b.attacker === me || b.defender === me) ?? null;
+    // first battle whose OWN-side orders are still unsubmitted — battles stay
+    // in pendingBattles until all resolve, so matching on participation alone
+    // re-selects an already-ordered battle #1 and battle #2 never gets a dialog
+    return (
+      auth.pendingBattles.find(
+        (b) => (b.attacker === me && b.ordersA === null) || (b.defender === me && b.ordersD === null),
+      ) ??
+      auth.pendingBattles.find((b) => b.attacker === me || b.defender === me) ??
+      null
+    );
   });
   const battlePhaseInfo = $derived.by(() => {
     void app.version;
     const auth = session().getState();
     if (!auth || auth.phase !== 'battle_orders') return null;
-    return auth.pendingBattles.map((b) => b.id).join(', ');
+    const nameOf = (id: number) =>
+      id === -2 ? 'Monsters' : id === -3 ? 'Andromedans' : (auth.empires.find((e) => e.id === id)?.name ?? `Empire ${id}`);
+    return auth.pendingBattles
+      .map((b) => `${nameOf(b.attacker)} vs ${nameOf(b.defender)} at ${auth.stars.find((s) => s.id === b.starId)?.name ?? 'an unknown star'}`)
+      .join('; ');
   });
   /** labs idle: no field selected and nothing queued — RP is being banked */
   const researchIdle = $derived(summary !== null && summary.researching === null);
@@ -187,7 +200,14 @@
   const chatVisible = $derived.by(() => {
     void app.version;
     const me = session().playerId;
-    return app.chat.filter((m) => (chatTo === -1 ? m.to === -1 : m.to !== -1 && (m.from === chatTo || m.to === chatTo || m.from === me)));
+    // "all": broadcasts plus any DMs involving me (an incoming DM must not
+    // vanish just because the box is on "all"); a DM thread shows only the
+    // exchange between me and that player — not every DM I ever sent
+    return app.chat.filter((m) =>
+      chatTo === -1
+        ? m.to === -1 || m.to === me || m.from === me
+        : (m.from === chatTo && m.to === me) || (m.from === me && m.to === chatTo),
+    );
   });
 
   let saveNote = $state('');
@@ -301,6 +321,7 @@
           title="Download the raw sqlite database">DB</button>
       {/if}
       {#if saveNote}<span class="dim" data-testid="save-note">{saveNote}</span>{/if}
+      {#if app.rejectedNote}<span class="dim" data-testid="rejected-note">{app.rejectedNote}</span>{/if}
       <button data-testid="leave-room" onclick={leaveGame}
         title={pbmInfo ? 'mail in: uploads your progress and hands the room to the next player' : 'leave this room (the game stays saved; rejoin any time)'}>
         {pbmInfo ? '📬 mail in & leave' : '⏏ leave'}
@@ -449,7 +470,7 @@
     <div class="help" data-testid="help-panel">
       <h3>Quick reference <button onclick={() => (showHelp = false)}>✕</button></h3>
       <ul>
-        <li><b>Colonies</b> — the spreadsheet runs your empire: assign jobs (± or drag a job count onto another job), pick builds, buy with BC. Click headers to sort; tick rows for bulk builds; 🏛 lists buildings (sell for half price).</li>
+        <li><b>Colonies</b> — the spreadsheet runs your empire: assign jobs (drag citizen icons onto another job or another colony), pick builds, buy with BC. Click headers to sort; tick rows for bulk builds; 🏛 lists buildings (sell for half price).</li>
         <li><b>Turns</b> are simultaneous: everything resolves when every player commits. Uncommit any time before the last player commits.</li>
         <li><b>Food</b> feeds colonists (2 per unit ×½); shortages starve growth. Freighters move surplus between colonies — blockades cut deliveries.</li>
         <li><b>Research</b> works one field at a time; basic fields and Cold Fusion (marked ✦) grant <i>all</i> their applications — Cold Fusion delivers colony ships, outposts, transports and freighters together. Never leave research idle — points bank but nothing finishes.</li>

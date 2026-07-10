@@ -161,6 +161,11 @@ export class GameStore {
   async appendCommands(gameId: string, records: CommandRecord[]): Promise<void> {
     if (!records.length) return;
     const now = new Date().toISOString();
+    // idempotent upsert: after a host crash-and-resume the same seq can be
+    // reissued for a different command. A plain INSERT threw (swallowed by
+    // the persist chain) and left the stored log permanently interleaving two
+    // branches — replay(storedLog) != state and exports failed verification.
+    // Last-writer-wins keeps the branch the live session actually folded.
     await this.db
       .insertInto('commands')
       .values(
@@ -172,6 +177,15 @@ export class GameStore {
           kind: r.kind,
           payload: canonicalStringify(r.payload),
           inserted_at: now,
+        })),
+      )
+      .onConflict((oc) =>
+        oc.columns(['game_id', 'seq']).doUpdateSet((eb) => ({
+          turn: eb.ref('excluded.turn'),
+          player_id: eb.ref('excluded.player_id'),
+          kind: eb.ref('excluded.kind'),
+          payload: eb.ref('excluded.payload'),
+          inserted_at: eb.ref('excluded.inserted_at'),
         })),
       )
       .execute();

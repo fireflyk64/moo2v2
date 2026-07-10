@@ -242,7 +242,8 @@ describe('designer numbers', () => {
   it('designDps sums expected weapon output per second', () => {
     const dps = designDps([beam('F', 10)], 50);
     expect(dps).toBeGreaterThan(0);
-    // twice the mounts, twice the output
-    expect(designDps([{ ...beam('F', 10), count: 4 }], 50)).toBe(dps * 2);
+    // twice the mounts, twice the output (±1 integer rounding: the readout
+    // divides by the real cooldown+1 firing period)
+    expect(Math.abs(designDps([{ ...beam('F', 10), count: 4 }], 50) - dps * 2)).toBeLessThanOrEqual(1);
   });
 });

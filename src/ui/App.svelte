@@ -46,7 +46,7 @@
 <main>
   {#if route === '#storage-smoke'}
     <StorageSmoke />
-  {:else if route === '#battle-lab'}
+  {:else if route === '#battle-lab' && app.screen !== 'game'}
     <BattleLab />
   {:else if app.screen === 'home'}
     <Home />
@@ -54,6 +54,13 @@
     <Lobby />
   {:else}
     <GameShell />
+    {#if route === '#battle-lab'}
+      <!-- mid-game the lab overlays the shell instead of unmounting it, so the
+           commit bar and battle-orders dialogs keep working underneath -->
+      <div class="lab-overlay">
+        <BattleLab />
+      </div>
+    {/if}
   {/if}
 </main>
 
@@ -71,6 +78,15 @@
   .updatebar .dim {
     opacity: 0.7;
     font-size: 0.8rem;
+  }
+  /* below the battle-orders dialog (40) and auto-turn banner (30/35): a battle
+     popping while the lab is open must still reach the player */
+  .lab-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    overflow: auto;
+    background: var(--bg);
   }
 
   :global(:root) {

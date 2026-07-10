@@ -8,12 +8,12 @@ import type { GameState } from '@engine/types';
 
 const SEED = 'aaaabbbbccccddddeeeeffff00001111';
 
-function newGame(): GameState {
+function newGame(startMode: 'pre_warp' | 'average' = 'average'): GameState {
   return gameEngine.init({
     seed: SEED,
     settings: {
       galaxySize: 'small',
-      startMode: 'average',
+      startMode,
       playerCount: 2,
       modes: { creativeVariant: false, pickBidding: false, stickyBuild: false, antarans: false, randomEvents: false },
       battleOrdersTimeoutMs: 1000,
@@ -37,8 +37,10 @@ function advance(state: GameState): GameState {
 
 describe('tier-1 research grants every application (bug: basic fields should research all 3)', () => {
   it('a non-creative empire completing a tier-1 field learns all of its applications', () => {
-    let state = newGame();
-    const chemistry = FIELD_ROWS.find((f) => f.id === 'chemistry')!;
+    // pre_warp: the general (grants-all) fields are start-known on "average"
+    // now that average is a strict superset of the pre-warp basics
+    let state = newGame('pre_warp');
+    const chemistry = FIELD_ROWS.find((f) => f.id === 'cold_fusion')!;
     expect(fieldGrantsAll(chemistry)).toBe(true);
     // no target application required for a grants-all field
     expect(
@@ -53,7 +55,7 @@ describe('tier-1 research grants every application (bug: basic fields should res
     state.empires[0]!.research.accumRP = chemistry.cost; // completes on the next resolution
     state = advance(state);
     const known = state.empires[0]!.knownApps;
-    for (const app of applicationsOfField('chemistry')) {
+    for (const app of applicationsOfField('cold_fusion')) {
       expect(known).toContain(app.id);
     }
   });

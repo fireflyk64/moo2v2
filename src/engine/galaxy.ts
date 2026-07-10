@@ -261,6 +261,18 @@ function rotatePoint(cx: number, cy: number, dx: number, dy: number, rot: readon
 /** planet specs for one star, reusable across mirror copies (no ids yet) */
 type PlanetSpec = Omit<Planet, 'id' | 'starId'>;
 
+/** Documented planet specials (planet_specials.md): gem/gold deposits pay BC
+ * to an established colony, space debris converts to 50 BC on settling, and
+ * rare wild artifact worlds boost science (and draw monster keepers). */
+function rollSpecial(rng: Rng): string | null {
+  const r = rng.int(100);
+  if (r < 3) return 'gold_deposits';
+  if (r < 5) return 'gem_deposits';
+  if (r < 7) return 'space_debris';
+  if (r < 8) return 'ancient_artifacts';
+  return null;
+}
+
 function rollPlanetSpecs(rng: Rng, color: StarColor, minBodies = 0): PlanetSpec[] {
   const count = weighted(
     rng,
@@ -280,7 +292,7 @@ function rollPlanetSpecs(rng: Rng, color: StarColor, minBodies = 0): PlanetSpec[
       climate: body === 'planet' ? weighted(rng, CLIMATE_WEIGHTS[orbitBand(orbit)]) : 'barren',
       minerals: weighted(rng, MINERAL_WEIGHTS[color]),
       gravity: rollGravity(rng, body === 'planet' ? sizeClass : 3),
-      special: null,
+      special: body === 'planet' ? rollSpecial(rng) : null,
       homeworldOf: null,
       terraformSteps: 0,
     });
@@ -354,14 +366,27 @@ function ensureHomeConnectivity(
     }
     if (!best) return; // cannot happen: home stars are always nodes
     const hops = Math.max(1, ceilDiv(best.d, BRIDGE_SPACING_CP));
+    // perpendicular nudge (~min star spacing) for bridge points that would
+    // stack on an existing star; a ±150cp offset keeps hops within fuel range
+    const ox = best.d > 0 ? roundDiv(-(best.b.y - best.a.y) * MIN_STAR_DIST, best.d) : 0;
+    const oy = best.d > 0 ? roundDiv((best.b.x - best.a.x) * MIN_STAR_DIST, best.d) : 0;
     for (let j = 1; j < hops; j++) {
-      const x = best.a.x + roundDiv((best.b.x - best.a.x) * j, hops);
-      const y = best.a.y + roundDiv((best.b.y - best.a.y) * j, hops);
-      // an existing refuel hop almost exactly here already serves the chain
+      const bx = best.a.x + roundDiv((best.b.x - best.a.x) * j, hops);
+      const by = best.a.y + roundDiv((best.b.y - best.a.y) * j, hops);
+      // an existing refuel hop close to this point already serves the chain
+      // (60cp: BRIDGE_SPACING + 60 still fits inside HOP_RANGE)
       const served = stars.some(
-        (s) => traversable(s) && bodiesAt(s.id) && (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y) <= 20 * 20,
+        (s) => traversable(s) && bodiesAt(s.id) && (s.x - bx) * (s.x - bx) + (s.y - by) * (s.y - by) <= 60 * 60,
       );
-      if (!served) addBridge(x, y);
+      if (served) continue;
+      // never generate a star inside another's minimum separation (stacked
+      // discs on the map): try the point, then small perpendicular nudges
+      const spot = [
+        [bx, by],
+        [bx + ox, by + oy],
+        [bx - ox, by - oy],
+      ].find(([x, y]) => !stars.some((s) => (s.x - x!) * (s.x - x!) + (s.y - y!) * (s.y - y!) < MIN_STAR_DIST * MIN_STAR_DIST));
+      addBridge(spot?.[0] ?? bx, spot?.[1] ?? by);
     }
   }
 }
@@ -426,8 +451,39 @@ export function generateGalaxy(
     if (chosen.length === empireTraits.length) bestSpread = chosen;
   }
   if (!bestSpread) {
-    // dense fallback: just take the most mutually distant stars greedily
-    bestSpread = nonHole.slice(0, empireTraits.length);
+    // dense fallback: greedy farthest-point pick — maximize the minimum
+    // home-pair distance instead of taking the first N stars in roll order
+    // (which spawned 6-8 player homes ~1.5pc apart on small maps)
+    const chosen: Star[] = [];
+    let seedPair: [Star, Star] | null = null;
+    let seedD = -1;
+    for (let i = 0; i < nonHole.length; i++) {
+      for (let j = i + 1; j < nonHole.length; j++) {
+        const d = (nonHole[i]!.x - nonHole[j]!.x) ** 2 + (nonHole[i]!.y - nonHole[j]!.y) ** 2;
+        if (d > seedD) {
+          seedD = d;
+          seedPair = [nonHole[i]!, nonHole[j]!];
+        }
+      }
+    }
+    if (seedPair) chosen.push(seedPair[0], seedPair[1]);
+    else if (nonHole[0]) chosen.push(nonHole[0]);
+    while (chosen.length < empireTraits.length && chosen.length < nonHole.length) {
+      let bestStar: Star | null = null;
+      let bestMin = -1;
+      for (const s of nonHole) {
+        if (chosen.includes(s)) continue;
+        let minD = Infinity;
+        for (const c of chosen) minD = Math.min(minD, (c.x - s.x) ** 2 + (c.y - s.y) ** 2);
+        if (minD > bestMin) {
+          bestMin = minD;
+          bestStar = s;
+        }
+      }
+      if (!bestStar) break;
+      chosen.push(bestStar);
+    }
+    bestSpread = chosen.slice(0, empireTraits.length);
   }
   for (const s of bestSpread) homeStars.push(s);
 

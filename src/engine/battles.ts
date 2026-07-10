@@ -4,6 +4,8 @@
 import { DEFAULT_ORDERS, runBattle, type BattleInput, type BattleOrders, type BattleResult, type CombatShipInit, type BattleTickFrame } from './combat';
 import { hullById, weaponById } from './data/index';
 import { colonyPopUnits } from './economy';
+import { starDistance } from './galaxy';
+import { travelTurns } from './movement';
 import { leaderCombatBonuses } from './leaders';
 import { floorDiv } from './imath';
 import { rngFor } from './rng';
@@ -14,6 +16,33 @@ import type { Colony, Empire, GameState, PendingBattle, Ship, TurnEvent } from '
 
 export function relationKey(a: number, b: number): [number, number] {
   return a < b ? [a, b] : [b, a];
+}
+
+/** Nearest own (non-outpost) colony star to fall back to after a battle, with
+ * a distance-honest ETA. state.colonies is id-sorted, so a naive find() would
+ * "retreat" every fleet to the homeworld in exactly one turn — free strategic
+ * fast-travel. */
+function retreatDestination(
+  state: GameState,
+  ownerId: number,
+  fromStarId: number,
+): { starId: number; arrivalTurn: number } | null {
+  const empire = state.empires.find((e) => e.id === ownerId);
+  const from = state.stars.find((st) => st.id === fromStarId);
+  if (!empire || !from) return null;
+  let best: { starId: number; d: number } | null = null;
+  for (const c of state.colonies) {
+    if (c.owner !== ownerId || c.outpost) continue;
+    const p = state.planets.find((pl) => pl.id === c.planetId);
+    if (!p || p.starId === fromStarId) continue;
+    const star = state.stars.find((st) => st.id === p.starId);
+    if (!star) continue;
+    const d = starDistance(from, star);
+    if (!best || d < best.d || (d === best.d && star.id < best.starId)) best = { starId: star.id, d };
+  }
+  if (!best) return null;
+  const to = state.stars.find((st) => st.id === best!.starId)!;
+  return { starId: best.starId, arrivalTurn: state.turn + travelTurns(state, empire, from, to) };
 }
 
 export function areAtWar(state: GameState, a: number, b: number): boolean {
@@ -75,7 +104,10 @@ export function detectBattles(state: GameState): PendingBattle[] {
         continue;
       }
       if (faction === ANTARAN_EMPIRE && colonyOwners.size > 0) {
-        const defender = [...colonyOwners].sort((a, b) => a - b)[0]!;
+        // the raid resolves against the empire it was AIMED at, not whichever
+        // co-located empire has the lowest id
+        const intended = npcs.find((m) => m.raidTargetEmpire !== undefined && colonyOwners.has(m.raidTargetEmpire))?.raidTargetEmpire;
+        const defender = intended ?? [...colonyOwners].sort((a, b) => a - b)[0]!;
         battles.push({
           id: `b${state.turn}-${star.id}-antaransv${defender}`,
           starId: star.id,
@@ -431,17 +463,15 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
         ship.dmgArmor = cs ? Math.max(0, cs.armorHp - o.armorLeft) : 0;
       }
       if (o.retreated) {
-        // retreat toward nearest own colony star (or stay if none)
-        const empire = state.empires.find((e) => e.id === ship.owner)!;
-        const home = state.colonies.find((c) => c.owner === empire.id && !c.outpost);
-        const homePlanet = home ? state.planets.find((p) => p.id === home.planetId) : null;
-        if (homePlanet && homePlanet.starId !== battle.starId) {
+        // retreat toward the genuinely nearest own colony star (or stay if none)
+        const dest = retreatDestination(state, ship.owner, battle.starId);
+        if (dest) {
           ship.location = {
             kind: 'transit',
             from: battle.starId,
-            to: homePlanet.starId,
+            to: dest.starId,
             departedTurn: state.turn,
-            arrivalTurn: state.turn + 1,
+            arrivalTurn: dest.arrivalTurn,
           };
         }
       }
@@ -465,15 +495,14 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
       ) {
         if (escortsEscaped) {
           // fall back with the fleet toward the nearest own colony
-          const home = state.colonies.find((c) => c.owner === loser && !c.outpost);
-          const homePlanet = home ? state.planets.find((p) => p.id === home.planetId) : null;
-          if (homePlanet && homePlanet.starId !== battle.starId) {
+          const dest = retreatDestination(state, loser, battle.starId);
+          if (dest) {
             ship.location = {
               kind: 'transit',
               from: battle.starId,
-              to: homePlanet.starId,
+              to: dest.starId,
               departedTurn: state.turn,
-              arrivalTurn: state.turn + 1,
+              arrivalTurn: dest.arrivalTurn,
             };
           }
         } else {
@@ -548,7 +577,7 @@ function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): 
   const colony = state.colonies.find(
     (c) => c.owner === battle.defender && state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
   );
-  if (!colony || colony.outpost) return { skipped: true };
+  if (!colony) return { skipped: true };
   const attacker = state.empires.find((e) => e.id === battle.attacker)!;
   let bombDamage = 0;
   for (const ship of state.ships) {
@@ -566,6 +595,17 @@ function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): 
   bombDamage = Math.floor(bombDamage);
   // stellar safety shield: half of the barrage is deflected
   if (colony.buildings.includes('stellar_safety_shield')) bombDamage = Math.floor(bombDamage / 2);
+  // an undefended outpost has no population to protect it: enough bombs raze
+  // it outright (otherwise a cheap outpost denies the planet forever)
+  if (colony.outpost) {
+    if (bombDamage >= 20) {
+      state.colonies = state.colonies.filter((c) => c.id !== colony.id);
+      const report = { colonyId: colony.id, bombDamage, outpostDestroyed: true };
+      events.push({ visibleTo: -1, kind: 'bombardment', payload: report });
+      return report;
+    }
+    return { skipped: true };
+  }
   const rng = rngFor(state.seed, state.turn, 'bombard', battle.id);
   let popKilled = 0;
   let buildingsDestroyed: string[] = [];
@@ -573,13 +613,15 @@ function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): 
   while (remaining >= 20) {
     remaining -= 20;
     if (rng.chancePct(60) || colony.buildings.length === 0) {
-      // kill population
-      const grp = colony.groups[0];
-      if (grp && grp.popK > 1000) {
+      // kill population: spread across ALL race groups (largest first), and
+      // never bomb the last unit out of existence from orbit
+      if (colonyPopUnits(colony) <= 1) break;
+      const grp = [...colony.groups].sort((a, b) => b.popK - a.popK)[0];
+      if (grp && grp.popK >= 1000) {
         grp.popK -= 1000;
         popKilled++;
-      } else if (grp && colonyPopUnits(colony) <= 1) {
-        break; // never bomb a colony out of existence from orbit (last unit survives)
+      } else {
+        break; // only fractions left anywhere: nothing more to kill
       }
     } else {
       const destructible = colony.buildings.filter((b) => b !== 'marine_barracks');

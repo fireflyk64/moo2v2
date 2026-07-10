@@ -44,8 +44,14 @@ describe('GameStore (node/better-sqlite3)', () => {
     const tail = await store.readCommands('g-test-1', 95);
     expect(tail.map((c) => c.seq)).toEqual([95, 96, 97, 98, 99]);
 
-    // gapless duplicate protection via PK
-    await expect(store.appendCommands('g-test-1', [cmds[0]!])).rejects.toThrow();
+    // re-appending a seq is an idempotent UPSERT (a host crash-and-resume can
+    // reissue a seq for a different command; last-writer-wins keeps the live
+    // branch instead of permanently interleaving two branches)
+    const replacement = { seq: 0, turn: 0, playerId: 1, kind: 'replaced_cmd', payload: { i: -1, data: [] } };
+    await store.appendCommands('g-test-1', [replacement]);
+    const after = await store.readCommands('g-test-1', 0, 0);
+    expect(after).toEqual([replacement]);
+    expect((await store.readCommands('g-test-1')).length).toBe(100);
     await store.destroy();
   });
 

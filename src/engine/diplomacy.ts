@@ -13,6 +13,22 @@ import type { Empire, GameState, Proposal, RelationEntry, TurnEvent } from './ty
 export const COUNCIL_INTERVAL = 25;
 export const PROPOSAL_TTL = 5;
 
+/** Read-only relation lookup for validators: never inserts into state
+ * (validators must be pure — a lazily-created entry on the host only would
+ * desync the state hash against clients that fold without validating). */
+export function peekRelation(state: GameState, a: number, b: number): RelationEntry {
+  const [x, y] = relationKey(a, b);
+  return (
+    state.relations.find((r) => r.a === x && r.b === y) ?? {
+      a: x,
+      b: y,
+      status: 'peace',
+      peaceOfferedBy: [],
+      treaties: { nap: false, alliance: false, trade: false, research: false },
+    }
+  );
+}
+
 export function relationOf(state: GameState, a: number, b: number): RelationEntry {
   const [x, y] = relationKey(a, b);
   let rel = state.relations.find((r) => r.a === x && r.b === y);

@@ -60,7 +60,10 @@ export class HostCore<S> {
   private lastSeq = -1;
   private state: S | null = null;
   private committed = new Set<number>();
-  private chatSeq = -1;
+  // chat ids are namespaced per host session (epoch-second base): a resumed
+  // host restarting at 0 would collide with persisted rows and the storage
+  // layer's conflict handling silently dropped every post-restart message
+  private chatSeq = Date.now();
   private turnHashes = new Map<number, string>();
   private unsubs: Array<() => void> = [];
   private battleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -266,6 +269,15 @@ export class HostCore<S> {
         reason: `data version mismatch (host ${this.dataVersion}, you ${msg.dataVersion})`,
       });
     }
+    // engineVersion is bumped independently for logic changes: a mixed-build
+    // table would silently diverge every turn (docs/save-compatibility.md
+    // requires cross-version joining to be refused)
+    if (msg.engineVersion !== this.engineVersion) {
+      return this.sendToChannel(from, {
+        t: 'version_reject',
+        reason: `engine version mismatch (host ${this.engineVersion}, you ${msg.engineVersion})`,
+      });
+    }
     let seatId: number;
     if (this.started) {
       const assigned = this.assignSeat(from, msg.name);
@@ -329,8 +341,14 @@ export class HostCore<S> {
    * With pick bidding on, contested picks go to sealed-bid auction first. */
   startGame(seed: string): void {
     if (this.started) throw new Error('already started');
+    // a re-entrant call mid-auction must not silently cancel the auction and
+    // start with contested picks intact
+    if (this.auction) throw new Error('pick auction in progress');
     if (this.settings.modes.pickBidding && !this.auction) {
-      const contested = findContested(this.roster().map((p) => ({ id: p.id, raceJson: p.raceJson })));
+      const contested = findContested(
+        this.roster().map((p) => ({ id: p.id, raceJson: p.raceJson })),
+        this.settings.pickPoints ?? 10,
+      );
       const bidders = [...new Set(Object.values(contested).flat())].sort((a, b) => a - b);
       if (bidders.length > 0) {
         this.auction = {
@@ -442,10 +460,19 @@ export class HostCore<S> {
         });
       }
     } else if (this.state) {
+      const turnBefore = this.engine.turnOf(this.state);
       this.state = this.engine.apply(this.state, cmd);
-      if (cmd.kind === 'advance_turn' && this.state) {
-        const t = this.engine.turnOf(this.state) - 1; // hash of the completed turn boundary
-        this.turnHashes.set(t, this.engine.hash(this.state));
+      // record the boundary hash only when the turn ACTUALLY advanced:
+      // a battle-pausing advance_turn does not (resolve_combat finishes the
+      // turn later). Hashing here regardless would (a) overwrite the previous
+      // boundary's correct hash with a mid-battle one and (b) leave combat
+      // turns with no entry at all — combat desyncs would go undetected and
+      // every fresh-folding client would loop on false desync notices.
+      if ((cmd.kind === 'advance_turn' || cmd.kind === 'resolve_combat') && this.state) {
+        const turnAfter = this.engine.turnOf(this.state);
+        if (turnAfter > turnBefore) {
+          this.turnHashes.set(turnAfter - 1, this.engine.hash(this.state));
+        }
       }
     }
     this.log.push(cmd);
@@ -531,6 +558,10 @@ export class HostCore<S> {
 
   private onCommit(from: number, turn: number, committed: boolean): void {
     if (!this.started || turn !== this.currentTurn()) return;
+    // during battle_orders the turn counter hasn't advanced yet: a commit
+    // accepted here would survive resolve_combat and pre-commit the player
+    // for a turn they never planned
+    if (this.state && this.engine.phaseOf && this.engine.phaseOf(this.state) !== 'planning') return;
     if (committed) this.committed.add(from);
     else this.committed.delete(from);
     this.broadcastCommitStatus();
@@ -571,16 +602,26 @@ export class HostCore<S> {
    * advances the turn without them (their next-turn planning is unharmed;
    * turns always advance ONE at a time). */
   private armAutoTurn(): void {
-    if (this.autoTurnTimer) {
-      clearTimeout(this.autoTurnTimer);
-      this.autoTurnTimer = null;
-    }
     const secs = this.settings.autoTurnSeconds ?? 0;
-    if (secs <= 0 || !this.state) return;
-    if (this.engine.phaseOf && this.engine.phaseOf(this.state) !== 'planning') return;
     const seats = [...this.seats.keys()];
     const committed = seats.filter((id) => this.committed.has(id)).length;
-    if (seats.length < 2 || committed < seats.length - 1 || committed >= seats.length) return;
+    const eligible =
+      secs > 0 &&
+      !!this.state &&
+      (!this.engine.phaseOf || this.engine.phaseOf(this.state) === 'planning') &&
+      seats.length >= 2 &&
+      committed >= seats.length - 1 &&
+      committed < seats.length;
+    if (!eligible) {
+      if (this.autoTurnTimer) {
+        clearTimeout(this.autoTurnTimer);
+        this.autoTurnTimer = null;
+      }
+      return;
+    }
+    // already armed: a committed player re-sending commit_turn must NOT keep
+    // pushing the laggard's deadline out
+    if (this.autoTurnTimer) return;
     this.autoTurnDeadline = Date.now() + secs * 1000;
     this.autoTurnTimer = setTimeout(() => {
       this.autoTurnTimer = null;

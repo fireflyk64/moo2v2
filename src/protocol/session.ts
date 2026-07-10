@@ -91,6 +91,9 @@ export class GameSession<S> {
   private listeners: Array<(ev: SessionEvent) => void> = [];
   private persistChain: Promise<void> = Promise.resolve();
   private lastReportedTurn = 0;
+  /** pre-combat events drained on a battle-pausing advance_turn, prepended to
+   * the boundary flush so combat turns don't lose their pre-combat reports */
+  private stashedEvents: Array<{ visibleTo: number; kind: string; payload: Record<string, unknown> }> = [];
   /** deterministic events from the most recent turn resolution (for reports UI) */
   lastTurnEvents: Array<{ visibleTo: number; kind: string; payload: Record<string, unknown> }> = [];
 
@@ -327,12 +330,25 @@ export class GameSession<S> {
     }
 
     if (cmd.kind === 'game_start') {
-      this.lastReportedTurn = this.authState ? this.engine.turnOf(this.authState) : 1;
+      // NEVER reset backwards: a resync refolds the log from scratch, and
+      // resetting here made the session re-send the same mismatching
+      // hash_report forever (the desync/full-resync loop of finding 54)
+      const startTurn = this.authState ? this.engine.turnOf(this.authState) : 1;
+      this.lastReportedTurn = Math.max(this.lastReportedTurn, startTurn);
       this.bump({ type: 'started' });
     } else if ((cmd.kind === 'advance_turn' || cmd.kind === 'resolve_combat') && this.authState) {
       const newTurn = this.engine.turnOf(this.authState);
-      const events = this.engine.takeEvents?.() ?? [];
-      if (events.length) this.lastTurnEvents = events;
+      const events = [...this.stashedEvents, ...(this.engine.takeEvents?.() ?? [])];
+      this.stashedEvents = [];
+      const pausedForBattle =
+        cmd.kind === 'advance_turn' && this.engine.phaseOf?.(this.authState) === 'battle_orders';
+      if (pausedForBattle) {
+        // hold the pre-combat events (research done, buildings, battle_pending
+        // ...) for the boundary flush resolve_combat will trigger
+        this.stashedEvents = events;
+      } else if (events.length) {
+        this.lastTurnEvents = events;
+      }
       if (newTurn > this.lastReportedTurn) {
         // the turn boundary actually happened (advance may pause for battles)
         this.lastReportedTurn = newTurn;

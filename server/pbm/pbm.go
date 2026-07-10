@@ -300,10 +300,24 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dir := filepath.Join(s.dataDir, code)
+	// stat-and-claim under the mutex: two concurrent first-uploads for the
+	// same code must not both become the creator
+	s.mu.Lock()
 	isNew := true
 	if _, err := os.Stat(filepath.Join(dir, "save.moo2save")); err == nil {
 		isNew = false
 	}
+	if isNew {
+		if lk, ok := s.locks[code]; ok && lk.name != body.Name && s.now().Before(lk.expires) {
+			holder := lk.name
+			s.mu.Unlock()
+			writeJSON(w, http.StatusLocked, map[string]any{"error": "another player is creating this room", "holder": holder})
+			return
+		}
+		// creating counts as taking the lock: the creator plays first
+		s.locks[code] = lockInfo{name: body.Name, expires: s.now().Add(s.lockTTL)}
+	}
+	s.mu.Unlock()
 	// uploads require holding the lock, except the very first (room creation)
 	if !isNew && !s.holdsLock(code, body.Name) {
 		lk := s.lockJSON(code)
@@ -315,6 +329,19 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "history"), 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// meta first, THEN the save renames into place: a crash between the two
+	// must never leave a new save paired with stale meta
+	meta := Meta{
+		Turn:      body.Turn,
+		Committed: normInts(body.Committed),
+		Players:   body.Players,
+		UpdatedAt: s.now().UTC(),
+		UpdatedBy: body.Name,
+	}
+	if err := s.writeMeta(code, meta); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -330,23 +357,6 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 	}
 	hist := filepath.Join(dir, "history", fmt.Sprintf("turn-%05d-%d.moo2save", body.Turn, s.now().UnixMilli()))
 	_ = os.WriteFile(hist, save, 0o644)
-	meta := Meta{
-		Turn:      body.Turn,
-		Committed: normInts(body.Committed),
-		Players:   body.Players,
-		UpdatedAt: s.now().UTC(),
-		UpdatedBy: body.Name,
-	}
-	if err := s.writeMeta(code, meta); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if isNew {
-		// creating counts as taking the lock: the creator plays first
-		s.mu.Lock()
-		s.locks[code] = lockInfo{name: body.Name, expires: s.now().Add(s.lockTTL)}
-		s.mu.Unlock()
-	}
 	s.log.Info("pbm save", "room", code, "by", body.Name, "turn", body.Turn, "committed", meta.Committed, "bytes", len(save))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "turn": meta.Turn})
 }
@@ -501,7 +511,12 @@ func (s *Server) writeSecrets(code string, secrets map[string]string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "secrets.json"), raw, 0o600)
+	// temp+rename: a crash mid-write must not drop every seat protection
+	tmp := filepath.Join(dir, "secrets.tmp")
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, "secrets.json"))
 }
 
 func (s *Server) protectedNames(code string) []string {

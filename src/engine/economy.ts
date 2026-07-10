@@ -104,6 +104,16 @@ export function colonyMaxPop(state: GameState, colony: Colony): number {
 
 // ---------- F3/F4/F5: per-colonist coefficients ----------
 
+/** Per-farmer food coefficient in HALF units: climate base + race pick (the
+ * farming picks come in half steps: farming1 is a true -0.5) + tech/buildings.
+ * On any life-bearing world a farmer always coaxes out at least 1 food (the
+ * -0.5 pick is a real penalty, not a way to zero out farming). */
+export function farmCoeffHalves(climate: Climate, gTraits: RaceTraits, accFarmCoeff: number): number {
+  const base = foodPerFarmerBase(climate, gTraits.aquatic);
+  const halves = Math.max(0, base * 2 + gTraits.farmingHalf + accFarmCoeff * 2);
+  return base > 0 ? Math.max(2, halves) : halves;
+}
+
 export function foodPerFarmerBase(climate: Climate, aquatic: boolean): number {
   if (aquatic) {
     if (climate === 'ocean' || climate === 'terran' || climate === 'gaia') return 3;
@@ -201,10 +211,10 @@ export function farmingViable(state: GameState, colony: Colony): boolean {
   const effClim = effectiveClimate(planet, colony);
   for (const g of colony.groups) {
     const gTraits = g.race === colony.owner ? traitsOf(owner) : groupTraits(state, g.race, traitsOf(owner));
-    if (foodPerFarmerBase(effClim, gTraits.aquatic) + gTraits.farming + acc.farmCoeff > 0) return true;
+    if (farmCoeffHalves(effClim, gTraits, acc.farmCoeff) > 0) return true;
   }
   // an empty/outpost colony: judge by the owner's own race
-  return foodPerFarmerBase(effClim, traitsOf(owner).aquatic) + traitsOf(owner).farming + acc.farmCoeff > 0;
+  return farmCoeffHalves(effClim, traitsOf(owner), acc.farmCoeff) > 0;
 }
 
 export function colonyOutput(state: GameState, colony: Colony): ColonyOutput {
@@ -238,15 +248,12 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
     let gravPen = planetHasGravityFix(colony) ? 0 : gravitySteps(gTraits.gravityPref, planet.gravity) * 25;
     if (g.unrest) gravPen += 25; // conquered colonists (SW-Calc penalty)
 
-    const farmCoeff = Math.max(
-      0,
-      foodPerFarmerBase(effClim, gTraits.aquatic) + gTraits.farming + acc.farmCoeff,
-    );
+    const farmHalves = farmCoeffHalves(effClim, gTraits, acc.farmCoeff);
     const prodCoeff = Math.max(1, MINERAL_PROD[planet.minerals] + gTraits.industry + acc.prodCoeff);
     let sciCoeff = Math.max(1, 3 + gTraits.science + acc.sciCoeff);
     if (planet.special === 'ancient_artifacts') sciCoeff += 2;
 
-    const gFarm = g.farmers * farmCoeff;
+    const gFarm = floorDiv(g.farmers * farmHalves, 2);
     const gProd = g.workers * prodCoeff;
     const gSci = g.scientists * sciCoeff;
     farmBase += gFarm;
@@ -411,9 +418,11 @@ export function explainOutput(state: GameState, colony: Colony): OutputExplain {
     const gTraits = g.race === colony.owner ? ownerTraits : groupTraits(state, g.race, ownerTraits);
     const gravPen = planetHasGravityFix(colony) ? 0 : gravitySteps(gTraits.gravityPref, planet.gravity) * 25;
     const farmBase = foodPerFarmerBase(effClim, gTraits.aquatic);
-    const farmCoeff = Math.max(0, farmBase + gTraits.farming + acc.farmCoeff);
+    const farmHalves = farmCoeffHalves(effClim, gTraits, acc.farmCoeff);
+    const farmCoeff = farmHalves % 2 === 0 ? `${farmHalves / 2}` : `${(farmHalves - (farmHalves % 2)) / 2}.5`;
+    const racePart = gTraits.farmingHalf ? `, ${gTraits.farmingHalf > 0 ? '+' : ''}${gTraits.farmingHalf / 2} race` : '';
     out.farm.push(
-      `${g.farmers} farmer${g.farmers === 1 ? '' : 's'} × ${farmCoeff} (${farmBase} ${effClim}${gTraits.farming ? `, ${gTraits.farming > 0 ? '+' : ''}${gTraits.farming} race` : ''}${acc.farmCoeff ? `, +${acc.farmCoeff} tech/buildings` : ''})`,
+      `${g.farmers} farmer${g.farmers === 1 ? '' : 's'} × ${farmCoeff} (${farmBase} ${effClim}${racePart}${acc.farmCoeff ? `, +${acc.farmCoeff} tech/buildings` : ''})`,
     );
     const prodCoeff = Math.max(1, MINERAL_PROD[planet.minerals] + gTraits.industry + acc.prodCoeff);
     out.prod.push(
@@ -510,20 +519,24 @@ export function groupGrowthK(
   const prodLack = projected?.prodLack ?? colony.prodLackPrev;
 
   let bonusPct = gTraits.growthPct + acc.growthPct;
-  // housing: % = floor(housingPP * 40 / colonists-of-this-race)
-  if (housingPP > 0 && c > 0) {
-    bonusPct += floorDiv(housingPP * 40, c);
+  // housing: colony-wide PP split across ALL colonists — applying the full
+  // pool to every race group would multiply the boost per group
+  if (housingPP > 0 && totalUnits > 0) {
+    bonusPct += floorDiv(housingPP * 40, totalUnits);
   }
 
   let inc = floorDiv(basic * (100 + Math.max(-90, bonusPct)), 100);
-  inc += acc.growthFlatK;
+  // growth-center style flat bonuses are per COLONY: each group gets its share
+  inc += totalUnits > 0 ? floorDiv(acc.growthFlatK * c, totalUnits) : acc.growthFlatK;
 
-  // food shortage penalty (colony-wide lack attributed to this group's share)
+  // food shortage penalty: the colony-wide lack is split by population share
+  // (an N-race colony must not starve N times as fast)
   if (foodLack > 0 || prodLack > 0) {
+    const share = (pen: number) => (totalUnits > 0 ? ceilDiv(pen * c, totalUnits) : pen);
     if (gTraits.cybernetic) {
-      inc -= 25 * foodLack + 25 * prodLack;
+      inc -= share(25 * foodLack + 25 * prodLack);
     } else {
-      inc -= 50 * foodLack;
+      inc -= share(50 * foodLack);
     }
   }
   return inc;

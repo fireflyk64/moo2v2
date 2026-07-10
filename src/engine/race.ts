@@ -7,7 +7,7 @@ import type { Gravity } from './types';
 export interface RaceTraits {
   government: Government;
   growthPct: number; // -50 | 0 | 50 | 100
-  farming: number; // food coeff delta per farmer (in half units from data: value/2)
+  farmingHalf: number; // food coeff delta per farmer in HALF units (-1 = -0.5 food)
   industry: number;
   science: number;
   bcHalves: number; // money pick in half-BC units (-1, 0, 1, 2)
@@ -53,7 +53,7 @@ export function resolveTraits(pickIds: readonly string[]): RaceTraits {
   return {
     government,
     growthPct: pickValue(picks, 'growth'),
-    farming: truncHalf(pickValue(picks, 'farming')),
+    farmingHalf: pickValue(picks, 'farming'),
     industry: pickValue(picks, 'industry'),
     science: pickValue(picks, 'science'),
     bcHalves: pickValue(picks, 'money'),
@@ -85,16 +85,11 @@ export function resolveTraits(pickIds: readonly string[]): RaceTraits {
   };
 }
 
-/** farming/money picks are stored in half units; farming1 value -1 means -0.5
- * (we floor toward zero for the coeff and keep the half for money). */
-function truncHalf(v: number): number {
-  return v < 0 ? -Math.floor(-v / 2) : Math.floor(v / 2);
-}
-
-/** Gravity mismatch steps for a race on a planet: 0, 1, or 2. */
+/** Gravity mismatch steps for a race on a planet: 0, 1, or 2. Mismatch is
+ * symmetric — a low-G world hampers a normal-G race just as a heavy world
+ * does — except heavy-G races operate fine down to normal (racepicks doc). */
 export function gravitySteps(pref: Gravity, planet: Gravity): number {
-  if (pref === 'high') return 0; // high-G races handle everything
   const order: Record<Gravity, number> = { low: 0, normal: 1, high: 2 };
-  const diff = order[planet] - order[pref];
-  return diff <= 0 ? 0 : diff;
+  if (pref === 'high') return planet === 'low' ? 2 : 0;
+  return Math.abs(order[planet] - order[pref]);
 }

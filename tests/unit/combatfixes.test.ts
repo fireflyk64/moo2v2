@@ -73,7 +73,8 @@ describe('MIRV', () => {
     const missile = { weaponId: 'nuclear_missile', classId: 1, dmgMin: 8, dmgMax: 8, mods: [] as string[], ammo: 5, cooldown: 0, count: 2, arc: 'F' as const };
     const plain = designDps([missile], 0);
     const mirv = designDps([{ ...missile, mods: ['mv'] }], 0);
-    expect(mirv).toBe(plain * 4);
+    // integer rounding (real firing period is cooldown+1 ticks) allows ±2
+    expect(Math.abs(mirv - plain * 4)).toBeLessThanOrEqual(2);
   });
 
   it('launches four warheads per missile in the sim', () => {

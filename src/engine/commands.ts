@@ -15,12 +15,13 @@ import {
 import { areAtWar, relationKey, setRelation } from './battles';
 import { buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, farmingViable, freeFreighters, traitsOf } from './economy';
 import { canQueue, itemCost } from './items';
-import { inRange, shipStar, travelTurns } from './movement';
+import { inRange, shipStar, supportStars, travelTurns } from './movement';
+import { starDistance } from './galaxy';
 import { availableFields, fieldGrantsAll } from './research';
-import { designStats } from './shipdesign';
+import { designStats, knownWeapons } from './shipdesign';
 import { isShipStyle } from './shipstyles';
 import type { BattleOrders, Stance, TargetPriority } from './combat';
-import type { Colony, GameState, PopGroup, Ship, Star } from './types';
+import type { Colony, GameState, PopGroup, Ship, Star, TurnEvent } from './types';
 
 export interface EngineCommand {
   turn: number;
@@ -30,7 +31,7 @@ export interface EngineCommand {
 }
 
 type Validator = (state: GameState, cmd: EngineCommand) => string | null;
-type Applier = (state: GameState, cmd: EngineCommand) => void;
+type Applier = (state: GameState, cmd: EngineCommand, events?: TurnEvent[]) => void;
 
 function colony(state: GameState, id: unknown): Colony | null {
   return state.colonies.find((c) => c.id === id) ?? null;
@@ -108,6 +109,7 @@ const validateSetQueue: Validator = (state, cmd) => {
   const c = ownColony(state, cmd, p?.colonyId);
   if (typeof c === 'string') return c;
   if (!Array.isArray(p.items) || p.items.length > 12) return 'items must be a list (max 12)';
+  if (p.items.some((i) => typeof i !== 'string')) return 'items must be strings';
   // buying locks the active item for the turn (no buy-then-switch exploit)
   if (c.boughtThisTurn && c.queue[0] && p.items[0] !== c.queue[0].item) {
     return 'production was bought this turn — the active item is locked until next turn';
@@ -282,6 +284,19 @@ const validateMove: Validator = (state, cmd) => {
       }
     }
   }
+  // a fleet stranded OUTSIDE the supply network can only limp back toward it,
+  // not warp laterally to any star adjacent to the network
+  for (const ship of ships) {
+    const origin = moveOrigin(state, ship);
+    if (origin.wormholeTo === dest.id) continue;
+    if (inRange(state, cmd.playerId, origin)) continue;
+    const support = supportStars(state, cmd.playerId);
+    if (support.length === 0) continue; // no network at all: free movement
+    const toNet = (s: Star) => support.reduce((m, sup) => Math.min(m, starDistance(sup, s)), Infinity);
+    if (toNet(dest) >= toNet(origin)) {
+      return 'out of fuel: stranded ships can only move back toward supply range';
+    }
+  }
   return null;
 };
 
@@ -361,6 +376,18 @@ const applyColonize: Applier = (state, cmd) => {
     housingPPPrev: 0,
     outpost: false,
   });
+  // on worlds where farming is impossible the sole colonist works instead of
+  // farming for 0 food (the "wasted farmer" trap validateSetJobs guards against)
+  const settled = state.colonies[state.colonies.length - 1]!;
+  if (!farmingViable(state, settled)) {
+    settled.groups[0]!.farmers = 0;
+    settled.groups[0]!.workers = 1;
+  }
+  // space debris: the wreckage is salvaged on arrival (one-time +50 BC)
+  if (planet.special === 'space_debris') {
+    empireOf(state, cmd.playerId).bc += 50;
+    planet.special = null;
+  }
   state.colonies.sort((a, b) => a.id - b.id);
 };
 
@@ -483,6 +510,13 @@ const validateSaveDesign: Validator = (state, cmd) => {
   if (typeof p?.name !== 'string' || !p.name.trim() || p.name.length > 30) return 'bad design name';
   if (p.modelIdx !== undefined && (!Number.isSafeInteger(p.modelIdx) || p.modelIdx < 0 || p.modelIdx > 31)) return 'bad model variant';
   if (empire.designs.filter((d) => !d.obsolete).length >= 12) return 'design limit reached (obsolete one first)';
+  // payloads arrive as raw network JSON: field types are hostile until proven
+  if (p.specials !== undefined && !Array.isArray(p.specials)) return 'bad specials';
+  if (p.weapons !== undefined && !Array.isArray(p.weapons)) return 'bad weapons';
+  for (const w of p.weapons ?? []) {
+    if (typeof w?.weapon !== 'string' || !Array.isArray(w.mods) || w.mods.some((m) => typeof m !== 'string')) return 'bad weapon entry';
+  }
+  if ((p.specials ?? []).some((s) => typeof s !== 'string')) return 'bad specials';
   const stats = designStats(state, empire, {
     name: p.name,
     hull: p.hull,
@@ -491,7 +525,14 @@ const validateSaveDesign: Validator = (state, cmd) => {
     specials: p.specials ?? [],
     weapons: p.weapons ?? [],
   });
-  return typeof stats === 'string' ? stats : null;
+  if (typeof stats === 'string') return stats;
+  // the weapon itself must be researched, not just its mods (a modified client
+  // could otherwise field endgame/monster weapons on turn 1)
+  const known = new Set(knownWeapons(empire).map((w) => w.id));
+  for (const w of p.weapons ?? []) {
+    if (!known.has(w.weapon)) return `${w.weapon} not researched`;
+  }
+  return null;
 };
 
 const applySaveDesign: Applier = (state, cmd) => {
@@ -573,7 +614,7 @@ const applyOfferPeace: Applier = (state, cmd) => {
 // ---------- battle orders (battle_orders sub-phase) ----------
 
 const STANCES: Stance[] = ['charge', 'hold_range', 'standoff', 'evade_retreat', 'formation', 'passthrough'];
-const PRIORITIES: TargetPriority[] = ['nearest', 'biggest', 'smallest', 'warships', 'bases'];
+const PRIORITIES: TargetPriority[] = ['nearest', 'biggest', 'smallest', 'warships', 'bases', 'deadliest'];
 
 const validateBattleOrders: Validator = (state, cmd) => {
   if (state.phase !== 'battle_orders') return 'no battle awaiting orders';
@@ -643,7 +684,12 @@ const validateUnloadTransports: Validator = (state, cmd) => {
   if (ship.shipKind !== 'transport' || ship.cargoPopUnits <= 0) return 'no loaded transport';
   if (ship.location.kind !== 'star') return 'transport in transit';
   const planet = state.planets.find((x) => x.id === c.planetId)!;
-  return ship.location.starId === planet.starId ? null : 'transport is not at that colony';
+  if (ship.location.starId !== planet.starId) return 'transport is not at that colony';
+  // same cap as move_colonists: no packing a colony past its climate ceiling
+  if (popUnitsOf(c) + ship.cargoPopUnits > colonyMaxPop(state, c)) {
+    return 'colony is at its population limit';
+  }
+  return null;
 };
 
 const applyUnloadTransports: Applier = (state, cmd) => {
@@ -689,7 +735,7 @@ const applySpyOrders: Applier = (state, cmd) => {
 
 // ---------- diplomacy proposals ----------
 
-import { acceptProposal, breakTreaties, relationOf } from './diplomacy';
+import { acceptProposal, breakTreaties, peekRelation } from './diplomacy';
 import type { ProposalKind } from './types';
 
 const PROPOSAL_KINDS: ProposalKind[] = ['peace', 'non_aggression', 'alliance', 'trade', 'research', 'gift_bc', 'tech_exchange', 'surrender'];
@@ -699,7 +745,7 @@ const validatePropose: Validator = (state, cmd) => {
   if (!state.empires.some((e) => e.id === p?.to && !e.eliminated)) return `no empire ${p?.to}`;
   if (p.to === cmd.playerId) return 'cannot propose to yourself';
   if (!PROPOSAL_KINDS.includes(p.kind)) return 'bad proposal kind';
-  const rel = relationOf(state, cmd.playerId, p.to);
+  const rel = peekRelation(state, cmd.playerId, p.to);
   if (p.kind === 'peace' && rel.status !== 'war') return 'not at war';
   if (['non_aggression', 'alliance', 'trade', 'research'].includes(p.kind) && rel.status === 'war') {
     return 'make peace first';
@@ -749,12 +795,27 @@ const validateRespond: Validator = (state, cmd) => {
   return null;
 };
 
-const applyRespond: Applier = (state, cmd) => {
+const applyRespond: Applier = (state, cmd, events = []) => {
   const p = cmd.payload as { proposalId: number; accept: boolean };
   const prop = state.proposals.find((x) => x.id === p.proposalId)!;
   state.proposals = state.proposals.filter((x) => x.id !== p.proposalId);
   if (p.accept) {
-    acceptProposal(state, prop, []);
+    // surface the outcome: signing an alliance / accepting a surrender must
+    // notify players, and an accept that became infeasible (war broke out,
+    // gift funds spent) must not silently no-op
+    const err = acceptProposal(state, prop, events);
+    if (err) {
+      events.push({
+        visibleTo: prop.from,
+        kind: 'proposal_failed',
+        payload: { kind: prop.kind, a: prop.from, b: prop.to, reason: err },
+      });
+      events.push({
+        visibleTo: prop.to,
+        kind: 'proposal_failed',
+        payload: { kind: prop.kind, a: prop.from, b: prop.to, reason: err },
+      });
+    }
   }
 };
 
@@ -876,6 +937,9 @@ interface MoveColonistsPayload {
   toColonyId: number;
   race: number;
   count: number;
+  /** the job the moved colonists vacate at the source (the UI drags SPECIFIC
+   * citizens; without this the renormalizer always sheds scientists first) */
+  fromJob?: 'farmers' | 'workers' | 'scientists';
 }
 
 /** Colonists move on freighters: free and instant between planets of the
@@ -927,6 +991,10 @@ const applyMoveColonists: Applier = (state, cmd) => {
   const moveK = p.count * 1000;
   const src = from.groups.find((g) => g.race === p.race)!;
   src.popK -= moveK;
+  // vacate the job the player actually grabbed from, then renormalize
+  if (p.fromJob === 'farmers' || p.fromJob === 'workers' || p.fromJob === 'scientists') {
+    src[p.fromJob] = Math.max(0, src[p.fromJob] - p.count);
+  }
   normalizeJobsForGroup(src);
   if (src.popK <= 0) {
     from.groups = from.groups.filter((g) => g !== src);
@@ -1001,24 +1069,40 @@ interface TraitReassignPayload {
  * of race development picks, to either remove disadvantages or increase
  * advantages" (mechanics/tech/ecology.md). Once per game; governments are
  * never touched; exclusive pick groups must stay consistent. */
-const validateTraitReassign: Validator = (state, cmd) => {
-  const p = cmd.payload as TraitReassignPayload;
-  const empire = empireOf(state, cmd.playerId);
-  if (!empire.knownApps.includes('trait_reassignment')) return 'Trait Reassignment is not researched';
-  if (empire.traitReassigned) return 'trait reassignment has already been used';
+/** Shared by validate + apply so both fold the exact same result: returns the
+ * final pick set, or an error string. Upgrading a held advantage a tier
+ * (attack2 -> attack3, a documented use) releases the lower tier and charges
+ * only the cost difference. */
+function traitReassignResult(
+  empire: { picks: string[] },
+  p: TraitReassignPayload,
+): Set<string> | string {
   const add = Array.isArray(p?.add) ? p.add : null;
   const remove = Array.isArray(p?.remove) ? p.remove : null;
   if (!add || !remove) return 'bad payload';
   if (add.length + remove.length === 0) return 'choose at least one change';
   let spent = 0;
-  const picks = new Set(empire.picks);
+  const picks = new Set<string>(empire.picks);
   for (const id of add) {
     const row = pickById.get(id);
     if (!row) return `unknown pick ${id}`;
     if (row.cost <= 0) return `${id} is not an advantage`;
     if ((GOVERNMENTS as readonly string[]).includes(id)) return 'governments cannot be reassigned';
     if (picks.has(id)) return `${id} already picked`;
-    spent += row.cost;
+    // tier upgrade within an exclusive family: swap out the held lower tier
+    let credit = 0;
+    for (const [group, members] of Object.entries(PICK_EXCLUSIVE_GROUPS)) {
+      if (group === 'government' || !members.includes(id)) continue;
+      for (const m of members) {
+        if (m === id || !picks.has(m)) continue;
+        const old = pickById.get(m);
+        if (old && old.cost > 0 && old.cost < row.cost) {
+          credit += old.cost;
+          picks.delete(m);
+        }
+      }
+    }
+    spent += row.cost - credit;
     picks.add(id);
   }
   for (const id of remove) {
@@ -1035,16 +1119,24 @@ const validateTraitReassign: Validator = (state, cmd) => {
     const chosen = members.filter((m) => picks.has(m));
     if (chosen.length > 1) return `picks are mutually exclusive: ${chosen.join(', ')}`;
   }
-  return null;
+  return picks;
+}
+
+const validateTraitReassign: Validator = (state, cmd) => {
+  const p = cmd.payload as TraitReassignPayload;
+  const empire = empireOf(state, cmd.playerId);
+  if (!empire.knownApps.includes('trait_reassignment')) return 'Trait Reassignment is not researched';
+  if (empire.traitReassigned) return 'trait reassignment has already been used';
+  const result = traitReassignResult(empire, p);
+  return typeof result === 'string' ? result : null;
 };
 
 const applyTraitReassign: Applier = (state, cmd) => {
   const p = cmd.payload as TraitReassignPayload;
   const empire = empireOf(state, cmd.playerId);
-  const picks = new Set(empire.picks);
-  for (const id of p.add) picks.add(id);
-  for (const id of p.remove) picks.delete(id);
-  empire.picks = [...picks].sort();
+  const result = traitReassignResult(empire, p);
+  if (typeof result === 'string') return; // unreachable for validated commands
+  empire.picks = [...result].sort();
   empire.traitReassigned = true;
 };
 
@@ -1301,13 +1393,19 @@ export function validateCommand(state: GameState, cmd: EngineCommand): string | 
   }
   const def = COMMANDS[cmd.kind];
   if (!def) return `unknown command ${cmd.kind}`;
-  return def.validate(state, cmd);
+  // malformed payloads (wrong field types from the network) must be REJECTED,
+  // not thrown out of the host's command path
+  try {
+    return def.validate(state, cmd);
+  } catch (e) {
+    return `malformed ${cmd.kind} payload: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
-export function applyCommand(state: GameState, cmd: EngineCommand): void {
+export function applyCommand(state: GameState, cmd: EngineCommand, events?: TurnEvent[]): void {
   const def = COMMANDS[cmd.kind];
   if (!def) throw new Error(`unknown command ${cmd.kind}`);
-  def.apply(state, cmd);
+  def.apply(state, cmd, events);
 }
 
 export { normalizeJobsForGroup };

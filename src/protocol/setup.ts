@@ -25,6 +25,10 @@ export interface HostedGame<S> {
 export function createHostedGame<S>(opts: {
   transport: NetTransport;
   engine: EngineAdapter<S>;
+  /** separate adapter instance for the HostCore: adapters carry a mutable
+   * event buffer, and the host sharing one with its own session dropped
+   * pre-combat reports and doubled combat events on battle turns */
+  hostEngine?: EngineAdapter<S>;
   store: SessionStore | null;
   settings: GameSettings;
   identity: PeerIdentity;
@@ -34,7 +38,7 @@ export function createHostedGame<S>(opts: {
   if (transport.selfId !== 0) throw new Error('host must be player 0 (room creator)');
   const host = new HostCore<S>({
     transport,
-    engine,
+    engine: opts.hostEngine ?? engine,
     gameId: opts.resume?.gameId ?? '',
     settings,
     engineVersion: identity.engineVersion,

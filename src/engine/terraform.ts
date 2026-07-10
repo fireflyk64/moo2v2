@@ -28,12 +28,20 @@ export function terraformCost(planet: Planet): number {
   return TERRAFORM_BASE_COST + TERRAFORM_STEP_COST * planet.terraformSteps;
 }
 
-export function canTerraform(planet: Planet): string | null {
+export function canTerraform(planet: Planet, queuedSteps = 0): string | null {
   if (planet.body !== 'planet') return 'only planets can be terraformed';
   if (planet.climate === 'hostile' || planet.climate === 'energized') {
     return `${planet.climate} worlds cannot be terraformed`;
   }
-  if (!NEXT_TERRAFORM[planet.climate]) return `${planet.climate} cannot be improved further`;
+  // validate against the climate PROJECTED past steps already in the queue —
+  // a second step queued past the top of the chain would burn full production
+  // for nothing
+  let climate: Climate | undefined = planet.climate;
+  for (let i = 0; i < queuedSteps; i++) {
+    climate = climate === 'barren' && planet.id % 2 === 1 ? 'tundra' : NEXT_TERRAFORM[climate!];
+    if (!climate) return 'terraforming already queued to the top of the chain';
+  }
+  if (!NEXT_TERRAFORM[climate!]) return `${climate} cannot be improved further`;
   return null;
 }
 

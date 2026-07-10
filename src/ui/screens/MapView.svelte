@@ -143,11 +143,27 @@
       .map((o) => gs.empires.find((e) => e.id === o)?.name ?? `#${o}`);
   });
 
+  /** transient move/settle feedback: silent failures read as a dead UI */
+  let mapNote = $state('');
+  let mapNoteTimer: ReturnType<typeof setTimeout> | null = null;
+  function showNote(text: string) {
+    mapNote = text;
+    if (mapNoteTimer) clearTimeout(mapNoteTimer);
+    mapNoteTimer = setTimeout(() => (mapNote = ''), 6000);
+  }
+
   function clickStar(starId: number) {
     if (selectedShipIds.length > 0 && selectedStarId !== starId) {
-      const res = session().submit('move_ships', { shipIds: selectedShipIds, destStarId: starId });
-      if (!res.error) selectedShipIds = [];
-      return;
+      // prune ships that no longer exist (destroyed in a battle) so a stale
+      // selection can't wedge star selection with endless invalid moves
+      const live = new Set(fleets.map((f) => f.ship.id));
+      selectedShipIds = selectedShipIds.filter((id) => live.has(id));
+      if (selectedShipIds.length > 0) {
+        const res = session().submit('move_ships', { shipIds: selectedShipIds, destStarId: starId });
+        if (!res.error) selectedShipIds = [];
+        else showNote(`⛔ ${res.error}`);
+        return;
+      }
     }
     selectedStarId = starId;
   }
@@ -159,10 +175,12 @@
   }
 
   function colonize(shipId: number, planetId: number) {
-    session().submit('colonize', { shipId, planetId });
+    const res = session().submit('colonize', { shipId, planetId });
+    if (res.error) showNote(`⛔ ${res.error}`);
   }
   function outpost(shipId: number, planetId: number) {
-    session().submit('build_outpost', { shipId, planetId });
+    const res = session().submit('build_outpost', { shipId, planetId });
+    if (res.error) showNote(`⛔ ${res.error}`);
   }
 
   // ---- star rename (needs a settlement in the system) ----
@@ -247,6 +265,9 @@
 
 <div class="wrap">
   <div class="mapcol">
+    {#if mapNote}
+      <div class="mapnote" data-testid="map-note">{mapNote}</div>
+    {/if}
     <div class="scroller" class:zoomed={mapZoom === 'zoom'}>
     <svg
       viewBox="0 0 {mapDims.w} {mapDims.h}"
@@ -570,6 +591,15 @@
   .mapcol {
     flex: 1;
     min-width: 0;
+  }
+  .mapnote {
+    background: #33201a;
+    border: 1px solid var(--bad, #ff8a7a);
+    color: var(--bad, #ff8a7a);
+    border-radius: 6px;
+    padding: 0.3rem 0.6rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.85rem;
   }
   svg {
     width: 100%;

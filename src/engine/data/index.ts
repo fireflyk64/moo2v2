@@ -71,6 +71,13 @@ export const techById: ReadonlyMap<string, TechRow> = byId(TECH_ROWS, 'tech');
 export const CURATED_BUILDABLES: BuildableRow[] = [
   { id: 'terraforming', techId: 184, cost: 250, maintenance: 0, group: 'special' },
   { id: 'gaia_transformation', techId: 211, cost: 500, maintenance: 0, group: 'special' },
+  // researchable applications with live effect handlers that the source tables
+  // never listed as buildable (costs from the classic tables)
+  { id: 'space_port', techId: 163, cost: 80, maintenance: 1, group: 'economy' },
+  { id: 'pollution_processor', techId: 141, cost: 80, maintenance: 1, group: 'production' },
+  { id: 'armor_barracks', techId: 0, cost: 75, maintenance: 2, group: 'government' },
+  { id: 'recyclotron', techId: 0, cost: 200, maintenance: 3, group: 'production' },
+  { id: 'robotic_factory', techId: 0, cost: 200, maintenance: 3, group: 'production' },
 ];
 
 export const buildableById: ReadonlyMap<string, BuildableRow> = byId(
@@ -78,7 +85,26 @@ export const buildableById: ReadonlyMap<string, BuildableRow> = byId(
   'buildable',
 );
 export const hullById: ReadonlyMap<string, HullRow> = byId(HULL_ROWS, 'hull');
-export const weaponById: ReadonlyMap<string, WeaponRow> = byId(WEAPON_ROWS, 'weapon');
+
+/** The Guardian's prize: the source weapon table has no death_ray row (the
+ * monster builds its own synthetic spec), but the granted application must
+ * map to a mountable weapon or the game's biggest PvE reward is inert. */
+export const CURATED_WEAPONS: WeaponRow[] = [
+  {
+    id: 'death_ray',
+    techId: 999, // no research path: granted only by defeating the Guardian
+    classId: 0,
+    ammo: -1,
+    space: 250,
+    cost: 300,
+    naturalMods: [],
+    tacticalDamage: { min: 50, max: 100 },
+    strategicDamage: { min: 50, max: 100 },
+    availableMods: ['hv'],
+  },
+];
+
+export const weaponById: ReadonlyMap<string, WeaponRow> = byId([...WEAPON_ROWS, ...CURATED_WEAPONS], 'weapon');
 export const weaponModById: ReadonlyMap<string, WeaponModRow> = byId(WEAPON_MOD_ROWS, 'weaponMod');
 
 export const fieldByNum: ReadonlyMap<number, FieldRow> = new Map(
@@ -90,6 +116,24 @@ export const applicationById: ReadonlyMap<string, ApplicationRow> = byId(
   APPLICATION_ROWS,
   'application',
 );
+
+/** Weapon id -> granting application id where naive pluralization fails
+ * (disrupter/disruptor spelling drift; torpedo + 's' != torpedoes). */
+export const WEAPON_APP_ALIAS: Readonly<Record<string, string>> = {
+  disrupter: 'disruptor_cannon',
+  proton_torpedo: 'proton_torpedoes',
+  plasma_torpedo: 'plasma_torpedoes',
+};
+
+/** The application that grants a weapon (id join with alias + plural forms). */
+export function appForWeapon(weaponId: string): ApplicationRow | undefined {
+  const alias = WEAPON_APP_ALIAS[weaponId];
+  return (
+    (alias ? applicationById.get(alias) : undefined) ??
+    applicationById.get(weaponId) ??
+    applicationById.get(weaponId + 's')
+  );
+}
 
 export function applicationsOfField(fieldId: string): ApplicationRow[] {
   return APPLICATION_ROWS.filter((a) => a.fieldId === fieldId);

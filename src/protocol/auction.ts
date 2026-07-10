@@ -28,15 +28,21 @@ export function bidHash(bids: Record<string, number>, nonce: string): string {
   return hashCanonical({ bids, nonce });
 }
 
-export function resolvedPicks(raceJson: string | null): { picks: string[]; raceName: string } {
-  return resolveRaceConfig(raceJson);
+/** Resolve a race config against the GAME's pick budget — resolving with the
+ * classic-10 default silently replaced every valid 11-14 point race with the
+ * Solari preset before the auction even started. */
+export function resolvedPicks(raceJson: string | null, budget: number = MAX_POSITIVE_PICKS): { picks: string[]; raceName: string } {
+  return resolveRaceConfig(raceJson, budget);
 }
 
 /** Contested = positive-cost non-government picks held by >= 2 players. */
-export function findContested(players: Array<{ id: number; raceJson: string | null }>): Record<string, number[]> {
+export function findContested(
+  players: Array<{ id: number; raceJson: string | null }>,
+  budget: number = MAX_POSITIVE_PICKS,
+): Record<string, number[]> {
   const holders = new Map<string, number[]>();
   for (const p of players) {
-    for (const pick of resolvedPicks(p.raceJson).picks) {
+    for (const pick of resolvedPicks(p.raceJson, budget).picks) {
       const row = pickById.get(pick);
       if (!row || row.cost <= 0) continue;
       if ((GOVERNMENTS as readonly string[]).includes(pick)) continue;
@@ -52,7 +58,7 @@ export function findContested(players: Array<{ id: number; raceJson: string | nu
 
 /** Max premium a player can pay over base costs given the pick budget. */
 export function budgetSlack(raceJson: string | null, budget: number = MAX_POSITIVE_PICKS): number {
-  const { picks } = resolvedPicks(raceJson);
+  const { picks } = resolvedPicks(raceJson, budget);
   const v = validatePicks(picks, budget);
   return Math.max(0, budget - v.cost);
 }
@@ -112,7 +118,7 @@ export function resolveAuction(input: ResolveInput): ResolveResult {
 
   const players: Record<string, string> = {};
   for (const p of input.players) {
-    const { picks, raceName } = resolvedPicks(p.raceJson);
+    const { picks, raceName } = resolvedPicks(p.raceJson, input.pickPoints ?? MAX_POSITIVE_PICKS);
     const lost = losses.get(p.id);
     const finalPicks = lost ? picks.filter((x) => !lost.has(x)) : picks;
     players[String(p.id)] = JSON.stringify({ picks: [...finalPicks].sort(), raceName });

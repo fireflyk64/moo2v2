@@ -578,19 +578,23 @@ export function runBattle(
         if (s.ammo[wi] === 0) continue;
 
         const isPd = w.mods.includes('pd');
+        const isAmr = w.weaponId === 'anti_missile_rocket'; // classId 5 interceptor
         // point defense priority: shoot an incoming projectile aimed at our side
-        if (isPd) {
+        if (isPd || isAmr) {
           const incoming = projectiles.find(
             (p) => p.hp > 0 && sims[p.targetIdx] && sims[p.targetIdx]!.init.side === s.init.side &&
               idist(Math.abs(p.x - s.x), Math.abs(p.y - s.y)) <= BAND_SHORT * 2,
           );
           if (incoming) {
-            const hit = rng.chancePct(70);
+            const hit = rng.chancePct(isAmr ? 85 : 70);
             frameShots.push({ tick, from: s.init.shipId, to: -1, weaponId: w.weaponId, classId: 0, hit, dmg: 0, ix: incoming.x, iy: incoming.y });
-            if (hit) incoming.hp = 0;
+            // armored missiles take two intercepts to bring down
+            if (hit) incoming.hp -= incoming.mods.includes('arm') ? 1 : incoming.hp;
+            if (isAmr && s.ammo[wi]! > 0) s.ammo[wi] = s.ammo[wi]! - 1;
             s.cds[wi] = cooldownOf(w, crippled, s.specials);
             continue;
           }
+          if (isAmr) continue; // rockets only engage missiles, never ships
         }
 
         let t = s.targetIdx >= 0 ? sims[s.targetIdx] : undefined;
@@ -610,7 +614,9 @@ export function runBattle(
         let band = bandOf(dist);
         if (band > 0 && s.specials.has('rangemaster_target_unit')) band = (band - 1) as 0 | 1 | 2;
 
-        if (w.classId === 0) {
+        if (w.classId === 0 || w.classId === 5) {
+          // classId 5 direct-fire specials (stellar converter, pulsar, plasma
+          // web, ...) fire like beams: auto-hit, no band falloff
           const maxBand = isPd ? BAND_SHORT : w.mods.includes('hv') ? BAND_HV : BAND_LONG;
           if (dist > maxBand) continue;
           const shots = w.mods.includes('af') ? 3 : 1;
@@ -622,11 +628,17 @@ export function runBattle(
           const retarget = (): boolean => {
             if (tt && active(tt) && !overkilled(ti)) return true;
             const alt = pickTarget(sims, s, (i) => !overkilled(i) && withinVolley(i));
-            if (alt < 0) return tt !== undefined && active(tt); // keep pounding the last live target
-            ti = alt;
-            tt = sims[alt]!;
-            s.targetIdx = alt;
-            return true;
+            // pickTarget's saturation fallback can hand back an enemy outside
+            // this mount's range/arc — never fire at an illegal solution
+            if (alt >= 0 && withinVolley(alt)) {
+              ti = alt;
+              tt = sims[alt]!;
+              s.targetIdx = alt;
+              return true;
+            }
+            // everyone fresh is out of reach: keep pounding the last live
+            // target, but only while it remains a legal solution itself
+            return tt !== undefined && active(tt) && withinVolley(ti);
           };
           const withinVolley = (i: number): boolean => {
             const e = sims[i]!;
@@ -648,22 +660,26 @@ export function runBattle(
                 95,
               );
               if (tt.specials.has('displacement_device')) hitPct = Math.floor((hitPct * 67) / 100);
-              if (w.mods.includes('hit')) hitPct = 100; // mauler device: never misses
+              if (w.mods.includes('hit') || w.classId === 5) hitPct = 100; // mauler device / field weapons: never miss
               const hit = rng.chancePct(hitPct);
               if (!hit) {
                 frameShots.push({ tick, from: s.init.shipId, to: tt.init.shipId, weaponId: w.weaponId, classId: 0, hit: false, dmg: 0 });
                 continue;
               }
               let dmg = w.dmgMin + rng.int(w.dmgMax - w.dmgMin + 1);
-              const dmgPct = w.mods.includes('nr') ? 100 : BAND_DMG[band2]!;
+              const dmgPct = w.mods.includes('nr') || w.classId === 5 ? 100 : BAND_DMG[band2]!;
               dmg = Math.max(1, roundDiv(dmg * dmgPct, 100));
               if (w.mods.includes('hv')) dmg = roundDiv(dmg * 150, 100);
+              if (w.mods.includes('ovr')) dmg = roundDiv(dmg * 150, 100); // overloaded mount
+              if (w.mods.includes('env')) dmg *= 2; // enveloping: wraps the shields
               if (isPd) dmg = Math.max(1, roundDiv(dmg * 50, 100));
               if (s.specials.has('high_energy_focus')) dmg = roundDiv(dmg * 150, 100);
               if (s.specials.has('structural_analyzer')) dmg *= 2;
               const mods = s.specials.has('achilles_targeting_unit') ? [...w.mods, 'achilles'] : w.mods;
               applyDamage(tt, dmg, mods, frameShots, tick, s.init.shipId, ti, w.weaponId, 0, frameDeaths, sims, rng);
-              hurtThisTick.set(ti, (hurtThisTick.get(ti) ?? 0) + dmg);
+              // NOTE: applied beam damage is already reflected in the target's
+              // live pools — adding it to hurtThisTick would double-count and
+              // declare targets dead-on-paper at ~half HP (fleet fire dithers)
             }
           }
           s.cds[wi] = cooldownOf(w, crippled, s.specials);
@@ -675,17 +691,20 @@ export function runBattle(
           // point-defensed and each pays shield flat separately, like MOO2)
           const warheads = w.classId === 1 && w.mods.includes('mv') ? 4 : 1;
           for (let n = 0; n < volley * warheads; n++) {
-            const dmg = w.dmgMin + rng.int(w.dmgMax - w.dmgMin + 1);
+            let dmg = w.dmgMin + rng.int(w.dmgMax - w.dmgMin + 1);
+            if (w.mods.includes('ovr')) dmg = roundDiv(dmg * 150, 100); // overloaded warhead
+            if (w.mods.includes('env')) dmg *= 2; // enveloping: wraps the shields
             projectiles.push({
               from: s.init.shipId,
               targetIdx: s.targetIdx,
               x: s.x,
               y: s.y,
               dmg,
-              speed: w.classId === 1 ? 12 : 8,
+              // fst (fast) drives push the munition half again as fast
+              speed: (w.classId === 1 ? 12 : 8) + (w.mods.includes('fst') ? (w.classId === 1 ? 6 : 4) : 0),
               classId: w.classId,
               weaponId: w.weaponId,
-              hp: 1,
+              hp: w.mods.includes('arm') ? 2 : 1, // armored: survives one intercept
               mods: w.mods,
             });
             hurtThisTick.set(s.targetIdx, (hurtThisTick.get(s.targetIdx) ?? 0) + dmg);
@@ -870,11 +889,13 @@ function applyDamage(
   if (t.specials.has('damper_field')) dmg = Math.max(1, Math.floor(dmg / 4));
   // energy absorber (monster trait): quarter of the damage is drunk
   if (t.specials.has('energy_absorber')) dmg = Math.max(1, Math.floor((dmg * 3) / 4));
-  const pierces = mods.includes('sp') && !t.specials.has('hard_shields');
+  // emissions-guided munitions ride the drive plume straight through shields
+  const pierces = (mods.includes('sp') || mods.includes('emg')) && !t.specials.has('hard_shields');
   let soaked = 0; // shield-stopped damage (flat + pool) — the viewer's fizzle cue
   if (!pierces) {
-    // flat per-hit reduction then pool absorption
-    if (!mods.includes('ap')) {
+    // flat per-hit reduction then pool absorption — none once the generator
+    // is knocked out (a dead generator deflects nothing)
+    if (!mods.includes('ap') && !t.sysShield) {
       const flat = Math.min(dmg, t.init.shieldFlat);
       if (t.shield > 0) soaked += flat; // a collapsed shield deflects nothing visible
       dmg = Math.max(0, dmg - t.init.shieldFlat);
@@ -906,13 +927,14 @@ function applyDamage(
   // internal hits can knock out systems for the rest of the fight (transient:
   // only structure/armor percentages persist after the battle). Boarding
   // craft (assault shuttles) ALWAYS cripple something they reach.
-  if (structDmg > 0 && t.alive && (mods.includes('board') || rng.chancePct(SYSTEM_KNOCKOUT_PCT))) {
+  if (structDmg > 0 && t.alive && (mods.includes('board') || mods.includes('emg') || rng.chancePct(SYSTEM_KNOCKOUT_PCT))) {
     const knockable: Array<'drive' | 'computer' | 'shield'> = [];
     if (!t.sysDrive && t.init.speed > 0) knockable.push('drive');
     if (!t.sysComputer && t.init.beamAttack > 0) knockable.push('computer');
     if (!t.sysShield && t.init.shieldPool > 0) knockable.push('shield');
     if (knockable.length) {
-      const hit = knockable[rng.int(knockable.length)]!;
+      // emissions guidance homes on the engines: the drive goes first
+      const hit = mods.includes('emg') && knockable.includes('drive') ? 'drive' : knockable[rng.int(knockable.length)]!;
       if (hit === 'drive') t.sysDrive = true;
       else if (hit === 'computer') t.sysComputer = true;
       else {
@@ -932,11 +954,18 @@ export function designDps(weapons: CombatWeapon[], beamAttack: number): number {
   let total = 0; // x100 fixed point
   for (const w of weapons) {
     if (w.classId === 3) continue; // bombs don't fire in the pass
-    const expected = roundDiv(w.dmgMin + w.dmgMax, 2);
+    if (w.weaponId === 'anti_missile_rocket') continue; // interceptor: no ship damage
+    let expected = roundDiv(w.dmgMin + w.dmgMax, 2);
+    // mirror the sim's damage mods so the readout doesn't lie
+    if (w.mods.includes('hv')) expected = roundDiv(expected * 150, 100);
+    if (w.mods.includes('ovr')) expected = roundDiv(expected * 150, 100);
+    if (w.mods.includes('env')) expected *= 2;
+    if (w.classId === 0 && w.mods.includes('pd')) expected = roundDiv(expected * 50, 100);
     const perShot = w.classId === 0 ? roundDiv(expected * (50 + clamp(beamAttack, 0, 100)), 100) : expected;
     let shots = w.classId === 0 && w.mods.includes('af') ? 3 : 1;
     if (w.classId === 1 && w.mods.includes('mv')) shots *= 4; // MIRV: four warheads
-    const cd = Math.max(1, cooldownOf(w, false));
+    // decrement-then-fire: the real firing period is cooldown + 1 ticks
+    const cd = Math.max(1, cooldownOf(w, false)) + 1;
     total += roundDiv(perShot * shots * w.count * 10 * 100, cd); // 10 ticks/sec
   }
   return roundDiv(total, 100);

@@ -16,6 +16,7 @@
 // E1  Random events (option): 4%/turn one event strikes a random empire;
 //     lucky races are never the victim of the bad ones.
 
+import { HOP_RANGE_CP, starDistance } from './galaxy';
 import { rngFor } from './rng';
 import { NEXT_TERRAFORM } from './terraform';
 import { grantApp } from './research';
@@ -164,6 +165,40 @@ function systemPrizeworthy(state: GameState, starId: number): boolean {
   );
 }
 
+/** The galaxy generator guarantees every home can reach every other by
+ * hopping colonizable systems <= HOP_RANGE apart. Monster keepers must not
+ * cut that path (or leave a home with no unguarded system in reach), so each
+ * tentative placement is checked against the hop graph. */
+function monsterPlacementOk(state: GameState, homeStars: Set<number>, guarded: Set<number>): boolean {
+  const bodiesAt = (starId: number) => state.planets.some((p) => p.starId === starId);
+  const nodes = state.stars.filter((s) => homeStars.has(s.id) || (!guarded.has(s.id) && bodiesAt(s.id)));
+  const parent = new Map<number, number>();
+  const find = (id: number): number => {
+    let r = id;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    return r;
+  };
+  for (const n of nodes) parent.set(n.id, n.id);
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      if (starDistance(nodes[i]!, nodes[j]!) <= HOP_RANGE_CP) {
+        parent.set(find(nodes[i]!.id), find(nodes[j]!.id));
+      }
+    }
+  }
+  const roots = [...homeStars].map((id) => find(id));
+  if (!roots.every((r) => r === roots[0])) return false;
+  // every home keeps at least one UNGUARDED colonizable system in hop range
+  for (const hid of homeStars) {
+    const home = state.stars.find((s) => s.id === hid)!;
+    const reachable = nodes.some(
+      (n) => n.id !== hid && !homeStars.has(n.id) && !guarded.has(n.id) && starDistance(home, n) <= HOP_RANGE_CP,
+    );
+    if (!reachable) return false;
+  }
+  return true;
+}
+
 /** Game-start placement: guarded systems + the Guardian's prize system (M1). */
 export function seedMonsters(state: GameState): void {
   if (state.settings.mirror) return seedMonstersMirror(state);
@@ -190,12 +225,20 @@ export function seedMonsters(state: GameState): void {
   }
   // guarded systems (bridges exempt — they carry the guaranteed path between
   // players): prize systems (ultra-rich / gaia / terran / specials) draw a
-  // keeper 55% of the time, ordinary systems 8%
+  // keeper 55% of the time, ordinary systems 8%. A keeper is only placed if
+  // the home-to-home hop graph stays connected without its system — otherwise
+  // monsters cut the guaranteed path in the majority of generated maps.
+  const guarded = new Set<number>(orion ? [orion.starId] : []);
   for (const star of state.stars) {
     if (homeStars.has(star.id) || star.id === orion?.starId || star.sym === -1) continue;
     if (!state.planets.some((p) => p.starId === star.id && p.body === 'planet')) continue;
     const pct = systemPrizeworthy(state, star.id) ? 55 : 8;
     if (rng.chancePct(pct)) {
+      guarded.add(star.id);
+      if (!monsterPlacementOk(state, homeStars, guarded)) {
+        guarded.delete(star.id); // cut vertex of the hop graph: leave it open
+        continue;
+      }
       const kind = GUARDABLE[rng.int(GUARDABLE.length)]!;
       state.monsters.push({ id: state.nextId++, kind, starId: star.id, dmgStructure: 0 });
     }
@@ -246,12 +289,23 @@ function seedMonstersMirror(state: GameState): void {
     if (star.sym === undefined || star.sym < 2) continue; // hub, homes, bridges exempt
     groups.set(star.sym, [...(groups.get(star.sym) ?? []), star]);
   }
+  const homeStars = new Set<number>();
+  for (const c of state.colonies) {
+    const p = state.planets.find((x) => x.id === c.planetId);
+    if (p) homeStars.add(p.starId);
+  }
+  const guarded = new Set<number>(hub ? [hub.id] : []);
   for (const sym of [...groups.keys()].sort((a, b) => a - b)) {
     const members = groups.get(sym)!;
     if (!state.planets.some((p) => p.starId === members[0]!.id && p.body === 'planet')) continue;
     // symmetric wedges: the value check on any member matches every member
     const pct = systemPrizeworthy(state, members[0]!.id) ? 55 : 8;
     if (rng.chancePct(pct)) {
+      for (const star of members) guarded.add(star.id);
+      if (!monsterPlacementOk(state, homeStars, guarded)) {
+        for (const star of members) guarded.delete(star.id); // would cut the hop graph
+        continue;
+      }
       const kind = GUARDABLE[rng.int(GUARDABLE.length)]!;
       for (const star of members.sort((a, b) => a.id - b.id)) {
         state.monsters.push({ id: state.nextId++, kind, starId: star.id, dmgStructure: 0 });
@@ -297,7 +351,7 @@ export function antaranUpkeep(state: GameState, events: TurnEvent[]): void {
   if (tier >= 3) party.push('antaran_marauder');
   if (tier >= 4) party.push('antaran_marauder', 'antaran_intruder');
   for (const kind of party) {
-    state.monsters.push({ id: state.nextId++, kind, starId: planet.starId, dmgStructure: 0, raidStar: planet.starId, raidTurn: state.turn + 1 });
+    state.monsters.push({ id: state.nextId++, kind, starId: planet.starId, dmgStructure: 0, raidStar: planet.starId, raidTurn: state.turn + 1, raidTargetEmpire: target.id });
   }
   state.monsters.sort((a, b) => a.id - b.id);
   state.antarans.nextRaidTurn = state.turn + 25 + rng.int(16);
@@ -385,7 +439,8 @@ export function randomEventsUpkeep(state: GameState, events: TurnEvent[]): void 
       break;
     }
     case 4: {
-      const loss = Math.floor(empire.bc / 5);
+      // a depression cannot PAY OUT to an empire already in debt
+      const loss = Math.max(0, Math.floor(empire.bc / 5));
       empire.bc -= loss;
       events.push({ visibleTo: -1, kind: 'event_depression', payload: { empireId: empire.id, bc: loss } });
       break;

@@ -172,7 +172,8 @@ export function canQueue(state: GameState, colony: Colony, itemId: string): stri
   const planet = planetOf(state, colony);
   if (!climateAllows(itemId, planet)) return `${itemId} cannot operate on ${planet.climate}`;
   if (itemId === 'terraforming') {
-    const blocked = canTerraform(planet);
+    const queuedSteps = colony.queue.filter((q) => q.item === 'terraforming').length;
+    const blocked = canTerraform(planet, queuedSteps);
     if (blocked) return blocked;
   }
   if (itemId === 'gaia_transformation' && planet.climate !== 'terran') {

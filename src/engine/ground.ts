@@ -53,11 +53,11 @@ export function resolveInvasions(state: GameState, events: TurnEvent[]): void {
         areAtWar(state, s.owner, colony.owner),
     );
     if (!invaders.length) continue;
-    // defenders present? warships block the landing
+    // defenders present? warships (armed scouts included) block the landing
     const defended = state.ships.some(
       (s) =>
         s.owner === colony.owner &&
-        s.shipKind === 'design' &&
+        (s.shipKind === 'design' || s.shipKind === 'scout') &&
         s.location.kind === 'star' &&
         s.location.starId === starId,
     );
@@ -215,7 +215,8 @@ export function isBlockaded(state: GameState, colony: Colony): boolean {
   let hostile = false;
   let friendly = false;
   for (const s of state.ships) {
-    if (s.shipKind !== 'design' || s.location.kind !== 'star' || s.location.starId !== starId) continue;
+    // armed scouts count on both sides of a blockade, same as in battle
+    if ((s.shipKind !== 'design' && s.shipKind !== 'scout') || s.location.kind !== 'star' || s.location.starId !== starId) continue;
     if (s.owner === colony.owner) friendly = true;
     else if (areAtWar(state, s.owner, colony.owner)) hostile = true;
   }

@@ -15,7 +15,7 @@
 //      the hull table's defense column, +2 per point of combat speed.
 
 import {
-  applicationById,
+  appForWeapon,
   fieldById,
   FIELD_ROWS,
   FIELD_SUBJECTS,
@@ -128,8 +128,10 @@ const CRAFT_BY_BAY: Record<string, string[]> = {
 export function knownWeapons(empire: Empire): WeaponRow[] {
   const out: WeaponRow[] = [];
   for (const w of weaponById.values()) {
-    // weapon rows join to applications by id (aliases already normalized)
-    if (empire.knownApps.includes(w.id) || empire.knownApps.includes(w.id + 's')) out.push(w);
+    // weapon rows join to applications by id, plural form, or explicit alias
+    // (disruptor_cannon / proton_torpedoes / plasma_torpedoes)
+    const app = appForWeapon(w.id);
+    if (empire.knownApps.includes(w.id) || (app && empire.knownApps.includes(app.id))) out.push(w);
   }
   for (const [bay, crafts] of Object.entries(CRAFT_BY_BAY)) {
     if (!empire.knownApps.includes(bay)) continue;
@@ -144,7 +146,7 @@ export function knownWeapons(empire: Empire): WeaponRow[] {
 // ---------- miniaturization (C5) ----------
 
 export function miniaturizationPct(empire: Empire, weaponId: string): number {
-  const app = applicationById.get(weaponId) ?? applicationById.get(weaponId + 's');
+  const app = appForWeapon(weaponId);
   if (!app) return 100;
   const field = fieldById.get(app.fieldId);
   if (!field) return 100;
@@ -193,7 +195,7 @@ const MOD_FIELD_DEPTH: Record<string, number> = { mv: 2, eccm: 2, pd: 1 };
 export function modUnlocked(empire: Empire, weaponId: string, mod: string): boolean {
   const need = MOD_FIELD_DEPTH[mod] ?? 0;
   if (need === 0) return true;
-  const app = applicationById.get(weaponId) ?? applicationById.get(weaponId + 's');
+  const app = appForWeapon(weaponId);
   if (!app) return true; // table-less starter weapons carry no gate
   const field = fieldById.get(app.fieldId);
   if (!field) return true;
@@ -289,6 +291,12 @@ export function designStats(state: GameState, empire: Empire, design: Omit<ShipD
   let spaceUsed = 0;
   let cost = hull.cost;
 
+  // computer/shield arrive as raw network JSON: a fractional value corrupts
+  // canonical hashing (soft-locks the game) and a negative one indexes the
+  // shield tables to undefined -> NaN damage math
+  if (!Number.isSafeInteger(design.computer) || design.computer < 0 || design.computer > 5) return 'bad computer tier';
+  if (!Number.isSafeInteger(design.shield) || design.shield < 0 || design.shield > 5) return 'bad shield tier';
+
   if (design.computer > 0) {
     if (design.computer > bestComputer(empire)) return 'computer tier not researched';
     spaceUsed += Math.max(1, floorDiv(hull.space * 5, 100));
@@ -313,6 +321,12 @@ export function designStats(state: GameState, empire: Empire, design: Omit<ShipD
     if (fitted.row.classId === 3 || fitted.row.classId === 5) {
       // bombs OK; monster-only specials (tech 0) are not player-designable
       if (fitted.row.techId === 0) return `${dw.weapon} is not designable`;
+    }
+    // classId 5 specials without a combat implementation must not silently
+    // charge space for a gun that never fires (damage-dealers fire like
+    // beams; anti-missile rockets intercept)
+    if (fitted.row.classId === 5 && fitted.row.tacticalDamage.max <= 0 && fitted.row.id !== 'anti_missile_rocket') {
+      return `${dw.weapon} is not implemented yet`;
     }
     weapons.push(fitted);
     spaceUsed += fitted.spaceEach * fitted.count;

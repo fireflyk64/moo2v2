@@ -4,7 +4,7 @@
 // - No imports from outside src/engine (zero runtime dependencies).
 // - No sources of nondeterminism; randomness comes only from the seeded PRNG.
 
-export const ENGINE_VERSION = '0.7.1'; // fleet ship styles + design model variants (cosmetic), richer battle replay frames (projectile ids, shield-soak markers, PD intercepts)
+export const ENGINE_VERSION = '0.8.0'; // 2026-07-10 audit fixes: validator purity + payload hardening, classId-5 weapons fire, per-colony growth/starvation, CP/freighter/gravity/farming corrections, connectivity-safe monster seeding, planet specials, outpost razing, eliminated-empire scrub
 
 export * from './types';
 export * from './canonical';

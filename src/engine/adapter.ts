@@ -80,8 +80,14 @@ export function initGame(start: EngineGameStart): GameState {
     winType: null,
   };
 
-  // starting knowledge: all applications of the start-mode fields + basics
-  const startFieldNums = startingFieldNums(start.settings.startMode);
+  // starting knowledge: all applications of the start-mode fields + basics.
+  // "average" is a HEAD START over pre-warp, so it must be a superset — the
+  // generated table alone omits the tier-1 roots (colony_base, star_base,
+  // lasers...), leaving an average empire knowing less basics than pre-warp.
+  const startFieldNums =
+    start.settings.startMode === 'average'
+      ? [...new Set([...startingFieldNums('pre_warp'), ...startingFieldNums('average')])]
+      : startingFieldNums(start.settings.startMode);
   const startApps = new Set<string>(ALWAYS_KNOWN_ITEMS);
   for (const num of startFieldNums) {
     const field = fieldByNum.get(num);
@@ -205,8 +211,13 @@ export function initGame(start: EngineGameStart): GameState {
 }
 
 /** Matches the protocol layer's EngineAdapter interface structurally, plus a
- * deterministic event side-channel consumed after advance_turn. */
-export const gameEngine = {
+ * deterministic event side-channel consumed after advance_turn.
+ *
+ * FACTORY, not singleton: every HostCore/GameSession must own its own
+ * instance — `lastEvents` is mutable, and sessions sharing one buffer on the
+ * same page dropped pre-combat reports and doubled combat events. */
+export function createGameEngine() {
+  return {
   lastEvents: [] as TurnEvent[],
 
   init(start: {
@@ -239,15 +250,22 @@ export const gameEngine = {
     if (cmd.kind === 'game_start') return next;
     if (cmd.kind === 'advance_turn') {
       const result = advanceTurn(next);
-      this.lastEvents = result.events;
+      // append (don't replace): command events emitted since the last drain
+      // (treaty signed, surrender...) belong to this boundary's flush too.
+      // Soft cap keeps undrained holders (HostCore) from growing unbounded.
+      this.lastEvents = [...this.lastEvents, ...result.events].slice(-5000);
       return next;
     }
     if (cmd.kind === 'resolve_combat') {
       const result = resolveCombat(next);
-      this.lastEvents = [...this.lastEvents, ...result.events];
+      this.lastEvents = [...this.lastEvents, ...result.events].slice(-5000);
       return next;
     }
-    applyCommand(next, cmd as EngineCommand);
+    // commands can emit events too (treaty signed, surrender, failed accept);
+    // they ride the buffer and surface at the next turn boundary flush
+    const cmdEvents: TurnEvent[] = [];
+    applyCommand(next, cmd as EngineCommand, cmdEvents);
+    if (cmdEvents.length) this.lastEvents = [...this.lastEvents, ...cmdEvents];
     return next;
   },
 
@@ -288,9 +306,14 @@ export const gameEngine = {
     this.lastEvents = [];
     return ev;
   },
-};
+  };
+}
 
-export type GameEngine = typeof gameEngine;
+/** Shared default instance: fine for stateless calls (hash/init/serialize)
+ * and single-session tests; live sessions should call createGameEngine(). */
+export const gameEngine = createGameEngine();
+
+export type GameEngine = ReturnType<typeof createGameEngine>;
 
 /** Big-empire start: give every player a coherent bubble of 10-20 colonies
  * around their homeworld, each 1/3-1/2 populated. Planets nearest an empire's

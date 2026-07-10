@@ -9,6 +9,7 @@ import { empireAccum } from './effects';
 import { isBlockaded } from './ground';
 import { leaderById } from './leaders';
 import { commandPoints, driveSpeed, fuelRangeCp, inRange, supportStars } from './movement';
+import { hostileMonsterAt } from './npc';
 import { availableFields, fieldCost, fieldGrantsAll } from './research';
 import { starDistance } from './galaxy';
 import { ceilDiv } from './imath';
@@ -79,7 +80,7 @@ export function projectedFoodShortages(state: GameState, empireId: number): Map<
     else deficits.push({ colony: c, lack: -o.foodNet });
     out.set(c.id, 0);
   }
-  let capacity = freeFreighters(state, empire) * 5;
+  let capacity = freeFreighters(state, empire); // 1 food per freighter (matches pipeline)
   let charterBudget = Math.max(0, empire.bc + bcIncome);
   deficits.sort((a, b) => a.colony.id - b.colony.id);
   for (const d of deficits) {
@@ -549,6 +550,9 @@ export function fleetRows(state: GameState, empireId: number): FleetRow[] {
     }
     const settleTargets = (kind: 'colony_ship' | 'outpost_ship'): number[] => {
       if (ship.shipKind !== kind || atStarId === null) return [];
+      // a keeper blocks settling: offering the button anyway just produces a
+      // silently-rejected command
+      if (hostileMonsterAt(state, atStarId)) return [];
       return state.planets
         .filter(
           (p) =>

@@ -4,7 +4,7 @@
 
 import { ENGINE_VERSION } from '@engine/index';
 import { DATA_VERSION } from '@engine/data/index';
-import { gameEngine } from '@engine/adapter';
+import { createGameEngine } from '@engine/adapter';
 import type { GameState } from '@engine/types';
 import type { EngineAdapter } from '@protocol/engineAdapter';
 import type { HostCore } from '@protocol/host';
@@ -61,7 +61,7 @@ export function addBotForSeat(active: ActiveGame, seatName: string, mode: BotMod
   const link = active.host.createLocalLink();
   const session = new GameSession<GameState>({
     link,
-    engine: gameEngine as unknown as EngineAdapter<GameState>,
+    engine: createGameEngine() as unknown as EngineAdapter<GameState>,
     store: null, // the host's own session already records the game
     playerId: -1, // the host's welcome assigns the real seat
     name: seatName,
@@ -166,12 +166,13 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
     lobbyServer: params.server,
   };
 
-  const resume = store ? await loadResume(store, params.code, gameEngine as unknown as EngineAdapter<GameState>) : null;
+  const resume = store ? await loadResume(store, params.code, createGameEngine() as unknown as EngineAdapter<GameState>) : null;
 
   if (transport.selfId === 0) {
     const hosted = createHostedGame<GameState>({
       transport,
-      engine: gameEngine as unknown as EngineAdapter<GameState>,
+      engine: createGameEngine() as unknown as EngineAdapter<GameState>,
+      hostEngine: createGameEngine() as unknown as EngineAdapter<GameState>,
       store,
       settings: { ...DEFAULT_SETTINGS, playerCount: params.playerCount, debugCommands: params.debug ?? false },
       identity,
@@ -194,7 +195,7 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
 
   const session = joinGame<GameState>({
     transport,
-    engine: gameEngine as unknown as EngineAdapter<GameState>,
+    engine: createGameEngine() as unknown as EngineAdapter<GameState>,
     store,
     identity,
     ...(resume ? { resume: { gameId: resume.gameId, lastSeq: resume.lastSeq, state: resume.state } } : {}),
@@ -244,11 +245,12 @@ export async function enterSoloGame(
     roomCode: params.code,
     lobbyServer: params.server,
   };
-  const resume = await loadResume(store, params.code, gameEngine as unknown as EngineAdapter<GameState>);
+  const resume = await loadResume(store, params.code, createGameEngine() as unknown as EngineAdapter<GameState>);
 
   const hosted = createHostedGame<GameState>({
     transport: hostTransport,
-    engine: gameEngine as unknown as EngineAdapter<GameState>,
+    engine: createGameEngine() as unknown as EngineAdapter<GameState>,
+    hostEngine: createGameEngine() as unknown as EngineAdapter<GameState>,
     store,
     // debugCommands power the parity bot's logged "grants" — the sim has no
     // bot cases; the fair bot never uses them
@@ -258,7 +260,7 @@ export async function enterSoloGame(
   });
   const botSession = joinGame<GameState>({
     transport: botTransport,
-    engine: gameEngine as unknown as EngineAdapter<GameState>,
+    engine: createGameEngine() as unknown as EngineAdapter<GameState>,
     store: null, // the human's store records the game; the bot keeps nothing
     identity: { ...identity, name: 'Bot' },
   });

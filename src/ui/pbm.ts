@@ -192,12 +192,25 @@ export async function enterPbmGame(params: PbmEnterParams): Promise<ActiveGame> 
 
     // ---- auto-upload on progress + lock heartbeat ----
     let uploadTimer: ReturnType<typeof setTimeout> | null = null;
-    let uploadChain: Promise<void> = Promise.resolve();
-    const setNote = (note: string) => {
+    let uploadChain: Promise<boolean> = Promise.resolve(true);
+    let retriesLeft = 5;
+    let noteTimer: ReturnType<typeof setTimeout> | null = null;
+    const setNote = (note: string, sticky = false) => {
       if (active.pbm) active.pbm.note = note;
       app.version++;
+      // success notes auto-clear like the local save toast; warnings stay
+      // until replaced (a pinned "uploaded turn N ✓" was the sticky-dialog bug)
+      if (noteTimer) clearTimeout(noteTimer);
+      if (!sticky) {
+        noteTimer = setTimeout(() => {
+          if (active.pbm && active.pbm.note === note) {
+            active.pbm.note = '';
+            app.version++;
+          }
+        }, 6000);
+      }
     };
-    const uploadNow = () => {
+    const uploadNow = (): Promise<boolean> => {
       uploadChain = uploadChain.then(async () => {
         try {
           await active.session.flush();
@@ -212,10 +225,23 @@ export async function enterPbmGame(params: PbmEnterParams): Promise<ActiveGame> 
             committed: active.host!.getCommittedSeats(),
             players: envelope.players.map((p) => ({ id: p.player_id, name: p.name })),
           });
-          setNote(res.status === 200 ? `uploaded turn ${state?.turn} ✓` : `⚠ upload failed: ${res.data['error']}`);
+          if (res.status === 200) {
+            retriesLeft = 5;
+            setNote(`uploaded turn ${state?.turn} ✓`);
+            return true;
+          }
+          // non-2xx (lock lost / auth expired) must not pass silently: the
+          // next player would resume a stale save while this session forks
+          setNote(`⚠ upload rejected (${res.status}): ${res.data['error'] ?? 'lock lost?'} — will retry`, true);
         } catch (e) {
-          setNote(`⚠ upload failed: ${e instanceof Error ? e.message : e}`);
+          setNote(`⚠ upload failed: ${e instanceof Error ? e.message : e} — will retry`, true);
         }
+        if (retriesLeft > 0) {
+          retriesLeft--;
+          if (uploadTimer) clearTimeout(uploadTimer);
+          uploadTimer = setTimeout(() => void uploadNow(), 5000);
+        }
+        return false;
       });
       return uploadChain;
     };
@@ -227,7 +253,15 @@ export async function enterPbmGame(params: PbmEnterParams): Promise<ActiveGame> 
       if (ev.type === 'commit-status' || ev.type === 'turn-advanced') scheduleUpload();
     });
     const heartbeat = setInterval(() => {
-      void api(server, 'POST', `/pbm/rooms/${code}/lock`, token, { name }).catch(() => undefined);
+      void api(server, 'POST', `/pbm/rooms/${code}/lock`, token, { name })
+        .then((hb) => {
+          // a 423/401 heartbeat means the lock is gone (laptop slept past the
+          // TTL): the player must know before playing an orphaned branch
+          if (hb.status !== 200) {
+            setNote(`⚠ room lock lost (${hb.status}): ${hb.data['error'] ?? 'another player may have taken over'}`, true);
+          }
+        })
+        .catch(() => undefined);
     }, HEARTBEAT_MS);
 
     active.pbm = {
@@ -239,8 +273,11 @@ export async function enterPbmGame(params: PbmEnterParams): Promise<ActiveGame> 
         unsub();
         clearInterval(heartbeat);
         if (uploadTimer) clearTimeout(uploadTimer);
-        await uploadNow(); // final state, including an uncommitted half-turn
-        await releaseLock();
+        retriesLeft = 0; // final attempt only — stop() must not self-reschedule
+        const ok = await uploadNow(); // final state, incl. an uncommitted half-turn
+        // keep the lock if the final upload failed: releasing it would hand
+        // the next player a stale save and silently discard this session
+        if (ok) await releaseLock();
       },
     };
     return active;

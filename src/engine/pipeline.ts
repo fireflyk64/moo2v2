@@ -12,8 +12,8 @@ import { leaderEmpireBonuses, leadersUpkeep } from './leaders';
 import { antaranUpkeep, randomEventsUpkeep } from './npc';
 import { itemCost, parseDesignItem, parseRefitItem } from './items';
 import { commandPoints } from './movement';
-import { applyTerraformStep, unsettledPlanetsInSystem } from './terraform';
-import { colonyMaxPop, colonyOutput, colonyPopUnits, freeFreighters, groupGrowthK, traitsOf } from './economy';
+import { applyTerraformStep, terraformCost, unsettledPlanetsInSystem } from './terraform';
+import { colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, traitsOf } from './economy';
 import { normalizeJobsForGroup } from './commands';
 import { rngFor } from './rng';
 import { applyResearch } from './research';
@@ -201,7 +201,7 @@ function s2_colonyOutput(state: GameState, events: TurnEvent[]): TurnOutputs {
       if (out.foodNet >= 0) surplus += out.foodNet;
       else deficits.push({ colony: c, lack: -out.foodNet });
     }
-    let capacity = freeFreighters(state, empire) * 5;
+    let capacity = freeFreighters(state, empire); // 1 food per freighter (5 per fleet)
     // chartered civilian haulers beyond freighter capacity: 1 BC per food unit
     let charterBudget = Math.max(0, empire.bc + (empireBC.get(empire.id) ?? 0));
     let charterSpent = 0;
@@ -257,6 +257,7 @@ function s3_buildAdvance(state: GameState, outputs: TurnOutputs, events: TurnEve
     if (colony.outpost) continue;
     const out = outputs.perColony.get(colony.id);
     if (!out) continue;
+    const idleAllTurn = colony.queue.length === 0;
     colony.storedProd += out.prodToQueue;
 
     let guard = 0;
@@ -273,7 +274,11 @@ function s3_buildAdvance(state: GameState, outputs: TurnOutputs, events: TurnEve
       colony.queue.shift();
       completeItem(state, colony, active, events);
     }
-    // production stored on an empty queue evaporates (classic behavior: keep it)
+    // production stored on a queue that was empty ALL turn evaporates
+    // (classic behavior) — banking it indefinitely lets an idle colony buy a
+    // Star Fortress "for free" the turn it finally queues one. Overflow from
+    // an item that just completed still carries to next turn's queue.
+    if (idleAllTurn && colony.queue.length === 0) colony.storedProd = 0;
   }
 }
 
@@ -288,6 +293,12 @@ function completeItem(state: GameState, colony: Colony, item: string, events: Tu
   }
   if (item === 'terraforming') {
     const next = applyTerraformStep(planet);
+    if (next === null) {
+      // the chain topped out before this step landed: refund instead of
+      // silently burning hundreds of PP
+      colony.storedProd += terraformCost(planet);
+      return;
+    }
     events.push({ visibleTo: colony.owner, kind: 'terraformed', payload: { colonyId: colony.id, climate: next } });
     return;
   }
@@ -320,6 +331,12 @@ function completeItem(state: GameState, colony: Colony, item: string, events: Tu
         housingPPPrev: 0,
         outpost: false,
       });
+      // seed a worker, not a farmer, where farming is impossible
+      const settled = state.colonies[state.colonies.length - 1]!;
+      if (!farmingViable(state, settled)) {
+        settled.groups[0]!.farmers = 0;
+        settled.groups[0]!.workers = 1;
+      }
       state.colonies.sort((a, b) => a.id - b.id);
       events.push({ visibleTo: colony.owner, kind: 'colony_founded', payload: { planetId: target.id, viaBase: true } });
     }
@@ -500,6 +517,14 @@ function s12_victory(state: GameState, events: TurnEvent[]): void {
     const hasSeedShip = state.ships.some((s) => s.owner === empire.id && s.shipKind === 'colony_ship');
     if (!hasColony && !hasSeedShip) {
       empire.eliminated = true;
+      // scrub the dead empire's leftovers like resign/surrender do — ghost
+      // fleets would otherwise blockade, fight, and invade forever
+      empire.leaders = [];
+      empire.spies = { count: 0, target: null, mode: 'steal' };
+      state.ships = state.ships.filter((s) => s.owner !== empire.id);
+      state.colonies = state.colonies.filter((c) => c.owner !== empire.id);
+      state.proposals = state.proposals.filter((p) => p.from !== empire.id && p.to !== empire.id);
+      state.leaderOffers = state.leaderOffers.filter((o) => o.empireId !== empire.id);
       events.push({ visibleTo: -1, kind: 'empire_eliminated', payload: { empireId: empire.id } });
     }
   }

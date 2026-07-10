@@ -59,9 +59,9 @@ export function travelTurns(state: GameState, empire: Empire, from: Star, to: St
   return Math.max(1, ceilDiv(dist, speed));
 }
 
-/** Orbital bases anchor fleet logistics: star base +1, battle station +2,
- * star fortress +3 command points, on top of the per-colony baseline. */
-const BASE_CP: Record<string, number> = { star_base: 1, battle_station: 2, star_fortress: 3 };
+// Orbital-base command points come solely from the buildings' cp_flat effect
+// modifiers (star base +2 / battlestation +4 / star fortress +6, matching the
+// CP_SOURCES table) — a second hardcoded table here double-counted them 1.5x.
 
 export interface CommandPointInfo {
   sources: number;
@@ -77,7 +77,6 @@ export function commandPoints(state: GameState, empire: Empire): CommandPointInf
     if (colony.owner !== empire.id) continue;
     if (!colony.outpost) sources += CP_SOURCES['colony'] ?? 1;
     for (const b of colony.buildings) {
-      sources += BASE_CP[b] ?? 0;
       for (const m of effectsOf(b)?.modifiers ?? []) {
         if (m.target === 'cp_flat' && m.scope === 'colony') sources += m.amount;
       }

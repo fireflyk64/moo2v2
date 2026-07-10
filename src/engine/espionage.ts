@@ -74,7 +74,10 @@ export function resolveEspionage(state: GameState, events: TurnEvent[]): void {
       if (empire.spies.count <= 0) continue;
     }
 
-    for (let i = 0; i < empire.spies.count; i++) {
+    // snapshot: a spy caught mid-sweep must not rob a SURVIVING spy of its
+    // attempt (the loop bound would shrink as exposures decrement the count)
+    const attempts = empire.spies.count;
+    for (let i = 0; i < attempts && empire.spies.count > 0; i++) {
       if (rng.chancePct(chance)) {
         if (empire.spies.mode === 'steal') {
           const stealable = target.knownApps.filter((a) => !empire.knownApps.includes(a));

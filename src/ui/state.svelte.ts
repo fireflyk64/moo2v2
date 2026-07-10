@@ -49,9 +49,14 @@ export const app = $state({
   reports: [] as ReportEntry[],
   /** host peer connectivity (clients only; host is always true) */
   hostConnected: true,
+  /** transient note when the host rejects a command that passed optimistic
+   * local validation (lost races: leader hires, colonize contention...) */
+  rejectedNote: '',
   /** the ?room=&name= URL auto-join already ran (don't rejoin after leaving) */
   autoJoined: false,
 });
+
+let rejectedNoteTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Not reactive on purpose: session/transport are external objects.
 let activeGame: ActiveGame | null = null;
@@ -91,10 +96,23 @@ export function bindActive(active: ActiveGame): void {
   }
   active.session.subscribe((ev) => {
     app.version++;
+    // any session event means host traffic is flowing: the "host offline"
+    // banner must clear even when only the signaling websocket dropped
+    // (lobbylink fires player-left(0) while the data channel stays healthy)
+    if (!active.host && !app.hostConnected) app.hostConnected = true;
     if (ev.type === 'started') app.screen = 'game';
     else if (ev.type === 'version-reject') {
       app.error = ev.reason;
       app.screen = 'home';
+    } else if (ev.type === 'rejected') {
+      // the optimistic UI already reverted; without a note the action just
+      // silently un-happens (lost host-side races)
+      app.rejectedNote = `⛔ ${ev.reason}`;
+      if (rejectedNoteTimer) clearTimeout(rejectedNoteTimer);
+      rejectedNoteTimer = setTimeout(() => {
+        app.rejectedNote = '';
+        app.version++;
+      }, 6000);
     } else if (ev.type === 'chat') {
       app.chat.push({ id: ev.id, from: ev.from, to: ev.to, text: ev.text });
       if (app.chat.length > 100) app.chat.shift();
@@ -137,6 +155,14 @@ export function leaveGame(): void {
   activeGame = null;
   app.screen = 'home';
   app.chat = [];
+  // scrub per-game UI state: reports/replays/an open viewer leaking into the
+  // next game shows the previous game's battles under the new game's turns
+  app.replays = [];
+  app.groundBattles = [];
+  app.reports = [];
+  app.viewing = null;
+  app.rejectedNote = '';
+  app.hostConnected = true;
   app.version++;
   if (!g) return;
   g.solo?.close();
