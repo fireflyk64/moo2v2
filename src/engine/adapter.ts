@@ -11,8 +11,10 @@ import {
   ALWAYS_KNOWN_ITEMS,
 } from './data/index';
 import { applyCommand, validateCommand, type EngineCommand } from './commands';
-import { generateGalaxy } from './galaxy';
+import { generateGalaxy, starDistance } from './galaxy';
+import { colonyMaxPop } from './economy';
 import { seedMonsters } from './npc';
+import { rngFor } from './rng';
 import { advanceTurn, resolveCombat } from './pipeline';
 import { resolveTraits } from './race';
 import type { Colony, GameState, GameStateSettings, PendingBattle, TurnEvent } from './types';
@@ -197,6 +199,8 @@ export function initGame(start: EngineGameStart): GameState {
 
   seedMonsters(state); // guarded systems + the Guardian's prize system (M1)
 
+  if (start.settings.bigStart) bigEmpireStart(state);
+
   return state;
 }
 
@@ -287,3 +291,91 @@ export const gameEngine = {
 };
 
 export type GameEngine = typeof gameEngine;
+
+/** Big-empire start: give every player a coherent bubble of 10-20 colonies
+ * around their homeworld, each 1/3-1/2 populated. Planets nearest an empire's
+ * home (that nobody else is closer to and no monster guards) join that empire,
+ * so the territories stay contiguous and non-overlapping. */
+function bigEmpireStart(state: GameState): void {
+  const rng = rngFor(state.seed, 0, 'bigstart');
+  const homeStarOf = new Map<number, number>();
+  for (const c of state.colonies) {
+    const p = state.planets.find((x) => x.id === c.planetId)!;
+    homeStarOf.set(c.owner, p.starId);
+  }
+  const empires = [...state.empires].sort((a, b) => a.id - b.id);
+  const target = new Map<number, number>();
+  for (const e of empires) target.set(e.id, 10 + rng.int(11)); // 10..20 each
+
+  // candidate planets: colonizable, unguarded, not already a homeworld
+  const guarded = new Set(state.monsters.map((m) => m.starId));
+  const homeStars = new Set(homeStarOf.values());
+  const candidates = state.planets.filter(
+    (p) =>
+      p.body === 'planet' &&
+      !guarded.has(p.starId) &&
+      !homeStars.has(p.starId) &&
+      !state.colonies.some((c) => c.planetId === p.id),
+  );
+
+  // assign each candidate to the empire whose home is nearest (contiguous
+  // bubbles); nearest-first so inner planets fill before the frontier
+  const claim: Array<{ planet: (typeof candidates)[number]; owner: number; d: number }> = [];
+  for (const planet of candidates) {
+    const star = state.stars.find((s) => s.id === planet.starId)!;
+    let best = -1;
+    let bestD = Infinity;
+    for (const e of empires) {
+      const hs = state.stars.find((s) => s.id === homeStarOf.get(e.id))!;
+      const d = starDistance(hs, star);
+      if (d < bestD) {
+        bestD = d;
+        best = e.id;
+      }
+    }
+    if (best >= 0) claim.push({ planet, owner: best, d: bestD });
+  }
+  claim.sort((a, b) => a.d - b.d || a.planet.id - b.planet.id);
+
+  const count = new Map<number, number>();
+  for (const e of empires) count.set(e.id, 1); // the homeworld counts
+  for (const { planet, owner } of claim) {
+    if ((count.get(owner) ?? 0) >= (target.get(owner) ?? 0)) continue;
+    const star = state.stars.find((s) => s.id === planet.starId)!;
+    const romans = ['I', 'II', 'III', 'IV', 'V'];
+    const colony: Colony = {
+      id: state.nextId++,
+      planetId: planet.id,
+      owner,
+      name: `${star.name} ${romans[planet.orbit - 1] ?? planet.orbit}`,
+      groups: [{ race: owner, popK: 1000, farmers: 0, workers: 1, scientists: 0, unrest: false }],
+      buildings: [],
+      queue: [],
+      storedProd: 0,
+      stickyInvested: {},
+      boughtThisTurn: false,
+      foodLackPrev: 0,
+      prodLackPrev: 0,
+      housingPPPrev: 0,
+      outpost: false,
+    };
+    state.colonies.push(colony);
+    // 1/3 to 1/2 of capacity, split into fed jobs
+    const cap = colonyMaxPop(state, colony);
+    const units = Math.max(1, Math.floor((cap * (33 + rng.int(18))) / 100));
+    const farmers = Math.min(units, Math.ceil(units / 2));
+    colony.groups[0] = {
+      race: owner,
+      popK: units * 1000,
+      farmers,
+      workers: units - farmers,
+      scientists: 0,
+      unrest: false,
+    };
+    const emp = state.empires.find((e) => e.id === owner)!;
+    if (!emp.exploredStars.includes(star.id)) emp.exploredStars.push(star.id);
+    count.set(owner, (count.get(owner) ?? 0) + 1);
+  }
+  for (const e of empires) e.exploredStars.sort((a, b) => a - b);
+  state.colonies.sort((a, b) => a.id - b.id);
+}

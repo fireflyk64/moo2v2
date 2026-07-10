@@ -14,7 +14,7 @@ import { DEFAULT_SETTINGS, type LogCommand } from '@protocol/messages';
 import { createHostedGame, generateSeed, joinGame } from '@protocol/setup';
 import { GameSession } from '@protocol/session';
 import type { NetTransport } from '@protocol/transport';
-import { SoloBot, type BotMode } from './soloBot';
+import { SoloBot, type BotMode, type BotPersonality } from './soloBot';
 import { isOpfsLikelyAvailable, openBrowserStore } from '@storage/browser';
 import { MemoryGameStore, type GameStoreLike } from '@storage/memory';
 import type { SQLocalKysely } from 'sqlocal/kysely';
@@ -70,7 +70,7 @@ export function addBotForSeat(active: ActiveGame, seatName: string, mode: BotMod
     roomCode: active.params.code,
     lobbyServer: active.params.server,
   });
-  const bot = new SoloBot({ session, mode });
+  const bot = new SoloBot({ session, mode, personality: 'auto' });
   active.bots.push(bot);
   return bot;
 }
@@ -225,7 +225,11 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
 /** Single-player mode: an in-process game against the simple bot — no
  * lobbylink server, no WebRTC. Persists like any room (code SOLO), so a
  * reload resumes the campaign. */
-export async function enterSoloGame(name: string, botMode: BotMode = 'parity'): Promise<ActiveGame> {
+export async function enterSoloGame(
+  name: string,
+  botMode: BotMode = 'parity',
+  personality: BotPersonality | 'auto' = 'militarist',
+): Promise<ActiveGame> {
   const params: RoomParams = { server: 'local', code: 'SOLO', name, playerCount: 2 };
   const hub = new MemoryHub(2);
   const hostTransport = hub.join();
@@ -258,7 +262,7 @@ export async function enterSoloGame(name: string, botMode: BotMode = 'parity'): 
     store: null, // the human's store records the game; the bot keeps nothing
     identity: { ...identity, name: 'Bot' },
   });
-  const solo = new SoloBot({ session: botSession, mode: botMode });
+  const solo = new SoloBot({ session: botSession, mode: botMode, personality });
 
   return {
     transport: hostTransport,

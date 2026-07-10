@@ -30,6 +30,7 @@
   }
 
   let botMode = $state<'parity' | 'fair'>('parity');
+  let botPersonality = $state<'auto' | 'techer' | 'rusher' | 'industrialist' | 'expander' | 'militarist'>('militarist');
 
   async function goSolo() {
     if (!name) {
@@ -39,7 +40,7 @@
     app.error = '';
     app.connecting = true;
     try {
-      const active = await enterSoloGame(name, botMode);
+      const active = await enterSoloGame(name, botMode, botPersonality);
       bindActive(active);
     } catch (e) {
       app.error = e instanceof Error ? e.message : String(e);
@@ -157,6 +158,14 @@
     <select data-testid="bot-mode" bind:value={botMode} title="parity: the bot keeps up via visible logged grants · fair: the bot plays with no help at all">
       <option value="parity">parity bot (keeps up)</option>
       <option value="fair">fair bot (no cheats)</option>
+    </select>
+    <select data-testid="bot-personality" bind:value={botPersonality} title="play style: expander grabs planets, rusher/militarist come at you early, techer out-researches, industrialist out-builds">
+      <option value="auto">random style</option>
+      <option value="techer">techer</option>
+      <option value="rusher">rusher</option>
+      <option value="industrialist">industrialist</option>
+      <option value="expander">expander</option>
+      <option value="militarist">militarist</option>
     </select>
   </span>
   <button data-testid="load-save" onclick={() => fileInput.click()} disabled={app.connecting}>

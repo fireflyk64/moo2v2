@@ -229,6 +229,9 @@ export interface GameStateSettings {
   homeStart?: 'good' | 'min';
   /** custom-race pick budget (absent = classic 10) */
   pickPoints?: number;
+  /** big-empire start: each player begins with a bubble of 10-20 colonies,
+   * each 1/3-1/2 populated (absent/false = classic single homeworld) */
+  bigStart?: boolean;
 }
 
 export type ProposalKind =

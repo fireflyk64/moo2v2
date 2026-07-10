@@ -49,6 +49,8 @@ export interface GameSettings {
   homeStart?: 'good' | 'min';
   /** custom-race pick budget (classic 10; 14 for richer races) */
   pickPoints?: number;
+  /** big-empire start: every player begins with a 10-20 colony bubble */
+  bigStart?: boolean;
 }
 
 export type ClientToHost =
@@ -135,6 +137,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   autoTurnUntil: 0,
   autoTurnSeconds: 0,
   pickPoints: 10,
+  bigStart: false,
   mirror: false,
   homeStart: 'good',
 };
