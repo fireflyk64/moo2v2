@@ -138,6 +138,50 @@ describe('fast start', () => {
     }
   }, 120_000);
 
+  it('the flagship combo: fast start on an advanced (big identical empires) map', async () => {
+    const { hub, hosted, joiner } = makeTable({ startMode: 'advanced' });
+    await hub.settle();
+    hosted.host.startGame(SEED);
+    await hub.settle();
+
+    const a = hosted.session;
+    const b = joiner;
+    const authSlices = new Map<number, string>();
+    b.subscribe((ev) => {
+      if (ev.type === 'turn-advanced') authSlices.set(ev.turn, ownSlice(b.getState()!, 0));
+    });
+
+    // developed empires: many colonies, freighters and scouts from turn one —
+    // and still strangers, so the fast phase is live
+    const start = a.getState()!;
+    expect(start.colonies.filter((c) => c.owner === 0).length).toBeGreaterThanOrEqual(4);
+    expect(a.fastPhaseActive()).toBe(true);
+
+    // Ann races 3 turns, ordering builds across her whole empire
+    const previewSlices = new Map<number, string>();
+    for (let i = 0; i < 3; i++) {
+      const turn = a.fastTurn();
+      for (const c of a.getPlanned()!.colonies.filter((x) => x.owner === 0).slice(0, 4)) {
+        a.submit('set_build_queue', { colonyId: c.id, items: [i % 2 ? 'trade_goods' : 'housing'] });
+      }
+      expect(a.endTurnFast()).toBe(true);
+      await hub.settle();
+      previewSlices.set(turn + 1, ownSlice(a.getPlanned()!, 0));
+    }
+    expect(a.fastAheadTurns()).toBe(3);
+
+    for (let i = 0; i < 3; i++) {
+      b.commitTurn();
+      await hub.settle();
+    }
+    expect(a.getState()!.turn).toBe(4);
+    const eng = engine();
+    expect(eng.hash(a.getState()!)).toBe(eng.hash(b.getState()!));
+    for (const [turn, slice] of previewSlices) {
+      expect(authSlices.get(turn), `own-slice fidelity at turn ${turn}`).toBe(slice);
+    }
+  }, 120_000);
+
   it('both players ahead: the host cascades through every mutually-committed turn', async () => {
     const { hub, hosted, joiner } = makeTable();
     await hub.settle();

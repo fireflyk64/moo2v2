@@ -74,11 +74,13 @@ payoff. Items marked ✅ already exist (some shipped with this batch).
 ## Setup-level shortcuts (rule-preserving options that already exist)
 
 14. ✅ **Average start** (skip the pre-warp tech grind), ✅ **Big empires
-    start** (skip the first 30 turns of expansion), ✅ **Mirror galaxy** (fair,
-    known distances — contact predictably early), ✅ **good home system**.
-    A lobby "quick game" preset bundling average + big start + fast start +
-    60s auto-turn would get a table from lobby to first contact in minutes
-    without touching a single rule.
+    start** (skip the first 30 turns of expansion), ✅ **Advanced start**
+    (identical developed empires covering ~1/3 of the map, half-full worlds,
+    freighters, frontier scouts — skips straight to the interesting part), ✅
+    **Mirror galaxy** (fair, known distances — contact predictably early), ✅
+    **good home system**. A lobby "quick game" preset bundling advanced start
+    + fast start + 60s auto-turn would get a table from lobby to first
+    contact in minutes without touching a single rule.
 
 ## Explicitly rejected (they would change the rules)
 
