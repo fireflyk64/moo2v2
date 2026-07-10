@@ -3,7 +3,7 @@
 // from here so alternate front ends and headless bots agree exactly.
 
 import { fieldByNum, applicationsOfField, FIELD_SUBJECTS, type FieldRow } from './data/index';
-import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, type ColonyOutput } from './economy';
+import { busyFreighters, buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, type ColonyOutput } from './economy';
 import { buildableItems, itemCost, refitCost, SHIPYARD_BASES } from './items';
 import { empireAccum } from './effects';
 import { isBlockaded } from './ground';
@@ -263,6 +263,11 @@ export function empireSummary(state: GameState, empireId: number): EmpireSummary
   const field = empire.research.fieldNum !== null ? fieldByNum.get(empire.research.fieldNum) : null;
   const fieldCostNow = field ? fieldCost(state, empire, field) : 0;
   const cp = commandPoints(state, empire);
+  // projected freighter upkeep: 0.5 BC per freighter in use (food hauls up to
+  // free capacity + colonists in transit at 5 per unit); idle hulls are free
+  const projectedHaul = Math.min(freightersNeeded, freeFreighters(state, empire));
+  const busy = busyFreighters(state, empireId);
+  if (projectedHaul + busy > 0) bcDelta -= ceilDiv(projectedHaul + busy, 2);
   return {
     id: empireId,
     name: empire.name,

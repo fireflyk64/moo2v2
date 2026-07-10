@@ -589,11 +589,11 @@
       <h3>Quick reference <button onclick={() => (showHelp = false)}>✕</button></h3>
       <ul>
         <li><b>Colonies</b> — the spreadsheet runs your empire: assign jobs (drag citizen icons onto another job or another colony), pick builds, buy with BC. Click headers to sort; tick rows for bulk builds; 🏛 lists buildings (sell for half price).</li>
-        <li><b>Turns</b> are simultaneous: everything resolves when every player commits. Uncommit any time before the last player commits.</li>
-        <li><b>Food</b> feeds colonists (2 per unit ×½); shortages starve growth. Freighters move surplus between colonies — blockades cut deliveries.</li>
+        <li><b>Turns</b> are simultaneous: everything resolves when every player commits. Uncommit any time before the last player commits. In <b>⚡ fast start</b> games nobody waits: end turns at your own pace until two empires meet — CONTACT then pulls everyone back to the synced turn (max 10 turns ahead of the slowest player).</li>
+        <li><b>Food</b> feeds colonists (2 per unit ×½); shortages starve growth. Freighters move surplus between colonies at 0.5 BC per freighter in use (idle ones are free); civilian charters cover overflow at 1 BC per food. Blockades cut deliveries.</li>
         <li><b>Research</b> works one field at a time; basic fields and Cold Fusion (marked ✦) grant <i>all</i> their applications — Cold Fusion delivers colony ships, outposts, transports and freighters together. Never leave research idle — points bank but nothing finishes.</li>
         <li><b>Ships</b> travel star-to-star within fuel range (unreachable stars are dashed red on the map). Move orders can be re-routed until you commit.</li>
-        <li><b>Colonists</b> move between stars on transports: build one, "load" at a colony, fly it, "unload" (Fleets tab). Within a system they move freely — drag citizens onto a sibling colony in the spreadsheet (no ships needed). Colony bases settle other planets in the same system.</li>
+        <li><b>Colonists</b> move between stars on transports: build one, "load" at a colony, fly it, "unload" (Fleets tab). Within a system they move freely — drag citizens onto a sibling colony in the spreadsheet (no ships needed); between systems the freighter run flies your <i>second-best</i> drive (the newest engines go to the warfleet). Colony bases settle other planets in the same system.</li>
         <li><b>Battles</b> only happen between empires at <b>war</b> — declare it on the Empires tab. A battle is a single pass; set stance/targeting/retreat before the clash.</li>
         <li><b>☠ stars</b> are guarded by monsters — clear the keeper to colonize. Orion holds the Guardian and the best worlds in the galaxy.</li>
         <li><b>Leaders</b> offer their services on the Empires tab; colony leaders boost one colony, ship officers the whole fleet.</li>

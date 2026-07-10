@@ -38,6 +38,8 @@
       case 'ship_arrived': return `a fleet arrived at its destination`;
       case 'starvation': return `${colonyOf(p['colonyId'])} is starving (${p['lack']} short)`;
       case 'food_chartered': return `chartered civilian haulers moved ${p['units']} food beyond freighter capacity (−${p['bc']} BC)`;
+      case 'freighter_upkeep': return `${p['inUse']} freighter${Number(p['inUse']) === 1 ? '' : 's'} in service hauling food and colonists (−${p['bc']} BC upkeep)`;
+      case 'colony_ship_arrived': return `a colony ship reached a system with an open planet — ready to settle`;
       case 'population_lost': return `${colonyOf(p['colonyId'])} lost population`;
       case 'colony_died': return `a colony has perished`;
       case 'research_complete': {
