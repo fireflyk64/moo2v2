@@ -129,6 +129,15 @@ export async function enterPbmGame(params: PbmEnterParams): Promise<ActiveGame> 
     const room = await api(server, 'GET', `/pbm/rooms/${code}`, token);
     const players = ((room.data['meta'] as PbmMeta | undefined)?.players ?? []).length || 8;
     const active = await enterRoom({ server, code, name, playerCount: players });
+    if (active.transport.selfId === 0) {
+      // nobody is actually in the room: the holder's tab died and their lock
+      // has not timed out yet — hosting now would fork the game
+      active.transport.close();
+      await active.store?.destroy().catch(() => undefined);
+      throw new Error(
+        `${holder} holds the room lock but is not online — try again in a few minutes (locks time out)`,
+      );
+    }
     active.pbm = {
       role: 'guest',
       note: `${holder} holds the room — joined their live game`,
