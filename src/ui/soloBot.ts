@@ -182,7 +182,11 @@ export class SoloBot {
           this.mode === 'fair' && this.brain === 'v2'
             ? open.sort((a, b) => a.cost - b.cost || a.field.num - b.field.num)[0]!
             : open[Math.floor(rand() * open.length)]!;
-        const target = pick.grantsAll ? null : (pick.apps.find((a) => !a.known)?.id ?? null);
+        // dead picks (morale tech under Unification) would be rejected —
+        // target the first LIVE unknown app, falling back only if none exist
+        const target = pick.grantsAll
+          ? null
+          : (pick.apps.find((a) => !a.known && !a.dead)?.id ?? pick.apps.find((a) => !a.known)?.id ?? null);
         this.submit('set_research', { fieldNum: pick.field.num, targetApp: target });
       }
     }

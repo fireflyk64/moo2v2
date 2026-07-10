@@ -201,14 +201,19 @@ const validateSetResearch: Validator = (state, cmd) => {
     const apps = applicationsOfField(field.id);
     if (!apps.some((a) => a.id === p.targetApp)) return `${p.targetApp} not in ${field.id}`;
     if (empire.knownApps.includes(p.targetApp)) return `${p.targetApp} already known`;
-    if (!appPickableBy(empire, p.targetApp)) {
-      return `${p.targetApp} is pointless under Unification (morale-immune)`;
-    }
   }
   const traits = traitsOf(empire);
   if (!traits.uncreative && !(traits.creative && !state.settings.modes.creativeVariant)) {
     if (p.targetApp === null && !field.id.startsWith('advf_') && !fieldGrantsAll(field)) {
       return 'target application required';
+    }
+    // only when the target actually decides the grant: dead picks (morale
+    // tech under Unification) are refused unless the field offers nothing else
+    if (p.targetApp !== null && !appPickableBy(empire, p.targetApp)) {
+      const others = applicationsOfField(field.id).some(
+        (a) => !empire.knownApps.includes(a.id) && appPickableBy(empire, a.id),
+      );
+      if (others) return `${p.targetApp} is pointless under Unification (morale-immune)`;
     }
   }
   return null;

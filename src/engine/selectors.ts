@@ -10,7 +10,7 @@ import { isBlockaded } from './ground';
 import { leaderById } from './leaders';
 import { commandPoints, driveSpeed, fuelRangeCp, inRange, supportStars } from './movement';
 import { hostileMonsterAt } from './npc';
-import { availableFields, fieldCost, fieldGrantsAll } from './research';
+import { appPickableBy, availableFields, fieldCost, fieldGrantsAll } from './research';
 import { starDistance } from './galaxy';
 import { ceilDiv } from './imath';
 import type { Colony, Empire, GameState, Planet, Ship, Star } from './types';
@@ -364,7 +364,7 @@ export interface ResearchChoice {
   cost: number;
   /** "(General)" fields deliver every application at once (no target choice) */
   grantsAll: boolean;
-  apps: Array<{ id: string; name: string; known: boolean }>;
+  apps: Array<{ id: string; name: string; known: boolean; dead: boolean }>;
 }
 
 export function researchChoices(state: GameState, empireId: number): ResearchChoice[] {
@@ -378,6 +378,9 @@ export function researchChoices(state: GameState, empireId: number): ResearchCho
       id: a.id,
       name: a.name,
       known: empire.knownApps.includes(a.id),
+      // dead pick for this empire (morale tech under Unification): kept out
+      // of the pick list; the field itself stays researchable for the ladder
+      dead: !appPickableBy(empire, a.id),
     })),
   }));
 }
