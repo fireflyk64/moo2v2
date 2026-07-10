@@ -65,9 +65,9 @@ export class HostCore<S> {
   private unsubs: Array<() => void> = [];
   private battleTimer: ReturnType<typeof setTimeout> | null = null;
   private battleOrdersTimeoutMs = 60_000;
-  /** true once any advance_turn is in the log (auto-turn eligibility) */
-  private anyTurnAdvanced = false;
-  private autoAdvancing = false;
+  /** auto-turn: armed once all seats but one have committed */
+  private autoTurnTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoTurnDeadline = 0;
   private auction: {
     seed: string;
     contested: Record<string, number[]>;
@@ -101,7 +101,7 @@ export class HostCore<S> {
       for (const cmd of opts.resumeLog) this.fold(cmd);
       this.battleOrdersTimeoutMs = this.settings.battleOrdersTimeoutMs || 60_000;
       this.checkBattlePhase(); // resumed mid battle-orders phase: restart the clock
-      this.maybeAutoAdvance(); // resumed mid auto-turn fast-forward: keep going
+      this.armAutoTurn(); // commits may already be one short of the table
     }
 
     this.unsubs.push(this.transport.onMessage((from, msg) => this.route(from, msg as ClientToHost)));
@@ -133,6 +133,7 @@ export class HostCore<S> {
   close(): void {
     for (const u of this.unsubs) u();
     if (this.battleTimer) clearTimeout(this.battleTimer);
+    if (this.autoTurnTimer) clearTimeout(this.autoTurnTimer);
   }
 
   // ----- message routing -----
@@ -442,7 +443,6 @@ export class HostCore<S> {
     } else if (this.state) {
       this.state = this.engine.apply(this.state, cmd);
       if (cmd.kind === 'advance_turn' && this.state) {
-        this.anyTurnAdvanced = true;
         const t = this.engine.turnOf(this.state) - 1; // hash of the completed turn boundary
         this.turnHashes.set(t, this.engine.hash(this.state));
       }
@@ -481,8 +481,7 @@ export class HostCore<S> {
         this.battleTimer = null;
       }
       this.accept({ turn: this.currentTurn(), playerId: -1, kind: 'resolve_combat', payload: {} });
-      this.broadcast({ t: 'commit_status', turn: this.currentTurn(), committed: [] });
-      this.maybeAutoAdvance();
+      this.broadcastCommitStatus();
       return;
     }
     if (!this.battleTimer) {
@@ -490,8 +489,7 @@ export class HostCore<S> {
         this.battleTimer = null;
         if (this.state && this.engine.phaseOf && this.engine.phaseOf(this.state) === 'battle_orders') {
           this.accept({ turn: this.currentTurn(), playerId: -1, kind: 'resolve_combat', payload: {} });
-          this.broadcast({ t: 'commit_status', turn: this.currentTurn(), committed: [] });
-          this.maybeAutoAdvance();
+          this.broadcastCommitStatus();
         }
       }, this.battleOrdersTimeoutMs);
     }
@@ -526,7 +524,7 @@ export class HostCore<S> {
     for (const id of seatIds) {
       if (this.seats.has(id)) this.committed.add(id);
     }
-    this.broadcast({ t: 'commit_status', turn: this.currentTurn(), committed: this.getCommittedSeats() });
+    this.broadcastCommitStatus();
     this.maybeAdvance();
   }
 
@@ -534,8 +532,20 @@ export class HostCore<S> {
     if (!this.started || turn !== this.currentTurn()) return;
     if (committed) this.committed.add(from);
     else this.committed.delete(from);
-    this.broadcast({ t: 'commit_status', turn, committed: [...this.committed].sort((a, b) => a - b) });
+    this.broadcastCommitStatus();
     this.maybeAdvance();
+  }
+
+  /** commit_status carries the auto-turn deadline when the timer is armed */
+  private broadcastCommitStatus(): void {
+    this.armAutoTurn();
+    const remaining = this.autoTurnTimer ? Math.max(0, this.autoTurnDeadline - Date.now()) : undefined;
+    this.broadcast({
+      t: 'commit_status',
+      turn: this.currentTurn(),
+      committed: this.getCommittedSeats(),
+      ...(remaining !== undefined ? { autoTurnInMs: remaining } : {}),
+    });
   }
 
   private maybeAdvance(): void {
@@ -552,36 +562,42 @@ export class HostCore<S> {
       kind: 'advance_turn',
       payload: this.engine.advancePayload(this.state),
     });
-    this.broadcast({ t: 'commit_status', turn: this.currentTurn(), committed: [] });
-    this.maybeAutoAdvance();
+    this.broadcastCommitStatus();
   }
 
-  /** Auto-turn mode: once the table has advanced a turn together, keep
-   * advancing automatically until settings.autoTurnUntil (early-game skip).
-   * Battles still pause for orders; auto-advance resumes after resolution. */
-  private maybeAutoAdvance(): void {
-    const until = this.settings.autoTurnUntil ?? 0;
-    if (until <= 0 || !this.anyTurnAdvanced || this.autoAdvancing) return;
-    this.autoAdvancing = true;
-    try {
-      while (
-        this.state &&
-        this.currentTurn() < until &&
-        (!this.engine.phaseOf || this.engine.phaseOf(this.state) === 'planning')
-      ) {
-        const turn = this.currentTurn();
-        this.committed.clear();
-        this.accept({
-          turn,
-          playerId: -1,
-          kind: 'advance_turn',
-          payload: this.engine.advancePayload(this.state),
-        });
-        this.broadcast({ t: 'commit_status', turn: this.currentTurn(), committed: [] });
-      }
-    } finally {
-      this.autoAdvancing = false;
+  /** Auto-turn timer: once every seat except one has committed, the table
+   * only waits settings.autoTurnSeconds for the laggard — then the host
+   * advances the turn without them (their next-turn planning is unharmed;
+   * turns always advance ONE at a time). */
+  private armAutoTurn(): void {
+    if (this.autoTurnTimer) {
+      clearTimeout(this.autoTurnTimer);
+      this.autoTurnTimer = null;
     }
+    const secs = this.settings.autoTurnSeconds ?? 0;
+    if (secs <= 0 || !this.state) return;
+    if (this.engine.phaseOf && this.engine.phaseOf(this.state) !== 'planning') return;
+    const seats = [...this.seats.keys()];
+    const committed = seats.filter((id) => this.committed.has(id)).length;
+    if (seats.length < 2 || committed < seats.length - 1 || committed >= seats.length) return;
+    this.autoTurnDeadline = Date.now() + secs * 1000;
+    this.autoTurnTimer = setTimeout(() => {
+      this.autoTurnTimer = null;
+      if (!this.state) return;
+      if (this.engine.phaseOf && this.engine.phaseOf(this.state) !== 'planning') return;
+      const now = [...this.seats.keys()];
+      const done = now.filter((id) => this.committed.has(id)).length;
+      if (done < now.length - 1) return; // someone uncommitted meanwhile
+      const turn = this.currentTurn();
+      this.committed.clear();
+      this.accept({
+        turn,
+        playerId: -1,
+        kind: 'advance_turn',
+        payload: this.engine.advancePayload(this.state!),
+      });
+      this.broadcastCommitStatus();
+    }, secs * 1000);
   }
 
   private onHashReport(from: number, msg: Extract<ClientToHost, { t: 'hash_report' }>): void {

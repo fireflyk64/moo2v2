@@ -37,9 +37,12 @@ export interface GameSettings {
   battleOrdersTimeoutMs: number;
   /** enable logged debug commands (testing) */
   debugCommands: boolean;
-  /** auto-advance turns up to this turn once everyone has committed the first
-   * time (0 = off). Skips the slow early game. */
+  /** DEPRECATED (kept so old saves parse): the old fast-forward-to-turn-N
+   * behavior. Ignored by current hosts — see autoTurnSeconds. */
   autoTurnUntil?: number;
+  /** auto-turn timer: once every player except one has committed, the host
+   * advances the turn after this many seconds (0 = off) */
+  autoTurnSeconds?: number;
   /** mirror galaxy: identical rotated wedges, every player on the map edge */
   mirror?: boolean;
   /** home-system sibling world: 'good' = ultra-rich, 'min' = abundant */
@@ -82,7 +85,13 @@ export type HostToClient =
   | { t: 'lobby_update'; players: PlayerRoster[]; settings: GameSettings }
   | { t: 'cmd_accept'; cmd: LogCommand; clientId?: string }
   | { t: 'cmd_reject'; clientId: string; reason: string }
-  | { t: 'commit_status'; turn: number; committed: number[] }
+  | {
+      t: 'commit_status';
+      turn: number;
+      committed: number[];
+      /** ms until the host force-advances (auto-turn timer armed) */
+      autoTurnInMs?: number;
+    }
   | { t: 'desync_notice'; turn: number; expected: string }
   | {
       t: 'resync_data';
@@ -122,6 +131,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   battleOrdersTimeoutMs: 60_000,
   debugCommands: false,
   autoTurnUntil: 0,
+  autoTurnSeconds: 0,
   mirror: false,
   homeStart: 'good',
 };
