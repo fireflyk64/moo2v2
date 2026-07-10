@@ -39,8 +39,9 @@ export function setRelation(state: GameState, a: number, b: number, status: 'pea
 }
 
 /** True if the ship fights (has a design or is a defended base-side unit). */
+/** Combat-capable: designed warships and (lightly armed) scouts. */
 function isWarship(ship: Ship): boolean {
-  return ship.shipKind === 'design';
+  return ship.shipKind === 'design' || ship.shipKind === 'scout';
 }
 
 /** S7: detect pairwise battles at each star (attacker = non-colony side or higher id).
@@ -148,6 +149,50 @@ function hullIndexOf(hull: string): number {
 }
 
 function shipToCombat(state: GameState, empire: Empire, ship: Ship, side: 0 | 1): CombatShipInit | null {
+  // scouts carry a single laser cannon and CAN fight (bug: "scouts should
+  // have 1 laser and be able to fight") — a synthetic frigate-class fit
+  if (ship.shipKind === 'scout') {
+    const scoutDesign = {
+      id: -1,
+      name: 'Scout',
+      hull: 'frigate',
+      computer: 0,
+      shield: 0,
+      specials: [] as string[],
+      weapons: [{ weapon: 'laser_cannon', count: 1, mods: [] as string[] }],
+      obsolete: false,
+    };
+    const stats = designStats(state, empire, scoutDesign);
+    if (typeof stats === 'string') return null;
+    return {
+      shipId: ship.id,
+      side,
+      hull: 'frigate',
+      hullIdx: hullIndexOf('frigate'),
+      isBase: false,
+      beamAttack: stats.beamAttack,
+      beamDefense: stats.beamDefense,
+      speed: stats.combatSpeed,
+      armorHp: stats.armorHp,
+      structureHp: stats.structureHp,
+      shieldPool: stats.shieldPool,
+      shieldFlat: stats.shieldFlat,
+      weapons: stats.weapons.map((w) => ({
+        weaponId: w.row.id,
+        classId: w.row.classId,
+        dmgMin: w.row.tacticalDamage.min,
+        dmgMax: w.row.tacticalDamage.max,
+        mods: w.mods,
+        ammo: w.row.ammo,
+        cooldown: 0,
+        count: w.count,
+        arc: w.arc,
+      })),
+      startingStructure: Math.max(1, stats.structureHp - ship.dmgStructure),
+      startingArmor: Math.max(0, stats.armorHp - ship.dmgArmor),
+      specials: [],
+    };
+  }
   if (!isWarship(ship) || ship.designId === null) return null;
   const design = empire.designs.find((d) => d.id === ship.designId);
   if (!design) return null;
@@ -292,10 +337,11 @@ export function buildBattleInput(state: GameState, battle: PendingBattle): Built
       }
     }
   }
-  // non-combat ships present: shown in the replay at the field edge (never simulated)
+  // non-combat ships present: shown in the replay at the field edge (never
+  // simulated). Scouts are NOT bystanders — they fight (see shipToCombat).
   const bystanders: Array<{ shipId: number; side: 0 | 1; kind: string }> = [];
   for (const ship of state.ships) {
-    if (ship.location.kind !== 'star' || ship.location.starId !== battle.starId || isWarship(ship)) continue;
+    if (ship.location.kind !== 'star' || ship.location.starId !== battle.starId || isWarship(ship) || ship.shipKind === 'scout') continue;
     if (ship.owner === battle.attacker) bystanders.push({ shipId: ship.id, side: 0, kind: ship.shipKind });
     else if (ship.owner === battle.defender) bystanders.push({ shipId: ship.id, side: 1, kind: ship.shipKind });
   }
@@ -450,12 +496,17 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
     ...(bombReport ? { bombardment: bombReport } : {}),
   };
   events.push({ visibleTo: -1, kind: 'battle_resolved', payload: summary });
-  // full input + seed label: the viewer re-runs the identical sim as playback
-  events.push({
-    visibleTo: -1,
-    kind: 'battle_replay',
-    payload: { battleId: battle.id, seed: state.seed, input: built.input as unknown as Record<string, unknown>, summary },
-  });
+  // full input + seed label: the viewer re-runs the identical sim as playback.
+  // Only the PARTICIPANTS get the replay — spectators would otherwise see
+  // both fleets' full compositions for free.
+  const audience = [battle.attacker, battle.defender].filter((id) => id >= 0);
+  for (const viewer of audience) {
+    events.push({
+      visibleTo: viewer,
+      kind: 'battle_replay',
+      payload: { battleId: battle.id, seed: state.seed, input: built.input as unknown as Record<string, unknown>, summary },
+    });
+  }
   return { battle, result, summary };
 }
 

@@ -69,6 +69,7 @@ export function bindActive(active: ActiveGame): void {
       const me = active.session.playerId;
       for (const e of active.session.lastTurnEvents) {
         if (e.kind === 'battle_replay') {
+          if (e.visibleTo !== -1 && e.visibleTo !== me) continue; // participants only
           const p = e.payload as { battleId: string; seed: string; input: unknown; summary: Record<string, unknown> };
           if (!app.replays.some((r) => r.battleId === p.battleId)) {
             app.replays.push({ ...p, turn: ev.turn - 1, watched: false });

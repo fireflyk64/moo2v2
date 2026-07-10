@@ -384,7 +384,11 @@
     </div>
   {/if}
   {#if myBattle}
-    <BattleOrdersDialog battle={myBattle} />
+    <!-- keyed so a SECOND battle in the same turn gets a fresh dialog with
+         fresh defaults, instead of silently reusing the first one's state -->
+    {#key myBattle.id}
+      <BattleOrdersDialog battle={myBattle} />
+    {/key}
   {/if}
   {#if app.viewing}
     <BattleViewer replay={app.viewing} onclose={() => (app.viewing = null)} />
