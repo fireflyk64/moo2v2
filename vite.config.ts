@@ -27,8 +27,23 @@ function crossOriginIsolation(): Plugin {
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
+// cache busting: assets are content-hashed already; version.json lets the
+// running app NOTICE a new deployment (index.html may be cached by proxies)
+const buildId = Date.now().toString(36);
+function versionStamp(): Plugin {
+  return {
+    name: 'version-stamp',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: buildId }) });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [svelte(), crossOriginIsolation()],
+  plugins: [svelte(), crossOriginIsolation(), versionStamp()],
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId),
+  },
   base: './',
   resolve: {
     alias: {

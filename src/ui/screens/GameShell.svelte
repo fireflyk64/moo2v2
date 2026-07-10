@@ -156,7 +156,7 @@
   // ---- UI telemetry: seconds per screen, flushed with each commit ----
   let dwellStart = Date.now();
   let dwell: Record<string, number> = {};
-  let dwellTab = tab;
+  let dwellTab: typeof tab = 'colonies'; // matches tab's initial value
   $effect(() => {
     if (tab === dwellTab) return;
     const secs = Math.floor((Date.now() - dwellStart) / 1000);

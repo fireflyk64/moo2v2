@@ -8,9 +8,41 @@
 
   let route = $state(location.hash);
   window.addEventListener('hashchange', () => (route = location.hash));
+
+  // deployment update check: the served version.json changes on every build;
+  // when it stops matching OUR build id, offer a reload (cache busting)
+  let updateAvailable = $state(false);
+  async function checkVersion() {
+    if (import.meta.env.DEV || updateAvailable) return;
+    try {
+      const res = await fetch('version.json', { cache: 'no-store' });
+      if (!res.ok) return;
+      const v = (await res.json()) as { build?: string };
+      if (v.build && v.build !== __BUILD_ID__) updateAvailable = true;
+    } catch {
+      // offline or host without version.json: nothing to do
+    }
+  }
+  $effect(() => {
+    void checkVersion();
+    const iv = setInterval(() => void checkVersion(), 5 * 60_000);
+    const onFocus = () => void checkVersion();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(iv);
+      window.removeEventListener('focus', onFocus);
+    };
+  });
 </script>
 
 <div class="starfield" aria-hidden="true"></div>
+{#if updateAvailable}
+  <div class="updatebar" data-testid="update-available">
+    ⬆ A new version of the game was deployed.
+    <button onclick={() => location.reload()}>Reload now</button>
+    <span class="dim">(finish and 💾 save your turn first if you're mid-game)</span>
+  </div>
+{/if}
 <main>
   {#if route === '#storage-smoke'}
     <StorageSmoke />
@@ -26,6 +58,21 @@
 </main>
 
 <style>
+  .updatebar {
+    position: sticky;
+    top: 0;
+    z-index: 90;
+    background: #2b2410;
+    border-bottom: 1px solid var(--gold, #ffd75e);
+    color: var(--gold, #ffd75e);
+    padding: 0.35rem 0.8rem;
+    font-size: 0.9rem;
+  }
+  .updatebar .dim {
+    opacity: 0.7;
+    font-size: 0.8rem;
+  }
+
   :global(:root) {
     --bg: #070a16;
     --panel: #0f1530;
