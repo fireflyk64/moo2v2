@@ -78,6 +78,74 @@ describe('galaxy connectivity guarantee (bug: path between all players at range 
       }
     }
   });
+
+  it('no size-1 planets, and home systems never carry a wormhole', () => {
+    for (const seed of SEEDS) {
+      for (const players of [2, 4] as const) {
+        const g = generateGalaxy(seed, settingsOf({ galaxySize: 'large', playerCount: players }), traitsFor(players));
+        for (const p of g.planets) {
+          if (p.body === 'planet') expect(p.sizeClass).toBeGreaterThanOrEqual(2);
+        }
+        const homeStarIds = new Set(g.homePlanets.map((pid) => g.planets.find((p) => p.id === pid)!.starId));
+        for (const s of g.stars) {
+          if (homeStarIds.has(s.id)) expect(s.wormholeTo).toBeNull();
+        }
+      }
+    }
+  });
+
+  it('empty systems are rare (a visited star usually offers something)', () => {
+    let stars = 0;
+    let empty = 0;
+    for (const seed of SEEDS) {
+      const g = generateGalaxy(seed, settingsOf({ galaxySize: 'large', playerCount: 2 }), traitsFor(2));
+      for (const s of g.stars) {
+        stars++;
+        if (!g.planets.some((p) => p.starId === s.id)) empty++;
+      }
+    }
+    expect(empty / stars).toBeLessThan(0.15);
+  });
+
+  it('prize systems (ultra-rich / gaia / specials) are guarded far more often than plain ones', () => {
+    let prizeGuarded = 0;
+    let prizeTotal = 0;
+    let plainGuarded = 0;
+    let plainTotal = 0;
+    for (const seed of SEEDS) {
+      const state: GameState = gameEngine.init({
+        seed,
+        settings: settingsOf({ galaxySize: 'huge', playerCount: 2 }),
+        players: [
+          { id: 0, name: 'A', raceJson: JSON.stringify({ presetId: 'solari' }) },
+          { id: 1, name: 'B', raceJson: JSON.stringify({ presetId: 'solari' }) },
+        ],
+        dataVersion: 'test',
+      });
+      const homeStarIds = new Set(state.colonies.map((c) => state.planets.find((p) => p.id === c.planetId)!.starId));
+      const guarded = new Set(state.monsters.map((m) => m.starId));
+      for (const s of state.stars) {
+        if (homeStarIds.has(s.id) || s.name === 'Orion') continue;
+        if (!state.planets.some((p) => p.starId === s.id && p.body === 'planet')) continue;
+        const prize = state.planets.some(
+          (p) =>
+            p.starId === s.id &&
+            p.body === 'planet' &&
+            (p.minerals === 'ultra_rich' || p.climate === 'gaia' || p.climate === 'terran' || p.special !== null),
+        );
+        if (prize) {
+          prizeTotal++;
+          if (guarded.has(s.id)) prizeGuarded++;
+        } else {
+          plainTotal++;
+          if (guarded.has(s.id)) plainGuarded++;
+        }
+      }
+    }
+    expect(prizeTotal).toBeGreaterThan(10);
+    expect(prizeGuarded / prizeTotal).toBeGreaterThan(0.35);
+    expect(plainGuarded / Math.max(1, plainTotal)).toBeLessThan(0.2);
+  });
 });
 
 describe('home-system parity (bug: same other planets for all players)', () => {

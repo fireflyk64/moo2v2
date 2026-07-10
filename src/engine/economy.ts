@@ -191,6 +191,22 @@ function cTotalPct(kind: OutputKind, traits: RaceTraits, morale: number): number
   return c;
 }
 
+/** Can farmers produce ANY food on this colony's world for its owner? False
+ * on barren/dead worlds until tech (hydroponics lattice etc.) makes farming
+ * viable — assigning farmers there would waste hands producing nothing. */
+export function farmingViable(state: GameState, colony: Colony): boolean {
+  const owner = empireOf(state, colony.owner);
+  const acc = colonyAccum(state, colony, owner);
+  const planet = planetOf(state, colony);
+  const effClim = effectiveClimate(planet, colony);
+  for (const g of colony.groups) {
+    const gTraits = g.race === colony.owner ? traitsOf(owner) : groupTraits(state, g.race, traitsOf(owner));
+    if (foodPerFarmerBase(effClim, gTraits.aquatic) + gTraits.farming + acc.farmCoeff > 0) return true;
+  }
+  // an empty/outpost colony: judge by the owner's own race
+  return foodPerFarmerBase(effClim, traitsOf(owner).aquatic) + traitsOf(owner).farming + acc.farmCoeff > 0;
+}
+
 export function colonyOutput(state: GameState, colony: Colony): ColonyOutput {
   const planet = planetOf(state, colony.planetId ? colony : colony); // keep call sites simple
   return computeOutput(state, colony, planet);

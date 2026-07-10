@@ -153,6 +153,17 @@ export function hostileMonsterAt(state: GameState, starId: number): boolean {
   return state.monsters.some((m) => m.starId === starId);
 }
 
+/** A system worth taking (ultra-rich, gaia/terran, or a special like
+ * artifacts) attracts a keeper far more often than an ordinary one. */
+function systemPrizeworthy(state: GameState, starId: number): boolean {
+  return state.planets.some(
+    (p) =>
+      p.starId === starId &&
+      p.body === 'planet' &&
+      (p.minerals === 'ultra_rich' || p.climate === 'gaia' || p.climate === 'terran' || p.special !== null),
+  );
+}
+
 /** Game-start placement: guarded systems + the Guardian's prize system (M1). */
 export function seedMonsters(state: GameState): void {
   if (state.settings.mirror) return seedMonstersMirror(state);
@@ -177,12 +188,14 @@ export function seedMonsters(state: GameState): void {
   if (orion) {
     placeOrion(state, state.stars.find((s) => s.id === orion!.starId)!);
   }
-  // guarded systems: ~12% of remaining systems with planets (bridges exempt —
-  // they carry the guaranteed path between players)
+  // guarded systems (bridges exempt — they carry the guaranteed path between
+  // players): prize systems (ultra-rich / gaia / terran / specials) draw a
+  // keeper 55% of the time, ordinary systems 8%
   for (const star of state.stars) {
     if (homeStars.has(star.id) || star.id === orion?.starId || star.sym === -1) continue;
     if (!state.planets.some((p) => p.starId === star.id && p.body === 'planet')) continue;
-    if (rng.chancePct(12)) {
+    const pct = systemPrizeworthy(state, star.id) ? 55 : 8;
+    if (rng.chancePct(pct)) {
       const kind = GUARDABLE[rng.int(GUARDABLE.length)]!;
       state.monsters.push({ id: state.nextId++, kind, starId: star.id, dmgStructure: 0 });
     }
@@ -236,7 +249,9 @@ function seedMonstersMirror(state: GameState): void {
   for (const sym of [...groups.keys()].sort((a, b) => a - b)) {
     const members = groups.get(sym)!;
     if (!state.planets.some((p) => p.starId === members[0]!.id && p.body === 'planet')) continue;
-    if (rng.chancePct(12)) {
+    // symmetric wedges: the value check on any member matches every member
+    const pct = systemPrizeworthy(state, members[0]!.id) ? 55 : 8;
+    if (rng.chancePct(pct)) {
       const kind = GUARDABLE[rng.int(GUARDABLE.length)]!;
       for (const star of members.sort((a, b) => a.id - b.id)) {
         state.monsters.push({ id: state.nextId++, kind, starId: star.id, dmgStructure: 0 });
