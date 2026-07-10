@@ -12,6 +12,12 @@ const SEEDS = [
   '0123456789abcdef0123456789abcdef',
   'deadbeefdeadbeefdeadbeefdeadbeef',
   'cafef00dcafef00dcafef00dcafef00d',
+  '11111111222222223333333344444444',
+  'aaaaaaaabbbbbbbbccccccccdddddddd',
+  '0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f',
+  '99998888777766665555444433332222',
+  'fedcba9876543210fedcba9876543210',
+  '5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a',
 ] as const;
 const TURN_CAP = 110;
 function identity(name: string) {
