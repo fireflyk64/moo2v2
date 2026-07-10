@@ -30,7 +30,8 @@ URL parameters skip the form: `/?server=…&room=CODE&name=Alice&players=2`.
 npm test              # boundaries + data + unit + protocol + storage + determinism
 npm run test:game     # headless suites incl. 200-turn soak + 500-turn fuzz
 npm run test:balance  # combat balance harness (MOO2_BALANCE=1)
-npm run test:e2e      # Playwright: real browsers + local lobbylink + real WebRTC
+npm run test:e2e      # Playwright: real browsers + local game server + real WebRTC
+(cd server && go test ./...)  # Go game server (play-by-mail store)
 ```
 
 ## Production build
@@ -102,10 +103,15 @@ can reload mid-game and resume, and any player can download a verified
 
 ## Play by mail
 
-For games where nobody can agree on a time: the lobbylink server, started with
-`--pbm-config <file>` (JSON: `{"password", "data_dir", "lock_ttl_seconds"}`),
-also stores one authoritative save per room code under `/pbm/` and hands out a
-single expiring lock so one player at a time hosts. Flow: log in once with the
+For games where nobody can agree on a time. The game's own Go server lives in
+`server/` (`cmd/moo2v2-server`): it links the generic lobbylink lobby in as a
+library (the public `lobbyserver` package; lobbylink itself stays game-agnostic
+and must be checked out as a sibling — see `server/go.mod`) and mounts moo2v2's
+play-by-mail routes next to it. Started with `--pbm-config <file>` (JSON:
+`{"password", "data_dir", "lock_ttl_seconds"}`, example in
+`server/pbm-config.example.json`), it stores one authoritative save per room
+code under `/pbm/` and hands out a single expiring lock so one player at a
+time hosts. Flow: log in once with the
 shared password (remembered as a token), take the room lock, the latest save
 downloads and re-hosts locally over the same server; every commit re-uploads
 the save together with who-has-committed, so the game advances whenever the

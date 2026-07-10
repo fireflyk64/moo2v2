@@ -1,0 +1,6 @@
+{
+  "_comment": "Play-by-mail store (enable with --pbm-config <this file>). The password is shared by all players and gates every /pbm/ endpoint; the login token is remembered client-side. data_dir holds one directory per room code (save + meta + turn history). lock_ttl_seconds is how long a silent player holds a room before their lock times out.",
+  "password": "change-me",
+  "data_dir": "/var/lib/moo2v2/pbm",
+  "lock_ttl_seconds": 180
+}
