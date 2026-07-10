@@ -22,7 +22,7 @@ export const NEXT_TERRAFORM: Partial<Record<Climate, Climate>> = {
 
 export const TERRAFORM_BASE_COST = 250;
 export const TERRAFORM_STEP_COST = 250;
-export const GAIA_COST = 500;
+// (gaia's cost comes from the buildable table like any other project)
 
 export function terraformCost(planet: Planet): number {
   return TERRAFORM_BASE_COST + TERRAFORM_STEP_COST * planet.terraformSteps;
@@ -38,8 +38,11 @@ export function canTerraform(planet: Planet): string | null {
 }
 
 export function applyTerraformStep(planet: Planet): Climate | null {
-  const next = NEXT_TERRAFORM[planet.climate];
+  let next = NEXT_TERRAFORM[planet.climate];
   if (!next) return null;
+  // docs: "Barren becomes desert or tundra" — decided deterministically by
+  // the planet's id so every peer folds the same climate
+  if (planet.climate === 'barren' && planet.id % 2 === 1) next = 'tundra';
   planet.climate = next;
   planet.terraformSteps += 1;
   return next;
