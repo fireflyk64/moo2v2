@@ -580,31 +580,55 @@ export function runBattle(
           if (dist > maxBand) continue;
           const shots = w.mods.includes('af') ? 3 : 1;
           const attack = s.sysComputer ? 0 : s.init.beamAttack; // fried targeting computer
+          // volley bookkeeping: once the current target is dead-on-paper the
+          // REST of the volley walks to the next victim (overkill spread)
+          let ti = s.targetIdx;
+          let tt: Sim | undefined = t;
+          const retarget = (): boolean => {
+            if (tt && active(tt) && !overkilled(ti)) return true;
+            const alt = pickTarget(sims, s, (i) => !overkilled(i) && withinVolley(i));
+            if (alt < 0) return tt !== undefined && active(tt); // keep pounding the last live target
+            ti = alt;
+            tt = sims[alt]!;
+            s.targetIdx = alt;
+            return true;
+          };
+          const withinVolley = (i: number): boolean => {
+            const e = sims[i]!;
+            const d2 = idist(Math.abs(e.x - s.x), Math.abs(e.y - s.y));
+            if (d2 > maxBand) return false;
+            if (isPd) return true;
+            return inArc(w.arc ?? 'F', headingToward(e.x - s.x, e.y - s.y), s.heading);
+          };
           for (let burst = 0; burst < shots; burst++) {
             for (let n = 0; n < w.count; n++) {
+              if (!retarget() || !tt || !active(tt)) break;
+              const d2 = idist(Math.abs(tt.x - s.x), Math.abs(tt.y - s.y));
+              let band2 = bandOf(d2);
+              if (band2 > 0 && s.specials.has('rangemaster_target_unit')) band2 = (band2 - 1) as 0 | 1 | 2;
               let hitPct = clamp(
-                50 + attack - t.init.beamDefense + BAND_HIT[band]! +
+                50 + attack - tt.init.beamDefense + BAND_HIT[band2]! +
                   (w.mods.includes('co') ? 25 : 0) + (w.mods.includes('af') ? -20 : 0),
                 5,
                 95,
               );
-              if (t.specials.has('displacement_device')) hitPct = Math.floor((hitPct * 67) / 100);
+              if (tt.specials.has('displacement_device')) hitPct = Math.floor((hitPct * 67) / 100);
               if (w.mods.includes('hit')) hitPct = 100; // mauler device: never misses
               const hit = rng.chancePct(hitPct);
               if (!hit) {
-                frameShots.push({ tick, from: s.init.shipId, to: t.init.shipId, weaponId: w.weaponId, classId: 0, hit: false, dmg: 0 });
+                frameShots.push({ tick, from: s.init.shipId, to: tt.init.shipId, weaponId: w.weaponId, classId: 0, hit: false, dmg: 0 });
                 continue;
               }
               let dmg = w.dmgMin + rng.int(w.dmgMax - w.dmgMin + 1);
-              const dmgPct = w.mods.includes('nr') ? 100 : BAND_DMG[band]!;
+              const dmgPct = w.mods.includes('nr') ? 100 : BAND_DMG[band2]!;
               dmg = Math.max(1, roundDiv(dmg * dmgPct, 100));
               if (w.mods.includes('hv')) dmg = roundDiv(dmg * 150, 100);
               if (isPd) dmg = Math.max(1, roundDiv(dmg * 50, 100));
               if (s.specials.has('high_energy_focus')) dmg = roundDiv(dmg * 150, 100);
               if (s.specials.has('structural_analyzer')) dmg *= 2;
               const mods = s.specials.has('achilles_targeting_unit') ? [...w.mods, 'achilles'] : w.mods;
-              applyDamage(t, dmg, mods, frameShots, tick, s.init.shipId, s.targetIdx, w.weaponId, 0, frameDeaths, sims, rng);
-              hurtThisTick.set(s.targetIdx, (hurtThisTick.get(s.targetIdx) ?? 0) + dmg);
+              applyDamage(tt, dmg, mods, frameShots, tick, s.init.shipId, ti, w.weaponId, 0, frameDeaths, sims, rng);
+              hurtThisTick.set(ti, (hurtThisTick.get(ti) ?? 0) + dmg);
             }
           }
           s.cds[wi] = cooldownOf(w, crippled, s.specials);

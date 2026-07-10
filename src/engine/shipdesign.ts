@@ -119,11 +119,24 @@ export function bestDrive(empire: Empire): number {
   return bestTier(empire, DRIVE_APPS, true); // nuclear is starting tech
 }
 
+/** Bay technologies unlock their strike craft as mountable "weapons". */
+const CRAFT_BY_BAY: Record<string, string[]> = {
+  fighter_bays: ['interceptor', 'bomber'],
+  heavy_fighter_bays: ['heavy_fighter'],
+};
+
 export function knownWeapons(empire: Empire): WeaponRow[] {
   const out: WeaponRow[] = [];
   for (const w of weaponById.values()) {
     // weapon rows join to applications by id (aliases already normalized)
     if (empire.knownApps.includes(w.id) || empire.knownApps.includes(w.id + 's')) out.push(w);
+  }
+  for (const [bay, crafts] of Object.entries(CRAFT_BY_BAY)) {
+    if (!empire.knownApps.includes(bay)) continue;
+    for (const c of crafts) {
+      const w = weaponById.get(c);
+      if (w && !out.includes(w)) out.push(w);
+    }
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
