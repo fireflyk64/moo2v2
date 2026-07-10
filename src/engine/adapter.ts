@@ -267,9 +267,34 @@ function advancedStart(state: GameState, homePlanets: number[], traits: RaceTrai
   for (const r of ranked) {
     if (claimed[r.owner]!.length < perPlayer) claimed[r.owner]!.push(r.starId);
   }
-  // identical sizes even on lopsided maps: everyone keeps their nearest few
+  // a planet-poor side (few colonizable systems in its half) tops up from the
+  // nearest FREE systems, so lopsided maps still yield full equal regions
+  const taken = new Set(claimed.flat());
+  const starOf = (id: number) => state.stars.find((s) => s.id === id)!;
+  for (let i = 0; i < n; i++) {
+    if (claimed[i]!.length >= perPlayer) continue;
+    const home = starOf(homeStars[i]!);
+    const free = ranked
+      .filter((r) => !taken.has(r.starId))
+      .sort(
+        (a, b) => starDistance(home, starOf(a.starId)) - starDistance(home, starOf(b.starId)) || a.starId - b.starId,
+      );
+    for (const f of free) {
+      if (claimed[i]!.length >= perPlayer) break;
+      claimed[i]!.push(f.starId);
+      taken.add(f.starId);
+    }
+  }
+  // identical sizes even so; and each region ordered home-first by distance,
+  // which is the pairing the world-stamp below relies on
   const size = Math.min(...claimed.map((c) => c.length));
-  for (let i = 0; i < n; i++) claimed[i] = claimed[i]!.slice(0, size);
+  for (let i = 0; i < n; i++) {
+    const home = starOf(homeStars[i]!);
+    const rest = claimed[i]!
+      .slice(1)
+      .sort((a, b) => starDistance(home, starOf(a)) - starDistance(home, starOf(b)) || a - b);
+    claimed[i] = [claimed[i]![0]!, ...rest].slice(0, size);
+  }
 
   // --- stamp: player i's k-th system carries player 0's k-th system's worlds
   // (k=0 is the home system, already made identical by placeHomeworlds) ---

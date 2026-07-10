@@ -34,7 +34,7 @@ function ownSlice(state: GameState, id: number): string {
   });
 }
 
-function makeTable(opts?: { debug?: boolean }) {
+function makeTable(opts?: { debug?: boolean; startMode?: 'pre_warp' | 'average' | 'advanced' }) {
   const hub = new MemoryHub(2);
   const hosted = createHostedGame<GameState>({
     transport: hub.join(),
@@ -46,7 +46,7 @@ function makeTable(opts?: { debug?: boolean }) {
       ...DEFAULT_SETTINGS,
       playerCount: 2,
       galaxySize: 'small',
-      startMode: 'average',
+      startMode: opts?.startMode ?? 'average',
       fastStart: true,
       debugCommands: opts?.debug ?? false,
       // keep the fidelity assertion sharp: no global-target events
