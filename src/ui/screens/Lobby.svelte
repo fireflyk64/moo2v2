@@ -173,7 +173,7 @@
     { key: 'creativeVariant', label: 'Creative variant', help: 'Creative races research each application individually instead of getting whole fields free.' },
     { key: 'pickBidding', label: 'Pick bidding', help: 'Contested race picks go to sealed-bid auction; winners pay their bid in pick points.' },
     { key: 'stickyBuild', label: 'Sticky build', help: 'Switching build items parks invested production on the old item instead of carrying it over.' },
-    { key: 'antarans', label: 'Antaran attacks', help: 'Raiders from another dimension strike the largest empire; build the portal to strike back and win.' },
+    { key: 'antarans', label: 'Andromedan attacks', help: 'Raiders from another dimension strike the largest empire; build the portal to strike back and win.' },
     { key: 'randomEvents', label: 'Random events', help: 'Galactic windfalls and disasters. Lucky races dodge the bad ones.' },
   ];
 </script>

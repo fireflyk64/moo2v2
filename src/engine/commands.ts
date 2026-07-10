@@ -944,6 +944,35 @@ const applyMoveColonists: Applier = (state, cmd) => {
   });
 };
 
+// ---------- UI telemetry (aggregate screen-time, shared via the log) ----------
+
+interface TelemetryPayload {
+  screens: Record<string, number>;
+}
+
+const validateTelemetry: Validator = (state, cmd) => {
+  const p = cmd.payload as TelemetryPayload;
+  if (!p || typeof p.screens !== 'object' || p.screens === null || Array.isArray(p.screens)) return 'bad payload';
+  const entries = Object.entries(p.screens);
+  if (entries.length === 0 || entries.length > 20) return 'bad screens';
+  for (const [k, v] of entries) {
+    if (typeof k !== 'string' || k.length === 0 || k.length > 24) return 'bad screen key';
+    if (!Number.isSafeInteger(v) || v < 0 || v > 86_400) return 'bad seconds';
+  }
+  void state;
+  return null;
+};
+
+const applyTelemetry: Applier = (state, cmd) => {
+  const p = cmd.payload as TelemetryPayload;
+  const empire = empireOf(state, cmd.playerId);
+  const t = { ...(empire.telemetry ?? {}) };
+  for (const [k, v] of Object.entries(p.screens)) {
+    t[k] = (t[k] ?? 0) + v;
+  }
+  empire.telemetry = t;
+};
+
 // ---------- trait reassignment (ecology docs: +4 pick points on research) ----------
 
 interface TraitReassignPayload {
@@ -1231,6 +1260,7 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   cast_vote: { validate: validateVote, apply: applyVote },
   move_colonists: { validate: validateMoveColonists, apply: applyMoveColonists },
   trait_reassignment: { validate: validateTraitReassign, apply: applyTraitReassign },
+  record_telemetry: { validate: validateTelemetry, apply: applyTelemetry },
   rename_star: { validate: validateRenameStar, apply: applyRenameStar },
   rename_colony: { validate: validateRenameColony, apply: applyRenameColony },
   set_colony_tags: { validate: validateSetColonyTags, apply: applySetColonyTags },

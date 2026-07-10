@@ -159,6 +159,9 @@ export interface Empire {
   /** empire-wide tax: this % of each colony's queue production is converted to
    * BC at 2 prod -> 1 BC (0-50; absent in older saves = 0) */
   taxRatePct?: number;
+  /** UI time-spent aggregates, seconds per screen (submitted with commits so
+   * every player can see where the table's time goes; absent = none) */
+  telemetry?: Record<string, number>;
   eliminated: boolean;
 }
 

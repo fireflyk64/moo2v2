@@ -34,7 +34,7 @@
     if (!gs) return { mine: 0, theirs: 0, theirBase: false };
     const count = (owner: number) => {
       if (owner < 0) {
-        // NPC side: monsters / Antarans at this star
+        // NPC side: monsters / Andromedans at this star
         return gs.monsters.filter(
           (m) => m.starId === battle.starId && (owner === -3) === m.kind.startsWith('antaran_'),
         ).length;

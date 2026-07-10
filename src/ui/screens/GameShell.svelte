@@ -153,9 +153,32 @@
   });
   const pretty = (id: string) => id.replaceAll('_', ' ');
 
+  // ---- UI telemetry: seconds per screen, flushed with each commit ----
+  let dwellStart = Date.now();
+  let dwell: Record<string, number> = {};
+  let dwellTab = tab;
+  $effect(() => {
+    if (tab === dwellTab) return;
+    const secs = Math.floor((Date.now() - dwellStart) / 1000);
+    if (secs > 0) dwell[dwellTab] = (dwell[dwellTab] ?? 0) + Math.min(secs, 3600);
+    dwellTab = tab;
+    dwellStart = Date.now();
+  });
+  function flushTelemetry() {
+    const secs = Math.floor((Date.now() - dwellStart) / 1000);
+    if (secs > 0) dwell[dwellTab] = (dwell[dwellTab] ?? 0) + Math.min(secs, 3600);
+    dwellStart = Date.now();
+    const screens = Object.fromEntries(Object.entries(dwell).filter(([, v]) => v > 0));
+    dwell = {};
+    if (Object.keys(screens).length) session().submit('record_telemetry', { screens });
+  }
+
   function toggleCommit() {
     if (iCommitted) session().uncommitTurn();
-    else session().commitTurn();
+    else {
+      flushTelemetry();
+      session().commitTurn();
+    }
   }
   function sendChat() {
     if (chatText.trim()) session().sendChat(chatText.trim(), chatTo);
@@ -325,7 +348,7 @@
     <!-- timer not armed: nothing to show -->
   {/if}
   {#if winner !== null}
-    {@const winLabel = gs.winType === 'council' ? 'is elected supreme ruler of the council' : gs.winType === 'antaran' ? 'has conquered the Antaran home' : 'wins by conquest'}
+    {@const winLabel = gs.winType === 'council' ? 'is elected supreme ruler of the council' : gs.winType === 'antaran' ? 'has conquered the Andromedan home' : 'wins by conquest'}
     <div class="banner" data-testid="victory">Victory: {roster.find((p) => p.id === winner)?.name ?? winner} {winLabel}!</div>
   {/if}
   <nav>
@@ -435,7 +458,7 @@
         <li><b>Battles</b> only happen between empires at <b>war</b> — declare it on the Empires tab. A battle is a single pass; set stance/targeting/retreat before the clash.</li>
         <li><b>☠ stars</b> are guarded by monsters — clear the keeper to colonize. Orion holds the Guardian and the best worlds in the galaxy.</li>
         <li><b>Leaders</b> offer their services on the Empires tab; colony leaders boost one colony, ship officers the whole fleet.</li>
-        <li><b>Victory</b>: conquer everyone, win the council vote (⅔ of population), or build the dimensional portal and beat the Antarans at home.</li>
+        <li><b>Victory</b>: conquer everyone, win the council vote (⅔ of population), or build the dimensional portal and beat the Andromedans at home.</li>
         <li><b>Play by mail</b> (📬 on the home screen): one player at a time takes the room, plays, commits and "mails in" — progress uploads on every commit and the turn advances when the last player commits. If a friend is online at the same time, you simply join their live game.</li>
       </ul>
     </div>

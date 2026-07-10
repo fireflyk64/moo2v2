@@ -275,6 +275,22 @@
     </fieldset>
   {/if}
 
+  {#if gs.empires.some((emp) => emp.telemetry && Object.keys(emp.telemetry).length)}
+    <details class="timespent">
+      <summary>⏱ Time spent per screen (all empires)</summary>
+      <table>
+        <thead><tr><th>empire</th><th>screen</th><th>time</th></tr></thead>
+        <tbody>
+          {#each gs.empires.filter((emp) => emp.telemetry) as emp (emp.id)}
+            {#each Object.entries(emp.telemetry ?? {}).sort((a, b) => b[1] - a[1]) as [screen, secs] (screen)}
+              <tr><td>{emp.raceName}</td><td>{screen}</td><td>{Math.floor(secs / 60)}m {secs % 60}s</td></tr>
+            {/each}
+          {/each}
+        </tbody>
+      </table>
+    </details>
+  {/if}
+
   <h3>Leaders ({countKind(me, 'colony')}/{MAX_LEADERS_PER_KIND} colony, {countKind(me, 'ship')}/{MAX_LEADERS_PER_KIND} ship)</h3>
   {#if myOffers.length}
     <ul data-testid="leader-offers">
@@ -283,7 +299,7 @@
         <li>
           <b>{row?.name}</b> {row?.title} — {row?.kind} leader,
           {row?.skills.map((s) => `${s.skill.replaceAll('_', ' ')}${s.enhanced ? '★' : ''}`).join(', ')}
-          — {o.priceBc} BC (expires turn {o.expiresTurn})
+          — {o.priceBc} BC (expires turn {o.expiresTurn} — {o.expiresTurn - gs.turn} turn{o.expiresTurn - gs.turn === 1 ? '' : 's'} left)
           <button data-testid="hire-{o.leaderId}" onclick={() => submit('hire_leader', { leaderId: o.leaderId })}>Hire</button>
         </li>
       {/each}
@@ -375,9 +391,9 @@
       <button
         data-testid="attack-antarans"
         disabled={!portalColony || gs.antarans.assaultBy !== null}
-        title={portalColony ? 'Send the fleet at your portal through to the Antaran home' : 'requires a dimensional portal'}
+        title={portalColony ? 'Send the fleet at your portal through to the Andromedan home' : 'requires a dimensional portal'}
         onclick={() => portalColony && submit('attack_antarans', { colonyId: portalColony.id })}
-      >⚔ Attack the Antarans</button>
+      >⚔ Attack the Andromedans</button>
     {/if}
     <button
       data-testid="resign"
@@ -412,6 +428,18 @@
     align-items: center;
     flex-wrap: wrap;
     margin-bottom: 0.5rem;
+  }
+  .timespent {
+    margin: 0.6rem 0;
+    font-size: 0.85rem;
+  }
+  .timespent table {
+    border-collapse: collapse;
+  }
+  .timespent td,
+  .timespent th {
+    border: 1px solid var(--line);
+    padding: 0.15rem 0.5rem;
   }
   .respec {
     border: 1px solid var(--line);

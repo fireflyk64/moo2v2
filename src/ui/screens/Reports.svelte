@@ -18,7 +18,7 @@
   function nameOf(id: unknown): string {
     if (typeof id !== 'number') return String(id);
     if (id === -2) return 'Monsters';
-    if (id === -3) return 'Antarans';
+    if (id === -3) return 'Andromedans';
     return gs?.empires.find((e) => e.id === id)?.name ?? `#${id}`;
   }
   function colonyOf(id: unknown): string {
@@ -69,9 +69,9 @@
       case 'terraformed': return `${colonyOf(p['colonyId'])} terraformed to ${p['climate']}`;
       case 'monster_slain': return `the ${p['kind']} at ${starOf(p['starId'])} was slain`;
       case 'guardian_defeated': return `${nameOf(p['empireId'])} defeated the Guardian of Orion!`;
-      case 'antaran_raid': return `Antaran raiders strike ${nameOf(p['empireId'])}!`;
-      case 'antarans_withdraw': return `the Antarans withdraw to their dimension`;
-      case 'colony_razed': return `${colonyOf(p['colonyId'])} was razed by the Antarans`;
+      case 'antaran_raid': return `Andromedan raiders strike ${nameOf(p['empireId'])}!`;
+      case 'antarans_withdraw': return `the Andromedans withdraw to their dimension`;
+      case 'colony_razed': return `${colonyOf(p['colonyId'])} was razed by the Andromedans`;
       case 'cp_overage': return `fleet over command limit: -${p['bc']} BC`;
       case 'treasury_deficit': return `treasury in deficit!`;
       case 'empire_eliminated': return `${nameOf(p['empireId'])} has been eliminated`;

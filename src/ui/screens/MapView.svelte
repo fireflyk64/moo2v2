@@ -1,7 +1,7 @@
 <script lang="ts">
   // Galaxy map v3 (SVG): proper star glyphs with glow, explored/unexplored fog,
   // fuel-range shading, in-flight fleet markers with travel progress, monster
-  // lairs vs Antaran raids, blockade badges, move ordering with re-routing.
+  // lairs vs Andromedan raids, blockade badges, move ordering with re-routing.
   import { selectors, inRange, isBlockaded, fuelRangeCp, supportStars, areAtWar } from '@engine/index';
   import { MAP_SIZE } from '@engine/galaxy';
   import { playerColor, STAR_COLORS } from '../colors';
@@ -397,7 +397,7 @@
       <span><span class="sw" style="border-color:#5a3030"></span> dashed ring = out of range</span>
       <span class="dimtext">◐ faded star = unexplored</span>
       <span><span class="monster">☠</span> monster lair</span>
-      <span><span class="raid">⚠</span> Antaran raid</span>
+      <span><span class="raid">⚠</span> Andromedan raid</span>
       <span>▶ fleet under way (label shows ETA)</span>
       <span>▲ solid = warships · △ hollow = civilians</span>
       <span style="color:#b78bff">┈ wormhole</span>
@@ -439,7 +439,7 @@
       {#if selected.explored && monstersByStar.has(selected.star.id)}
         {@const kinds = monstersByStar.get(selected.star.id)!}
         {#if isRaid(kinds)}
-          <p class="raid" data-testid="monster-warning">⚠ Antaran raid in progress: {kinds.map(prettify).join(', ')}</p>
+          <p class="raid" data-testid="monster-warning">⚠ Andromedan raid in progress: {kinds.map(prettify).join(', ')}</p>
         {:else}
           <p class="monster" data-testid="monster-warning">☠ guarded by: {kinds.map(prettify).join(', ')} — destroy the keeper to settle here</p>
         {/if}
@@ -605,12 +605,6 @@
   }
   .dimlabel {
     fill: #5d6788;
-  }
-  .pips {
-    font-size: 13px;
-    fill: #6ea8ff;
-    letter-spacing: 2px;
-    opacity: 0.8;
   }
   .unknown {
     fill: #5d6788;
