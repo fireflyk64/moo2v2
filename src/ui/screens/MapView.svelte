@@ -3,9 +3,121 @@
   // fuel-range shading, in-flight fleet markers with travel progress, monster
   // lairs vs Andromedan raids, blockade badges, move ordering with re-routing.
   import { selectors, inRange, isBlockaded, fuelRangeCp, supportStars, areAtWar, shortEntityId } from '@engine/index';
+  import type { StarColor } from '@engine/types';
   import { MAP_SIZE } from '@engine/galaxy';
   import { playerColor, STAR_COLORS } from '../colors';
   import { app, getActive } from '../state.svelte';
+
+  const MAP_BG_CACHE = new Map<string, string>();
+
+  function hashText(s: string): number {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function mulberry32(seed: number): () => number {
+    let t = seed >>> 0;
+    return () => {
+      t = (t + 0x6d2b79f5) >>> 0;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function makeGalaxyBackground(seedText: string, w: number, h: number): string {
+    const seed = hashText(seedText);
+    const rnd = mulberry32(seed);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    // deep-space base + soft center glow
+    ctx.fillStyle = '#03050d';
+    ctx.fillRect(0, 0, w, h);
+    const core = ctx.createRadialGradient(w * 0.52, h * 0.44, 0, w * 0.52, h * 0.44, Math.max(w, h) * 0.64);
+    core.addColorStop(0, 'rgba(60,78,140,0.22)');
+    core.addColorStop(1, 'rgba(4,6,14,0)');
+    ctx.fillStyle = core;
+    ctx.fillRect(0, 0, w, h);
+
+    // broad spiral-arm haze using stamped radial blobs (cheap one-time draw)
+    const cx = w * (0.45 + rnd() * 0.1);
+    const cy = h * (0.46 + rnd() * 0.08);
+    const armCount = 3;
+    const armTurns = 2.1 + rnd() * 0.7;
+    const maxR = Math.min(w, h) * (0.47 + rnd() * 0.07);
+    for (let arm = 0; arm < armCount; arm++) {
+      const armPhase = (Math.PI * 2 * arm) / armCount + rnd() * 0.25;
+      for (let i = 0; i < 220; i++) {
+        const t = i / 220;
+        const th = armPhase + t * Math.PI * armTurns;
+        const r = t * maxR + (rnd() - 0.5) * 38;
+        const x = cx + Math.cos(th) * r;
+        const y = cy + Math.sin(th) * r * (0.72 + rnd() * 0.16);
+        const rr = 14 + rnd() * 44;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, rr);
+        g.addColorStop(0, `rgba(${80 + Math.floor(rnd() * 40)},${95 + Math.floor(rnd() * 45)},${150 + Math.floor(rnd() * 60)},${0.03 + rnd() * 0.05})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+      }
+    }
+
+    // colorful nebulas: clustered translucent blobs
+    const nebColors = [
+      [168, 74, 62],
+      [90, 62, 156],
+      [58, 118, 148],
+      [142, 76, 124],
+    ] as const;
+    const nebulaCount = 4;
+    for (let n = 0; n < nebulaCount; n++) {
+      const px = w * (0.12 + rnd() * 0.76);
+      const py = h * (0.12 + rnd() * 0.76);
+      const [cr, cg, cb] = nebColors[Math.floor(rnd() * nebColors.length)]!;
+      for (let k = 0; k < 14; k++) {
+        const ox = (rnd() - 0.5) * 170;
+        const oy = (rnd() - 0.5) * 120;
+        const rr = 38 + rnd() * 110;
+        const a = 0.04 + rnd() * 0.08;
+        const g = ctx.createRadialGradient(px + ox, py + oy, 0, px + ox, py + oy, rr);
+        g.addColorStop(0, `rgba(${cr},${cg},${cb},${a})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(px + ox - rr, py + oy - rr, rr * 2, rr * 2);
+      }
+    }
+
+    // dense but subtle star sprinkle (single-pixel only)
+    const starCount = Math.floor((w * h) / 380);
+    for (let i = 0; i < starCount; i++) {
+      const x = Math.floor(rnd() * w);
+      const y = Math.floor(rnd() * h);
+      const b = rnd();
+      const alpha = 0.06 + b * 0.28;
+      const tint = rnd();
+      if (tint < 0.12) ctx.fillStyle = `rgba(255,225,190,${alpha})`;
+      else if (tint > 0.9) ctx.fillStyle = `rgba(190,215,255,${alpha})`;
+      else ctx.fillStyle = `rgba(240,246,255,${alpha})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+
+    // vignette to keep focus toward map center
+    const vg = ctx.createRadialGradient(w * 0.5, h * 0.5, Math.min(w, h) * 0.28, w * 0.5, h * 0.5, Math.max(w, h) * 0.82);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(2,3,8,0.5)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
+
+    return canvas.toDataURL('image/png');
+  }
 
   const session = () => getActive()!.session;
   const gs = $derived.by(() => {
@@ -53,14 +165,193 @@
   let mapZoom = $state<'fit' | 'zoom'>(
     typeof localStorage !== 'undefined' && localStorage.getItem('moo2.mapZoom') === 'zoom' ? 'zoom' : 'fit',
   );
-  function toggleMapZoom() {
-    mapZoom = mapZoom === 'fit' ? 'zoom' : 'fit';
+  const MIN_SCALE = 0.2;
+  const MAX_SCALE = 2.4;
+  const clampScale = (s: number) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
+  const clampFitScale = (s: number) => Math.min(MAX_SCALE, s);
+  let mapScale = $state<number>((() => {
+    if (typeof localStorage === 'undefined') return 0.85;
+    const raw = Number(localStorage.getItem('moo2.mapScale') ?? '0.85');
+    return Number.isFinite(raw) ? clampScale(raw) : 0.85;
+  })());
+  let fitScale = $state(1);
+  const mapDims = $derived(gs ? MAP_SIZE[gs.settings.galaxySize] : { w: 2000, h: 1500 });
+  const renderScale = $derived(mapZoom === 'fit' ? fitScale : mapScale);
+  let mapBgUrl = $state('');
+  const mapSvgStyle = $derived.by(() => {
+    const base = `width:${Math.round(mapDims.w * renderScale)}px;max-width:none`;
+    if (!mapBgUrl) return base;
+    return `${base};background-image:url(${mapBgUrl});background-size:cover;background-position:center`;
+  });
+
+  function recomputeFitScale() {
+    if (!mapScroller) return;
+    const w = Math.max(1, mapScroller.clientWidth);
+    const h = Math.max(1, mapScroller.clientHeight);
+    fitScale = clampFitScale(Math.min(w / mapDims.w, h / mapDims.h));
+  }
+
+  function persistMapZoom() {
     try {
       localStorage.setItem('moo2.mapZoom', mapZoom);
+      localStorage.setItem('moo2.mapScale', String(mapScale));
     } catch {
-      // private mode: view still toggles, just not remembered
+      // private mode: zoom still works for this session
     }
   }
+
+  function toggleMapZoom() {
+    if (mapZoom === 'fit') {
+      mapZoom = 'zoom';
+      // start zoom mode exactly from fit scale (no visible jump)
+      mapScale = fitScale;
+    } else {
+      mapZoom = 'fit';
+    }
+    persistMapZoom();
+  }
+
+  function onMapWheel(ev: WheelEvent) {
+    // Keep browser/page zoom intact globally; only intercept Ctrl/Cmd wheel
+    // while hovering the galaxy map and apply it to map zoom instead.
+    if (!ev.ctrlKey && !ev.metaKey) return;
+    ev.preventDefault();
+    const dir = ev.deltaY < 0 ? 1 : -1;
+    const step = ev.shiftKey ? 0.16 : 0.08;
+
+    let focusX = 0;
+    let focusY = 0;
+    let contentX = 0;
+    let contentY = 0;
+    if (mapScroller) {
+      const rect = mapScroller.getBoundingClientRect();
+      focusX = Math.max(0, Math.min(mapScroller.clientWidth, ev.clientX - rect.left));
+      focusY = Math.max(0, Math.min(mapScroller.clientHeight, ev.clientY - rect.top));
+      contentX = mapScroller.scrollLeft + focusX;
+      contentY = mapScroller.scrollTop + focusY;
+    }
+
+    let oldScale = mapZoom === 'fit' ? fitScale : mapScale;
+    if (mapZoom === 'fit') {
+      // wheel-in from fit enters zoom mode seamlessly at the same scale
+      if (dir < 0) return;
+      mapZoom = 'zoom';
+      mapScale = fitScale;
+      oldScale = fitScale;
+    }
+
+    const nextScale = clampScale(oldScale + dir * step);
+
+    // Unified end-state: zooming out to the fit scale snaps to fit mode.
+    if (dir < 0 && nextScale <= fitScale + 0.0005) {
+      mapScale = fitScale;
+      mapZoom = 'fit';
+      persistMapZoom();
+      return;
+    }
+
+    if (nextScale === oldScale) {
+      persistMapZoom();
+      return;
+    }
+
+    mapScale = nextScale;
+    persistMapZoom();
+
+    if (mapScroller) {
+      const ratio = nextScale / oldScale;
+      requestAnimationFrame(() => {
+        if (!mapScroller) return;
+        const maxLeft = Math.max(0, mapScroller.scrollWidth - mapScroller.clientWidth);
+        const maxTop = Math.max(0, mapScroller.scrollHeight - mapScroller.clientHeight);
+        const left = contentX * ratio - focusX;
+        const top = contentY * ratio - focusY;
+        mapScroller.scrollLeft = Math.max(0, Math.min(maxLeft, left));
+        mapScroller.scrollTop = Math.max(0, Math.min(maxTop, top));
+      });
+    }
+  }
+
+  let mapScroller = $state<HTMLDivElement | null>(null);
+  let panning = $state(false);
+  let panPointerId = -1;
+  let panCandidate = false;
+  let panStartX = 0;
+  let panStartY = 0;
+  let panStartLeft = 0;
+  let panStartTop = 0;
+  let suppressClickUntil = 0;
+
+  function onMapPointerDown(ev: PointerEvent) {
+    if (mapZoom !== 'zoom' || ev.button !== 0 || !mapScroller) return;
+    panCandidate = true;
+    panning = false;
+    panPointerId = ev.pointerId;
+    panStartX = ev.clientX;
+    panStartY = ev.clientY;
+    panStartLeft = mapScroller.scrollLeft;
+    panStartTop = mapScroller.scrollTop;
+  }
+
+  function onMapPointerMove(ev: PointerEvent) {
+    if (ev.pointerId !== panPointerId || !panCandidate || !mapScroller) return;
+    const dx = ev.clientX - panStartX;
+    const dy = ev.clientY - panStartY;
+    if (!panning) {
+      if (Math.abs(dx) + Math.abs(dy) <= 4) return;
+      panning = true;
+      suppressClickUntil = Date.now() + 140;
+      mapScroller.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    }
+    mapScroller.scrollLeft = panStartLeft - dx;
+    mapScroller.scrollTop = panStartTop - dy;
+  }
+
+  function endMapPan(ev?: PointerEvent) {
+    if (!mapScroller || (ev && ev.pointerId !== panPointerId)) return;
+    if (ev && mapScroller.hasPointerCapture(ev.pointerId)) {
+      mapScroller.releasePointerCapture(ev.pointerId);
+    }
+    panCandidate = false;
+    panning = false;
+    panPointerId = -1;
+  }
+  $effect(() => {
+    void mapDims.w;
+    void mapDims.h;
+    requestAnimationFrame(() => recomputeFitScale());
+  });
+  $effect(() => {
+    if (!mapScroller) return;
+    if (typeof ResizeObserver === 'undefined') {
+      requestAnimationFrame(() => recomputeFitScale());
+      return;
+    }
+    const ro = new ResizeObserver(() => recomputeFitScale());
+    ro.observe(mapScroller);
+    requestAnimationFrame(() => recomputeFitScale());
+    return () => ro.disconnect();
+  });
+  $effect(() => {
+    if (!gs || typeof document === 'undefined') {
+      mapBgUrl = '';
+      return;
+    }
+    const texW = Math.max(900, Math.min(2048, Math.round(mapDims.w * 0.55)));
+    const texH = Math.max(700, Math.min(1536, Math.round(mapDims.h * 0.55)));
+    const key = `${JSON.stringify(gs.seed)}:${mapDims.w}x${mapDims.h}:${texW}x${texH}`;
+    const cached = MAP_BG_CACHE.get(key);
+    if (cached) {
+      mapBgUrl = cached;
+      return;
+    }
+    const url = makeGalaxyBackground(key, texW, texH);
+    if (url) {
+      MAP_BG_CACHE.set(key, url);
+      mapBgUrl = url;
+    }
+  });
   const rangeCircles = $derived.by(() => {
     if (!gs || !showRange) return [];
     const empire = gs.empires.find((e) => e.id === me());
@@ -94,7 +385,6 @@
     const sv = view.find((v) => v.star.id === selectedStarId);
     return sv?.wormholeVisible ? sv.star.wormholeTo : null;
   });
-  const mapDims = $derived(gs ? MAP_SIZE[gs.settings.galaxySize] : { w: 2000, h: 1500 });
 
   /** own fleets in flight (or ordered this turn): marker at progress point */
   const transits = $derived.by(() => {
@@ -160,6 +450,7 @@
   }
 
   function clickStar(starId: number) {
+    if (Date.now() < suppressClickUntil) return;
     if (selectedShipIds.length > 0 && selectedStarId !== starId) {
       // prune ships that no longer exist (destroyed in a battle) so a stale
       // selection can't wedge star selection with endless invalid moves
@@ -299,16 +590,46 @@
     return null;
   }
 
-  /** 5-point star polygon path centred on 0,0 */
-  function starPath(outer: number): string {
-    const inner = outer * 0.45;
-    const pts: string[] = [];
-    for (let i = 0; i < 10; i++) {
-      const r = i % 2 === 0 ? outer : inner;
-      const a = (Math.PI / 5) * i - Math.PI / 2;
-      pts.push(`${(Math.cos(a) * r).toFixed(1)},${(Math.sin(a) * r).toFixed(1)}`);
-    }
-    return pts.join(' ');
+  interface StarVisual {
+    spectral: string;
+    common: string;
+    coreR: number;
+    coronaR: number;
+    spikeLen: number;
+    spikeCount: number;
+    spikeAlpha: number;
+    glow: number;
+    hotCoreTint: number;
+  }
+
+  const STAR_VISUALS: Record<StarColor, StarVisual> = {
+    // Approximate real classes by map color: hotter stars are larger + spikier.
+    blue: { spectral: 'O/B', common: 'blue giant', coreR: 8.2, coronaR: 19, spikeLen: 25, spikeCount: 4, spikeAlpha: 0.48, glow: 0.28, hotCoreTint: 0.42 },
+    white: { spectral: 'A/F', common: 'white main sequence', coreR: 7.5, coronaR: 17, spikeLen: 22, spikeCount: 4, spikeAlpha: 0.42, glow: 0.24, hotCoreTint: 0.36 },
+    yellow: { spectral: 'G', common: 'yellow dwarf', coreR: 6.9, coronaR: 15, spikeLen: 18, spikeCount: 3, spikeAlpha: 0.32, glow: 0.2, hotCoreTint: 0.3 },
+    orange: { spectral: 'K', common: 'orange dwarf/giant', coreR: 6.2, coronaR: 13.5, spikeLen: 14, spikeCount: 2, spikeAlpha: 0.2, glow: 0.16, hotCoreTint: 0.24 },
+    red: { spectral: 'M', common: 'red dwarf/giant', coreR: 5.8, coronaR: 12.5, spikeLen: 11, spikeCount: 2, spikeAlpha: 0.15, glow: 0.14, hotCoreTint: 0.18 },
+    brown: { spectral: 'L/T', common: 'brown dwarf', coreR: 5.1, coronaR: 10.5, spikeLen: 0, spikeCount: 0, spikeAlpha: 0, glow: 0.09, hotCoreTint: 0.12 },
+    black_hole: { spectral: 'X', common: 'black hole', coreR: 0, coronaR: 0, spikeLen: 0, spikeCount: 0, spikeAlpha: 0, glow: 0, hotCoreTint: 0 },
+  };
+
+  const SPIKE_ANGLES: Record<StarColor, number[]> = {
+    blue: [0, 45, 90, 135],
+    white: [0, 45, 90, 135],
+    yellow: [0, 60, 120],
+    orange: [0, 90],
+    red: [0, 90],
+    brown: [],
+    black_hole: [],
+  };
+
+  function starClassText(color: StarColor): string {
+    const v = STAR_VISUALS[color];
+    return color === 'black_hole' ? 'black hole' : `${v.spectral}-class ${v.common}`;
+  }
+
+  function starSpikeStroke(color: StarColor): string {
+    return mixHex(STAR_COLORS[color], '#ffffff', color === 'blue' ? 0.62 : 0.5);
   }
   const prettify = (id: string) => id.replaceAll('_', ' ');
 </script>
@@ -318,11 +639,24 @@
     {#if mapNote}
       <div class="mapnote" data-testid="map-note">{mapNote}</div>
     {/if}
-    <div class="scroller" class:zoomed={mapZoom === 'zoom'}>
+    <div
+      class="scroller"
+      class:zoomed={mapZoom === 'zoom'}
+      class:dragging={panning}
+      role="region"
+      aria-label="Galaxy map viewport"
+      bind:this={mapScroller}
+      onpointerdown={onMapPointerDown}
+      onpointermove={onMapPointerMove}
+      onpointerup={endMapPan}
+      onpointercancel={endMapPan}
+    >
     <svg
       viewBox="0 0 {mapDims.w} {mapDims.h}"
       data-testid="galaxy-map"
-      style={mapZoom === 'zoom' ? `width:${Math.round(mapDims.w * 0.85)}px;max-width:none` : ''}
+      data-allow-ctrl-wheel-zoom="true"
+      onwheel={onMapWheel}
+      style={mapSvgStyle}
     >
       <defs>
         <filter id="starglow" x="-80%" y="-80%" width="260%" height="260%">
@@ -331,6 +665,9 @@
             <feMergeNode in="blur" />
             <feMergeNode in="SourceGraphic" />
           </feMerge>
+        </filter>
+        <filter id="starsoft" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="2.8" />
         </filter>
       </defs>
 
@@ -361,6 +698,8 @@
 
       {#each view as v (v.star.id)}
         {@const kinds = monstersByStar.get(v.star.id)}
+        {@const sv = STAR_VISUALS[v.star.color]}
+        {@const scale = v.explored ? 1 : 0.82}
         <g
           class="star"
           role="button"
@@ -371,6 +710,7 @@
         >
           <title>
             {v.star.name}
+            {' — ' + starClassText(v.star.color)}
             {v.explored ? '' : ' — unexplored'}
             {reachable.has(v.star.id) ? '' : ' — out of fuel range'}
           </title>
@@ -386,15 +726,42 @@
             <circle r="26" class="norange" />
           {/if}
           {#if v.star.color === 'black_hole'}
-            <circle r="10" fill="#05070f" stroke="#8a76b5" stroke-width="3" opacity={v.explored ? 1 : 0.4} />
-            <circle r="16" fill="none" stroke="#5b4a75" stroke-width="2" opacity="0.6" />
+            <ellipse rx="16" ry="7.2" fill="none" stroke="#704c8a" stroke-width="2.6" opacity={v.explored ? 0.78 : 0.45} transform="rotate(-24)" />
+            <ellipse rx="13.2" ry="6" fill="none" stroke="#ad89d9" stroke-width="1.2" opacity={v.explored ? 0.58 : 0.32} transform="rotate(-24)" />
+            <circle r="8.4" fill="#02030a" stroke="#8a76b5" stroke-width="2.2" opacity={v.explored ? 1 : 0.5} />
+            <circle r="4.4" fill="#000000" />
           {:else}
-            <polygon
-              points={starPath(v.explored ? 15 : 12)}
-              fill={STAR_COLORS[v.star.color]}
-              opacity={v.explored ? 1 : 0.35}
-              filter={v.explored ? 'url(#starglow)' : undefined}
+            <circle
+              r={sv.coronaR}
+              fill={mixHex(STAR_COLORS[v.star.color], '#ffffff', sv.hotCoreTint * 0.5)}
+              opacity={v.explored ? sv.glow : Math.max(0.07, sv.glow * 0.5)}
+              filter={v.explored ? 'url(#starglow)' : 'url(#starsoft)'}
             />
+            <circle
+              r={sv.coreR * 1.06 * scale}
+              fill={STAR_COLORS[v.star.color]}
+              opacity={v.explored ? 0.95 : 0.42}
+            />
+            <circle
+              r={sv.coreR * 0.56 * scale}
+              fill={mixHex(STAR_COLORS[v.star.color], '#ffffff', sv.hotCoreTint)}
+              opacity={v.explored ? 0.88 : 0.5}
+            />
+            {#if sv.spikeCount > 0}
+              {#each SPIKE_ANGLES[v.star.color] as ang, ai (ai)}
+                <line
+                  x1={-sv.spikeLen * scale}
+                  y1="0"
+                  x2={sv.spikeLen * scale}
+                  y2="0"
+                  stroke={starSpikeStroke(v.star.color)}
+                  stroke-width={ang % 90 === 0 ? 1.45 : 1.05}
+                  opacity={v.explored ? sv.spikeAlpha : sv.spikeAlpha * 0.45}
+                  transform="rotate({ang})"
+                  stroke-linecap="round"
+                />
+              {/each}
+            {/if}
           {/if}
           {#if !v.explored}
             <circle r="21" class="fog" />
@@ -531,8 +898,33 @@
       {#if selected.explored && selected.planets.length}
         <!-- classic system view: star + orbit arcs, planet size/climate/richness at a glance -->
         <svg class="system" viewBox="0 0 330 92" aria-label="system view">
-          <circle cx="-26" cy="46" r="44" fill={STAR_COLORS[selected.star.color]} opacity="0.9" />
-          <circle cx="-26" cy="46" r="52" fill="none" stroke={STAR_COLORS[selected.star.color]} opacity="0.35" />
+          <g transform="translate(-26,46)">
+            {#if selected.star.color === 'black_hole'}
+              <ellipse rx="56" ry="18" fill="none" stroke="#6c4f8e" stroke-width="4.5" opacity="0.7" transform="rotate(-24)" />
+              <ellipse rx="47" ry="14" fill="none" stroke="#c6a2ec" stroke-width="2" opacity="0.5" transform="rotate(-24)" />
+              <circle r="39" fill="#02030a" stroke="#8a76b5" stroke-width="3.5" />
+              <circle r="18" fill="#000000" />
+            {:else}
+              <circle r={STAR_VISUALS[selected.star.color].coronaR * 2.7} fill={mixHex(STAR_COLORS[selected.star.color], '#ffffff', STAR_VISUALS[selected.star.color].hotCoreTint * 0.5)} opacity="0.24" filter="url(#starglow)" />
+              <circle r={STAR_VISUALS[selected.star.color].coreR * 2.55} fill={STAR_COLORS[selected.star.color]} opacity="0.96" />
+              <circle r={STAR_VISUALS[selected.star.color].coreR * 1.35} fill={mixHex(STAR_COLORS[selected.star.color], '#ffffff', STAR_VISUALS[selected.star.color].hotCoreTint)} opacity="0.9" />
+              {#if STAR_VISUALS[selected.star.color].spikeCount > 0}
+                {#each SPIKE_ANGLES[selected.star.color] as ang, ai (ai)}
+                  <line
+                    x1={-STAR_VISUALS[selected.star.color].spikeLen * 2.1}
+                    y1="0"
+                    x2={STAR_VISUALS[selected.star.color].spikeLen * 2.1}
+                    y2="0"
+                    stroke={starSpikeStroke(selected.star.color)}
+                    stroke-width={ang % 90 === 0 ? 2.2 : 1.7}
+                    opacity={STAR_VISUALS[selected.star.color].spikeAlpha * 0.55}
+                    transform="rotate({ang})"
+                    stroke-linecap="round"
+                  />
+                {/each}
+              {/if}
+            {/if}
+          </g>
           {#each [1, 2, 3, 4, 5] as orbit (orbit)}
             {@const ox = 30 + orbit * 56}
             <circle cx="-26" cy="46" r={ox + 26} fill="none" stroke="#26304f" stroke-width="1" />
@@ -719,10 +1111,17 @@
   .wrap {
     display: flex;
     gap: 0.8rem;
+    /* include nav, section padding, sticky footer and map legend in the
+       viewport budget so fit mode keeps the full map + legend visible */
+    height: calc(100dvh - 14rem);
+    min-height: 30rem;
   }
   .mapcol {
     flex: 1;
     min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
   .mapnote {
     background: #33201a;
@@ -734,25 +1133,42 @@
     font-size: 0.85rem;
   }
   svg {
-    width: 100%;
     background:
       radial-gradient(70% 60% at 60% 30%, rgba(38, 48, 95, 0.35) 0%, transparent 70%),
       #05070f;
     border: 1px solid var(--line);
     border-radius: 10px;
-    min-height: 420px;
+    min-height: 0;
     display: block;
   }
   /* zoom-to-fit really FITS: the whole galaxy stays inside the viewport
      height instead of only matching the width and scrolling vertically */
+  .scroller {
+    min-height: 0;
+    flex: 1;
+  }
+  .scroller:not(.zoomed) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
   .scroller:not(.zoomed) svg {
-    max-height: calc(100vh - 11rem);
-    margin: 0 auto;
+    height: auto;
+    margin: 0;
   }
   .scroller.zoomed {
     overflow: auto;
     max-height: 74vh;
     border-radius: 10px;
+    cursor: grab;
+  }
+  .scroller.zoomed svg {
+    min-height: 420px;
+  }
+  .scroller.zoomed.dragging {
+    cursor: grabbing;
+    user-select: none;
   }
   .zoombtn {
     font-size: 0.8rem;
@@ -839,6 +1255,8 @@
   }
   aside {
     width: 22rem;
+    max-height: 100%;
+    overflow: auto;
     font-size: 0.9rem;
     background: linear-gradient(180deg, var(--panel-2), var(--panel));
     border: 1px solid var(--line);
@@ -915,6 +1333,7 @@
     font-size: 0.9rem;
   }
   .legend {
+    flex: 0 0 auto;
     display: flex;
     gap: 1rem;
     flex-wrap: wrap;
@@ -940,6 +1359,12 @@
     gap: 0.3rem;
     align-items: center;
     color: var(--text);
+  }
+
+  @media (min-height: 980px) {
+    .wrap {
+      height: calc(100dvh - 13rem);
+    }
   }
   .wormhole {
     stroke: #b78bff;

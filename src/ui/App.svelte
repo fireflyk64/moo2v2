@@ -33,6 +33,19 @@
       window.removeEventListener('focus', onFocus);
     };
   });
+
+  $effect(() => {
+    // Prevent browser/page zoom from Ctrl/Cmd+wheel across the app.
+    // Specific widgets can opt in by setting data-allow-ctrl-wheel-zoom="true".
+    const onWheel = (ev: WheelEvent) => {
+      if (!ev.ctrlKey && !ev.metaKey) return;
+      const target = ev.target as HTMLElement | null;
+      if (target?.closest('[data-allow-ctrl-wheel-zoom="true"]')) return;
+      ev.preventDefault();
+    };
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    return () => window.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions);
+  });
 </script>
 
 <div class="starfield" aria-hidden="true"></div>

@@ -1,5 +1,7 @@
 // Player color assignments (by seat id) and star color rendering.
 
+import type { StarColor } from '@engine/types';
+
 export const PLAYER_COLORS = [
   '#4da3ff', // 0 blue
   '#ff6b5e', // 1 red
@@ -42,7 +44,7 @@ export function ownerName(id: number, lookup: (id: number) => string | undefined
   return lookup(id) ?? `player #${id}`;
 }
 
-export const STAR_COLORS: Record<string, string> = {
+export const STAR_COLORS: Record<StarColor, string> = {
   blue: '#7fb4ff',
   white: '#f2f4ff',
   yellow: '#ffe58a',
