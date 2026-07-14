@@ -8,10 +8,12 @@
 //     stipend when broke. Copies the human's ship designs.
 //   'fair'   — no help at all: researches on its own, builds colony ships and
 //     settles free planets with ordinary commands, spends its own money.
-// Everything else is ordinary play in both modes: planets stay fed with one
-// scientist and the rest on industry, it builds random things, occasionally
-// buys production, and — in aggressive mode — throws half its warfleet at the
-// human's nearest systems.
+// Everything else is ordinary play in both modes: the tuned build brain (v2)
+// keeps colonies fed and working, expands with real colony ships, keeps a
+// fleet, occasionally buys production, and — in aggressive mode — throws half
+// its warfleet at the human's nearest systems. (Before the v2 brain applied
+// to parity, that bot built RANDOM items and never sailed the colony ships it
+// happened to build, so it sat on one system all game.)
 
 import { selectors, starDistance } from '@engine/index';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
@@ -179,7 +181,7 @@ export class SoloBot {
         // v2: cheapest field first — quick breakthroughs compound; techers
         // still take the cheapest (fast tech throughput); v1: random
         const pick =
-          this.mode === 'fair' && this.brain === 'v2'
+          this.brain === 'v2'
             ? open.sort((a, b) => a.cost - b.cost || a.field.num - b.field.num)[0]!
             : open[Math.floor(rand() * open.length)]!;
         // dead picks (morale tech under Unification) would be rejected —
@@ -217,7 +219,7 @@ export class SoloBot {
 
     // ---- per-colony: jobs, builds, buys ----
     const planned = this.session.getPlanned() ?? state;
-    const v2 = this.mode === 'fair' && this.brain === 'v2';
+    const v2 = this.brain === 'v2';
     const myWarships = planned.ships.filter((s) => s.owner === me && s.shipKind === 'design').length;
     const queuedWarships = planned.colonies.reduce(
       (n, c) => n + (c.owner === me ? c.queue.filter((q) => q.item.startsWith('design:')).length : 0),
@@ -312,8 +314,11 @@ export class SoloBot {
       }
     }
 
-    // ---- fair expansion: build/sail/settle colony ships, no shortcuts ----
-    if (this.mode === 'fair') this.fairExpansion(me);
+    // ---- real expansion (both modes): build/sail/settle colony ships. The
+    // parity bot's debug catch-up above only fires when the human is AHEAD;
+    // without this it never used the colony ships it built and sat on one
+    // system while the human matched its colony count. ----
+    this.fairExpansion(me);
 
     // ---- aggression: half the warfleet at the human's two nearest systems ----
     if (alwaysWar) this.attack(state, me, human.id);
