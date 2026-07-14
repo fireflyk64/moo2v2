@@ -27,7 +27,7 @@ import {
   type WeaponRow,
 } from './data/index';
 import { floorDiv, roundDiv } from './imath';
-import { resolveTraits } from './race';
+import { hasAdvancedGov, resolveTraits } from './race';
 import type { Empire, GameState } from './types';
 
 export const HULLS_BUILDABLE = ['frigate', 'destroyer', 'cruiser', 'battleship', 'titan', 'doomstar'] as const;
@@ -370,6 +370,12 @@ export function designStats(state: GameState, empire: Empire, design: Omit<ShipD
   }
 
   if (spaceUsed > spaceTotal) return `over space: ${spaceUsed}/${spaceTotal}`;
+
+  // feudal shipyards build warships at 2/3 cost (racepicks.md); confederation
+  // (the advanced feudal government) drops that to 1/3
+  if (traits.government === 'feudal') {
+    cost = Math.max(1, roundDiv(cost * (hasAdvancedGov(empire) ? 1 : 2), 3));
+  }
 
   const armorTier = bestArmor(empire);
   const driveTier = bestDrive(empire);

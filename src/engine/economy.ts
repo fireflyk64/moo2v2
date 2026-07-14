@@ -9,7 +9,7 @@ import { effectiveClimate } from './terraform';
 import { isBlockaded } from './ground';
 import { ceilDiv, floorDiv, roundDiv } from './imath';
 import { isqrt } from './isqrt';
-import { gravitySteps, resolveTraits, type RaceTraits } from './race';
+import { hasAdvancedGov, gravitySteps, resolveTraits, type RaceTraits } from './race';
 import { NATIVE_RACE } from './types';
 import type { Climate, Colony, Empire, GameState, Minerals, Planet, PopGroup } from './types';
 
@@ -190,14 +190,15 @@ export interface ColonyOutput {
 
 type OutputKind = 'farm' | 'prod' | 'sci';
 
-function cTotalPct(kind: OutputKind, traits: RaceTraits, morale: number): number {
+function cTotalPct(kind: OutputKind, traits: RaceTraits, morale: number, advanced = false): number {
   if (traits.government === 'unification') {
-    return kind === 'sci' ? 0 : 50;
+    // galactic unification doubles the classic +50% farm/prod bonus
+    return kind === 'sci' ? 0 : advanced ? 100 : 50;
   }
   let c = morale;
   if (kind === 'sci') {
-    if (traits.government === 'democracy') c += 50;
-    if (traits.government === 'feudal') c -= 50;
+    if (traits.government === 'democracy') c += advanced ? 75 : 50; // federation
+    if (traits.government === 'feudal') c -= advanced ? 25 : 50; // confederation
   }
   return c;
 }
@@ -282,13 +283,14 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
   }
 
   // farming: unification/morale multiplier + leader %, then flat buildings
+  const advGov = hasAdvancedGov(owner);
   const farmWorker =
-    roundDiv(farmBase * (100 + cTotalPct('farm', ownerTraits, morale) + acc.farmPct), 100) - farmPenalty;
+    roundDiv(farmBase * (100 + cTotalPct('farm', ownerTraits, morale, advGov) + acc.farmPct), 100) - farmPenalty;
   const food = Math.max(0, farmWorker) + acc.farmFlat;
 
   // production before pollution
   const prodWorkerRaw =
-    roundDiv(prodBase * (100 + cTotalPct('prod', ownerTraits, morale) + acc.prodPct), 100) - prodPenalty;
+    roundDiv(prodBase * (100 + cTotalPct('prod', ownerTraits, morale, advGov) + acc.prodPct), 100) - prodPenalty;
   const prodWorker = Math.max(0, prodWorkerRaw);
 
   // F8 pollution (flat building production exempt)
@@ -318,7 +320,7 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
 
   // research
   const sciWorker =
-    roundDiv(sciBase * (100 + cTotalPct('sci', ownerTraits, morale) + acc.sciPct), 100) - sciPenalty;
+    roundDiv(sciBase * (100 + cTotalPct('sci', ownerTraits, morale, advGov) + acc.sciPct), 100) - sciPenalty;
   const research = Math.max(0, sciWorker) + acc.sciFlat;
 
   // ---------- F7 money ----------
@@ -328,7 +330,10 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
   const baseForBonus = special + popIncome;
   if (acc.moneyCoeffHalves > 0) bonusIncome += floorDiv(baseForBonus * acc.moneyCoeffHalves, 2);
   if (acc.bcPct > 0) bonusIncome += floorDiv(baseForBonus * acc.bcPct, 100); // financial leader
-  if (ownerTraits.government === 'democracy') bonusIncome += floorDiv(baseForBonus, 2); // ×0.5
+  if (ownerTraits.government === 'democracy') {
+    // federation raises the civilian-economy bonus from ×0.5 to ×0.75
+    bonusIncome += advGov ? floorDiv(baseForBonus * 3, 4) : floorDiv(baseForBonus, 2);
+  }
   if (ownerTraits.government !== 'unification') {
     bonusIncome += roundDiv(popIncome * morale, 100);
   }
@@ -442,7 +447,7 @@ export function explainOutput(state: GameState, colony: Colony): OutputExplain {
     }
   }
   const moraleLine = (kind: OutputKind) => {
-    const pct = cTotalPct(kind, ownerTraits, morale);
+    const pct = cTotalPct(kind, ownerTraits, morale, hasAdvancedGov(owner));
     return pct !== 0 ? `${pct > 0 ? '+' : ''}${pct}% ${ownerTraits.government === 'unification' ? 'unification' : 'morale/government'}` : null;
   };
   for (const [kind, lines, pctAcc, flat] of [

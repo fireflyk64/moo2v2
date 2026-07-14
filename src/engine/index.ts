@@ -4,7 +4,7 @@
 // - No imports from outside src/engine (zero runtime dependencies).
 // - No sources of nondeterminism; randomness comes only from the seeded PRNG.
 
-export const ENGINE_VERSION = '0.13.0'; // battlefield enlarged 512x384 -> 768x576: fleets deploy farther apart (the defender line is now relative to the field edge), so closing, flanking and retreating off-field all take meaningfully longer. Combat replays from 0.12.0 diverge at the first battle tick, so older saves load snapshot-first. (0.12.0: engine-maintained default designs per hull class that track research.)
+export const ENGINE_VERSION = '0.14.0'; // advanced governments implemented (confederation/imperium/federation/galactic_unification now amplify their base government) and feudal warships cost 2/3 per racepicks.md — feudal build costs and any empire holding an advanced-gov app diverge old replays. Prior: 0.13.0 battlefield enlarged 512x384 -> 768x576: fleets deploy farther apart (the defender line is now relative to the field edge), so closing, flanking and retreating off-field all take meaningfully longer. Combat replays from 0.12.0 diverge at the first battle tick, so older saves load snapshot-first. (0.12.0: engine-maintained default designs per hull class that track research.)
 
 export * from './types';
 export * from './ids';

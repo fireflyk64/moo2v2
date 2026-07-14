@@ -2,11 +2,12 @@
 // support network (colonies/outposts). Speeds come from the best known drive,
 // empire-wide, per the drive application effects.
 
-import { ceilDiv } from './imath';
+import { ceilDiv, floorDiv } from './imath';
 import { starDistance } from './galaxy';
 import { leaderEmpireBonuses } from './leaders';
 import { CP_SOURCES, CP_USAGE } from './data/index';
 import { effectsOf, empireAccum } from './effects';
+import { hasAdvancedGov } from './race';
 import type { Empire, GameState, Ship, Star } from './types';
 
 /** best known drive speed in parsecs/turn */
@@ -117,6 +118,10 @@ export function commandPoints(state: GameState, empire: Empire): CommandPointInf
     }
   }
   if (empire.picks.includes('warlord')) sources += CP_SOURCES['warlord_pick_bonus'] ?? 2;
+  // imperium (advanced dictatorship): total command points +50%
+  if (empire.government === 'dictatorship' && hasAdvancedGov(empire)) {
+    sources += floorDiv(sources, 2);
+  }
   let usage = 0;
   for (const ship of state.ships) {
     if (ship.owner !== empire.id || ship.designId === null) continue;

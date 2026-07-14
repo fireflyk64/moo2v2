@@ -250,10 +250,10 @@ export const EFFECTS: Record<string, EffectSpec> = {
     kind: 'building',
     modifiers: [col('farm_coeff', 1), col('prod_coeff', 1), col('sci_coeff', 1)],
   },
-  confederation: { kind: 'system', stub: 'advanced government (Phase 6)' },
-  imperium: { kind: 'system', stub: 'advanced government (Phase 6)' },
-  federation: { kind: 'system', stub: 'advanced government (Phase 6)' },
-  galactic_unification: { kind: 'system', stub: 'advanced government (Phase 6)' },
+  confederation: { kind: 'system', handler: 'shipdesign' }, // advanced feudal: warships 1/3 cost, research penalty -50% -> -25% (economy)
+  imperium: { kind: 'system', handler: 'movement' }, // advanced dictatorship: +50% command points, +20 spy defense (espionage)
+  federation: { kind: 'system', handler: 'economy' }, // advanced democracy: +50% money/research bonuses become +75%
+  galactic_unification: { kind: 'system', handler: 'economy' }, // advanced unification: +50% farm/prod bonuses become +100%
   galactic_currency_exchange: { kind: 'building', modifiers: [col('money_coeff_halves', 1)] },
 
   // ---------------- non-application buildables & starting items ----------------

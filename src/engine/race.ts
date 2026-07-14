@@ -85,6 +85,21 @@ export function resolveTraits(pickIds: readonly string[]): RaceTraits {
   };
 }
 
+/** Advanced-government application per base government (sociology field 6).
+ * Researching the app matching YOUR government upgrades it; a mismatched app
+ * (e.g. a democracy stealing imperium) has no effect. */
+export const ADVANCED_GOV_APP: Record<Government, string> = {
+  feudal: 'confederation',
+  dictatorship: 'imperium',
+  democracy: 'federation',
+  unification: 'galactic_unification',
+};
+
+/** Does this empire run the advanced form of its government? */
+export function hasAdvancedGov(empire: { government: Government; knownApps: readonly string[] }): boolean {
+  return empire.knownApps.includes(ADVANCED_GOV_APP[empire.government]);
+}
+
 /** Gravity mismatch steps for a race on a planet: 0, 1, or 2. Mismatch is
  * symmetric — a low-G world hampers a normal-G race just as a heavy world
  * does — except heavy-G races operate fine down to normal (racepicks doc). */

@@ -5826,8 +5826,8 @@ export const APPLICATION_ROWS: readonly ApplicationRow[] = [
     "subject": "sociology",
     "fieldId": "advanced_governments",
     "techId": null,
-    "effectSummary": "",
-    "effectSummaryLen": 0
+    "effectSummary": "Advanced form of feudalism. Warships cost only one-third of normal production and the feudal research penalty is halved to -25%.",
+    "effectSummaryLen": 128
   },
   {
     "id": "imperium",
@@ -5844,8 +5844,8 @@ export const APPLICATION_ROWS: readonly ApplicationRow[] = [
     "subject": "sociology",
     "fieldId": "advanced_governments",
     "techId": null,
-    "effectSummary": "",
-    "effectSummaryLen": 0
+    "effectSummary": "Advanced form of democracy. The +50% income and research bonuses rise to +75%.",
+    "effectSummaryLen": 78
   },
   {
     "id": "galactic_unification",
@@ -5853,8 +5853,8 @@ export const APPLICATION_ROWS: readonly ApplicationRow[] = [
     "subject": "sociology",
     "fieldId": "advanced_governments",
     "techId": null,
-    "effectSummary": "",
-    "effectSummaryLen": 0
+    "effectSummary": "Advanced form of unification. The +50% food and industry bonuses rise to +100%.",
+    "effectSummaryLen": 79
   },
   {
     "id": "galactic_currency_exchange",

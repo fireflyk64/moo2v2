@@ -19,6 +19,7 @@ import { isKnownApplicationId } from './items';
 import { empireAccum } from './effects';
 import { traitsOf } from './economy';
 import { leaderEmpireBonuses } from './leaders';
+import { hasAdvancedGov } from './race';
 import { grantApp } from './research';
 import { rngFor } from './rng';
 import type { Empire, GameState, TurnEvent } from './types';
@@ -51,6 +52,8 @@ function defenseOf(state: GameState, empire: Empire): number {
     floorDiv(traitsOf(empire).spyingPct, 2) +
     empireAccum(state, empire).spyDefense +
     govSpyDefense(traitsOf(empire).government) +
+    // imperium (advanced dictatorship): all defensive spy rolls +20
+    (empire.government === 'dictatorship' && hasAdvancedGov(empire) ? 20 : 0) +
     amc
   );
 }
