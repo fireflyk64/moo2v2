@@ -1026,6 +1026,12 @@
                 <button data-testid="colonize-{p.id}" onclick={() => colonize(f.ship.id, p.id)}>colonize</button>
               {:else if f.canOutpostHere.includes(p.id)}
                 <button onclick={() => outpost(f.ship.id, p.id)}>outpost</button>
+              {:else if f.canConstructHere.includes(p.id)}
+                <button
+                  data-testid="construct-{p.id}"
+                  title="rebuild this body into a barren world (consumes the construction ship)"
+                  onclick={() => session().submit('construct_planet', { shipId: f.ship.id, planetId: p.id })}
+                >construct planet</button>
               {/if}
             {/each}
           </li>

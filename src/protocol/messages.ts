@@ -39,6 +39,8 @@ export interface GameSettings {
     randomEvents: boolean;
     /** unlocks the 2-point out_of_box_thinking race pick (buy skipped techs with RP) */
     outOfBoxThinking?: boolean;
+    /** unlocks the planetary construction ship (endgame construction reward) */
+    constructionShip?: boolean;
   };
   /** ms for the battle-orders sub-phase before host applies defaults */
   battleOrdersTimeoutMs: number;
@@ -164,6 +166,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
     antarans: false,
     randomEvents: true,
     outOfBoxThinking: false,
+    constructionShip: false,
   },
   battleOrdersTimeoutMs: 60_000,
   debugCommands: false,

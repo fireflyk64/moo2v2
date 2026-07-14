@@ -188,7 +188,7 @@ export interface Empire {
   eliminated: boolean;
 }
 
-export type ShipKind = 'colony_ship' | 'outpost_ship' | 'transport' | 'scout';
+export type ShipKind = 'colony_ship' | 'outpost_ship' | 'transport' | 'scout' | 'construction_ship';
 
 export type ShipLocation =
   | { kind: 'star'; starId: number }
@@ -251,6 +251,8 @@ export interface GameStateSettings {
     randomEvents: boolean;
     /** unlocks the out_of_box_thinking race pick (absent in older saves = off) */
     outOfBoxThinking?: boolean;
+    /** unlocks the planetary construction ship once ALL construction fields are researched (absent = off) */
+    constructionShip?: boolean;
   };
   battleOrdersTimeoutMs: number;
   debugCommands: boolean;

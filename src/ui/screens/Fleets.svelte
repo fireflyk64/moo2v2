@@ -108,6 +108,12 @@
             {#each f.canOutpostHere.slice(0, 1) as pid (pid)}
               <button onclick={() => outpost(f.ship.id, pid)}>outpost</button>
             {/each}
+            {#each f.canConstructHere.slice(0, 1) as pid (pid)}
+              <button
+                title="rebuild the asteroid belt / gas giant here into a barren world (consumes the ship)"
+                onclick={() => submit('construct_planet', { shipId: f.ship.id, planetId: pid })}
+              >construct planet</button>
+            {/each}
             {#if f.canLoadFromColonyId !== null}
               <button
                 title="load 2 colonists from {colonyName(f.canLoadFromColonyId)}"

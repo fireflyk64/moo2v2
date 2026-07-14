@@ -15,7 +15,7 @@ import { itemCost, parseDesignItem, parseRefitItem } from './items';
 import { commandPoints, inRange, supportStars } from './movement';
 import { availableHulls, defaultDesign, designLoadoutKey } from './shipdesign';
 import { ceilDiv } from './imath';
-import { applyTerraformStep, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
+import { applyTerraformStep, constructAsBarren, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
 import { busyFreighters, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, traitsOf } from './economy';
 import { applyFoundingSpecials, normalizeJobsForGroup } from './commands';
 import { rngFor } from './rng';
@@ -427,13 +427,7 @@ function completeItem(state: GameState, colony: Colony, item: string, events: Tu
       colony.storedProd += itemCost(state, colony.owner, 'artificial_planet', colony) ?? 0;
       return;
     }
-    // MOO2-style planetary construction: the body becomes a barren world.
-    // A gas giant compacts into a huge planet, an asteroid belt into a medium
-    // one; minerals and gravity carry over from the original body.
-    target.sizeClass = target.body === 'gas_giant' ? 5 : 3;
-    target.body = 'planet';
-    target.climate = 'barren';
-    target.terraformSteps = 0;
+    constructAsBarren(target);
     events.push({
       visibleTo: colony.owner,
       kind: 'planet_constructed',
@@ -536,7 +530,7 @@ function completeItem(state: GameState, colony: Colony, item: string, events: Tu
     events.push({ visibleTo: colony.owner, kind: 'ship_built', payload: { colonyId: colony.id, item } });
     return;
   }
-  if (item === 'colony_ship' || item === 'outpost_ship' || item === 'transport') {
+  if (item === 'colony_ship' || item === 'outpost_ship' || item === 'transport' || item === 'construction_ship') {
     state.ships.push({
       id: allocId(state, colony.owner),
       owner: colony.owner,

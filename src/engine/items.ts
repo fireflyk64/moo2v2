@@ -2,7 +2,7 @@
 // Buildings are unique per colony; ships/projects repeat. Availability derives
 // from the empire's known applications plus the always-known starting items.
 
-import { ALWAYS_KNOWN_ITEMS, applicationById, buildableById } from './data/index';
+import { ALWAYS_KNOWN_ITEMS, applicationById, buildableById, FIELD_ROWS, FIELD_SUBJECTS } from './data/index';
 import type { Colony, Empire, GameState, Planet } from './types';
 import { planetOf } from './economy';
 import { designStats } from './shipdesign';
@@ -14,7 +14,25 @@ export const SHIP_BUILDABLES = new Set([
   'outpost_ship',
   'transport',
   'freighter_fleet',
+  'construction_ship',
 ]);
+
+/** Buildables gated by a game-mode option instead of a researched
+ * application (checked in canQueue; listed for the unlocks audit). */
+export const MODE_GATED_BUILDABLES = new Set(['construction_ship']);
+
+/** The planetary construction ship unlocks once EVERY construction field is
+ * researched (hyper-advanced repeats excluded) — an endgame construction
+ * capstone, only offered when the game option is on. */
+export function constructionShipUnlocked(state: GameState, empire: Empire): boolean {
+  if (state.settings.modes.constructionShip !== true) return false;
+  const done = new Set(empire.completedFields);
+  for (const f of FIELD_ROWS) {
+    if (FIELD_SUBJECTS[f.id] !== 'construction' || f.id.startsWith('advf_')) continue;
+    if (!done.has(f.num)) return false;
+  }
+  return true;
+}
 
 /** Repeatable non-building projects. */
 export const PROJECT_BUILDABLES = new Set([
@@ -169,7 +187,12 @@ export function canQueue(state: GameState, colony: Colony, itemId: string): stri
   const b = buildableById.get(itemId);
   if (!b) return `unknown item ${itemId}`;
   if (DEFERRED_BUILDABLES.has(itemId)) return `${itemId} not available yet`;
-  if (!empireKnowsItem(empire, itemId)) return `${itemId} not researched`;
+  if (itemId === 'construction_ship') {
+    if (state.settings.modes.constructionShip !== true) return 'the construction-ship game option is off';
+    if (!constructionShipUnlocked(state, empire)) return 'requires every construction field to be researched';
+  } else if (!empireKnowsItem(empire, itemId)) {
+    return `${itemId} not researched`;
+  }
   const planet = planetOf(state, colony);
   if (!climateAllows(itemId, planet)) return `${itemId} cannot operate on ${planet.climate}`;
   if (itemId === 'terraforming') {

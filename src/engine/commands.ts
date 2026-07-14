@@ -16,6 +16,7 @@ import { areAtWar, relationKey, setRelation } from './battles';
 import { anyEmpireContact, metEmpireIds } from './contact';
 import { buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, farmingViable, freeFreighters, traitsOf } from './economy';
 import { allocId, allocWorldId } from './ids';
+import { constructAsBarren } from './terraform';
 import { canQueue, itemCost, parseRefitItem } from './items';
 import { inRange, settlerTravelTurns, shipStar, supportStars, travelTurns } from './movement';
 import { starDistance } from './galaxy';
@@ -477,6 +478,38 @@ const applyOutpost: Applier = (state, cmd) => {
   state.colonies.sort((a, b) => a.id - b.id);
 };
 
+// ---------- construct_planet (planetary construction ship) ----------
+
+const validateConstructPlanet: Validator = (state, cmd) => {
+  if (state.settings.modes.constructionShip !== true) return 'the construction-ship game option is off';
+  const p = cmd.payload as ColonizePayload;
+  const ships = ownShips(state, cmd, [p?.shipId]);
+  if (typeof ships === 'string') return ships;
+  const ship = ships[0]!;
+  if (ship.shipKind !== 'construction_ship') return `ship ${ship.id} is not a construction ship`;
+  if (ship.location.kind !== 'star') return 'ship is in transit';
+  const planet = state.planets.find((x) => x.id === p.planetId);
+  if (!planet) return `no planet ${p.planetId}`;
+  if (planet.starId !== ship.location.starId) return 'ship is not at that system';
+  if (planet.body !== 'asteroids' && planet.body !== 'gas_giant') return 'only asteroid belts and gas giants can be constructed';
+  if (hostileMonsterAt(state, planet.starId)) return 'the system is guarded — destroy its keeper first';
+  return null;
+};
+
+const applyConstructPlanet: Applier = (state, cmd, events) => {
+  const p = cmd.payload as ColonizePayload;
+  const ship = state.ships.find((s) => s.id === p.shipId)!;
+  const planet = state.planets.find((x) => x.id === p.planetId)!;
+  // outposts on the old body (asteroid anchors) survive on the new world
+  state.ships = state.ships.filter((s) => s.id !== ship.id); // consumed by the build
+  constructAsBarren(planet);
+  events?.push({
+    visibleTo: cmd.playerId,
+    kind: 'planet_constructed',
+    payload: { planetId: planet.id, orbit: planet.orbit, starId: planet.starId },
+  });
+};
+
 // ---------- scrap_ship ----------
 
 const validateScrap: Validator = (state, cmd) => {
@@ -491,7 +524,7 @@ const applyScrap: Applier = (state, cmd) => {
   const empire = empireOf(state, cmd.playerId);
   // MOO2 scrap value: a quarter of the ship's production cost, in BC —
   // designed warships use their design's real cost
-  const costs: Record<string, number> = { colony_ship: 500, outpost_ship: 100, transport: 100, scout: 10 };
+  const costs: Record<string, number> = { colony_ship: 500, outpost_ship: 100, transport: 100, scout: 10, construction_ship: 400 };
   const cost =
     ship.shipKind === 'design' && ship.designId !== null
       ? (itemCost(state, cmd.playerId, `design:${ship.designId}`) ?? 0)
@@ -1505,6 +1538,10 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   build_outpost: {
     validate: (s, c) => validateSettle(s, c, 'outpost_ship'),
     apply: applyOutpost,
+  },
+  construct_planet: {
+    validate: validateConstructPlanet,
+    apply: applyConstructPlanet,
   },
   scrap_ship: { validate: validateScrap, apply: applyScrap },
   scrap_outpost: { validate: validateScrapOutpost, apply: applyScrapOutpost },

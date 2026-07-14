@@ -202,6 +202,7 @@
     { key: 'antarans', label: 'Andromedan attacks', help: 'Raiders from another dimension strike the largest empire; build the portal to strike back and win.' },
     { key: 'randomEvents', label: 'Random events', help: 'Galactic windfalls and disasters. Lucky races dodge the bad ones.' },
     { key: 'outOfBoxThinking', label: 'Out-of-the-box thinking', help: 'Unlocks a 2-point race pick: buy technologies you skipped in completed fields, each at the full field price in research points.' },
+    { key: 'constructionShip', label: 'Construction ship', help: 'Endgame reward: once every construction field is researched you can build a planetary construction ship that flies to an asteroid belt or gas giant and rebuilds it into a barren world.' },
   ];
 </script>
 

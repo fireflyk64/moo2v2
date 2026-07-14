@@ -43,7 +43,7 @@ describe('table counts (vs mechanics docs)', () => {
     expect(WEAPON_ROWS.length).toBe(45);
     expect(WEAPON_MOD_ROWS.length).toBe(14);
     expect(APPLICATION_ROWS.length).toBe(191);
-    expect(BUILDABLE_ROWS.length).toBe(69);
+    expect(BUILDABLE_ROWS.length).toBe(70);
   });
 });
 

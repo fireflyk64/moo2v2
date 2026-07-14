@@ -648,6 +648,8 @@ export interface FleetRow {
   reroutable: boolean;
   canColonizeHere: number[]; // planet ids
   canOutpostHere: number[];
+  /** construction ships: asteroid/gas-giant bodies here they can convert */
+  canConstructHere: number[];
   /** transports: own colony here that colonists can be loaded from / landed on */
   canLoadFromColonyId: number | null;
   canUnloadToColonyId: number | null;
@@ -658,6 +660,7 @@ const SHIP_KIND_NAMES: Record<string, string> = {
   colony_ship: 'Colony Ship',
   outpost_ship: 'Outpost Ship',
   transport: 'Transport',
+  construction_ship: 'Construction Ship',
 };
 
 export function fleetRows(state: GameState, empireId: number): FleetRow[] {
@@ -724,6 +727,10 @@ export function fleetRows(state: GameState, empireId: number): FleetRow[] {
       reroutable: transit !== null && transit.departedTurn === state.turn,
       canColonizeHere: settleTargets('colony_ship'),
       canOutpostHere: settleTargets('outpost_ship'),
+      canConstructHere:
+        ship.shipKind === 'construction_ship' && atStarId !== null && state.settings.modes.constructionShip === true && !hostileMonsterAt(state, atStarId)
+          ? state.planets.filter((p) => p.starId === atStarId && (p.body === 'asteroids' || p.body === 'gas_giant')).map((p) => p.id)
+          : [],
       canLoadFromColonyId: colonyHere('load'),
       canUnloadToColonyId: colonyHere('unload'),
     });

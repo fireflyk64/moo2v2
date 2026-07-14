@@ -64,6 +64,16 @@ export function effectiveClimate(planet: Planet, colony: Colony | null): Climate
   return planet.climate;
 }
 
+/** MOO2-style planetary construction: the body becomes a barren world. A gas
+ * giant compacts into a huge planet, an asteroid belt into a medium one;
+ * minerals and gravity carry over from the original body. */
+export function constructAsBarren(planet: Planet): void {
+  planet.sizeClass = planet.body === 'gas_giant' ? 5 : 3;
+  planet.body = 'planet';
+  planet.climate = 'barren';
+  planet.terraformSteps = 0;
+}
+
 /** Asteroid belts and gas giants a planetary-construction project could
  * convert into a barren world, nearest orbit first (deterministic order). */
 export function convertiblePlanetsInSystem(state: GameState, starId: number): Planet[] {

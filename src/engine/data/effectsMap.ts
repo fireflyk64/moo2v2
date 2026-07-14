@@ -140,6 +140,7 @@ export const EFFECTS: Record<string, EffectSpec> = {
   recyclotron: { kind: 'building', handler: 'economy' }, // +1 prod/pop unit, pollution-free (economy.ts)
   automated_repair_unit: { kind: 'ship_special', handler: 'combat' }, // ~0.5% structure/tick in combat
   artificial_planet: { kind: 'project', handler: 'pipeline' }, // converts an asteroid belt / gas giant in-system into a barren world (completeItem)
+  construction_ship: { kind: 'unlock', handler: 'commands' }, // mode-gated endgame ship: construct_planet rebuilds an asteroid belt / gas giant into a barren world
   robotic_factory: { kind: 'building', handler: 'economy' }, // +5..+25 prod by minerals
   deep_core_mine: { kind: 'building', modifiers: [col('prod_flat', 15), col('prod_coeff', 3)] },
   core_waste_dump: { kind: 'building', modifiers: [col('pollution_zero', 1)] },

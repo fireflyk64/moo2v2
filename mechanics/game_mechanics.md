@@ -521,6 +521,7 @@ Columns:
 | nanite_factory | 113 | 300 | 2 | production |
 | colony_base | 39 | 200 | 0 | ship |
 | colony_ship | 40 | 500 | 0 | ship |
+| construction_ship | 0 | 400 | 0 | ship |
 | outpost_ship | 122 | 100 | 0 | ship |
 | transport | 191 | 100 | 0 | ship |
 | freighter_fleet | 69 | 100 | 0 | ship |

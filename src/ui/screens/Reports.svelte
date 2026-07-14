@@ -69,7 +69,7 @@
       case 'council_convened': return `the Galactic Council convenes: ${(p['candidates'] as number[]).map(nameOf).join(' vs ')}`;
       case 'council_result': return `council result: ${p['winner'] === null ? 'no ruler elected' : `${nameOf(p['winner'])} elected!`}`;
       case 'terraformed': return `${colonyOf(p['colonyId'])} terraformed to ${p['climate']}`;
-      case 'planet_constructed': return `${colonyOf(p['colonyId'])} finished planetary construction: orbit ${p['orbit']} is now a barren world`;
+      case 'planet_constructed': return `planetary construction complete ${p['colonyId'] !== undefined ? `at ${colonyOf(p['colonyId'])}` : `at ${starOf(p['starId'])}`}: orbit ${p['orbit']} is now a barren world`;
       case 'monster_slain': return `the ${p['kind']} at ${starOf(p['starId'])} was slain`;
       case 'guardian_defeated': return `${nameOf(p['empireId'])} defeated the Guardian of Orion!`;
       case 'antaran_raid': return `Andromedan raiders strike ${nameOf(p['empireId'])}!`;

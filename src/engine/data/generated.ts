@@ -629,6 +629,13 @@ export const BUILDABLE_ROWS: readonly BuildableRow[] = [
     "group": "ship"
   },
   {
+    "id": "construction_ship",
+    "techId": 0,
+    "cost": 400,
+    "maintenance": 0,
+    "group": "ship"
+  },
+  {
     "id": "outpost_ship",
     "techId": 122,
     "cost": 100,
