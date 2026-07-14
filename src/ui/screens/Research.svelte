@@ -71,10 +71,14 @@
     return spec?.stub ? `${summary}\n⚠ not implemented yet: ${spec.stub}` : summary;
   }
 
-  // creative-variant: buy applications from completed fields, one at a time
+  // buy skipped applications from completed fields, one at a time:
+  // creative races under creative-variant mode, or any race with the
+  // out_of_box_thinking pick under its game option
   const creativeVariant = $derived(gs?.settings.modes.creativeVariant === true && !!empire && traitsOf(empire).creative);
+  const outOfBoxThinking = $derived(gs?.settings.modes.outOfBoxThinking === true && !!empire && traitsOf(empire).outOfBoxThinking);
+  const canBuyExtra = $derived(creativeVariant || outOfBoxThinking);
   const purchasable = $derived.by(() => {
-    if (!creativeVariant || !empire || !gs) return [];
+    if (!canBuyExtra || !empire || !gs) return [];
     const out: Array<{ id: string; name: string; fieldId: string; cost: number }> = [];
     for (const num of empire.completedFields) {
       const field = fieldByNum.get(num);
@@ -118,9 +122,9 @@
     {/if}
   </p>
 
-  {#if creativeVariant}
+  {#if canBuyExtra}
     <div class="field" data-testid="creative-variant">
-      <b>Creative applications</b>
+      <b>{creativeVariant ? 'Creative applications' : 'Out-of-the-Box Thinking'}</b>
       <p class="dim">
         Buy skipped applications from completed fields — each costs the full field price, one per turn.
         {#if empire.research.extraQueue.length}

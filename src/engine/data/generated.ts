@@ -345,6 +345,12 @@ export const PICK_ROWS: readonly PickRow[] = [
     "cost": 4,
     "value": null,
     "meaning": "Command/crew/combat advantage; includes CP bonus in parameter table."
+  },
+  {
+    "id": "out_of_box_thinking",
+    "cost": 2,
+    "value": null,
+    "meaning": "Out-of-the-Box Thinking: may buy skipped technologies from already-completed fields with research points (requires the matching game option)."
   }
 ] as const;
 

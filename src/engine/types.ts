@@ -249,6 +249,8 @@ export interface GameStateSettings {
     stickyBuild: boolean;
     antarans: boolean;
     randomEvents: boolean;
+    /** unlocks the out_of_box_thinking race pick (absent in older saves = off) */
+    outOfBoxThinking?: boolean;
   };
   battleOrdersTimeoutMs: number;
   debugCommands: boolean;

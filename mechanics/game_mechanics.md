@@ -277,6 +277,7 @@ The following table uses public parameter identifiers. `value` is the numeric mo
 | stealthy_ships | 4 | n/a | Fleet stealth bonus. |
 | trans_dimensional | 5 | n/a | Movement/combat mobility bonus. |
 | warlord | 4 | n/a | Command/crew/combat advantage; includes CP bonus in parameter table. |
+| out_of_box_thinking | 2 | n/a | Out-of-the-Box Thinking: may buy skipped technologies from already-completed fields with research points (requires the matching game option). |
 
 ## Research pick behavior
 

@@ -73,6 +73,10 @@ export function resolveRaceConfig(
 
 export function initGame(start: EngineGameStart): GameState {
   const configs = start.players.map((p) => resolveRaceConfig(p.raceJson, start.settings.pickPoints));
+  // out_of_box_thinking is only a legal pick when the game mode enables it
+  if (start.settings.modes.outOfBoxThinking !== true) {
+    for (const c of configs) c.picks = c.picks.filter((x) => x !== 'out_of_box_thinking');
+  }
   const traits = configs.map((c) => resolveTraits(c.picks));
   const galaxy = generateGalaxy(start.seed, start.settings, traits);
 

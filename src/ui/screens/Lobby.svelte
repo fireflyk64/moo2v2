@@ -80,6 +80,7 @@
     poor_hw: 'Poor Home World',
     arti_world: 'Artifacts World',
     trans_dimensional: 'Trans-Dimensional',
+    out_of_box_thinking: 'Out-of-the-Box Thinking',
   };
   function titleCase(id: string): string {
     return id
@@ -103,11 +104,17 @@
   }));
   const tierIds = new Set(tierFieldsets.flatMap((f) => f.picks.map((p) => p.id)));
   const governments = GOVERNMENTS.map((id) => pickById.get(id)).filter((p): p is PickRow => !!p);
-  const specials = PICK_ROWS.filter(
-    (p) => !tierIds.has(p.id) && !(GOVERNMENTS as readonly string[]).includes(p.id),
-  )
-    .slice()
-    .sort((a, b) => pickName(a).localeCompare(pickName(b)));
+  const specials = $derived(
+    PICK_ROWS.filter(
+      (p) =>
+        !tierIds.has(p.id) &&
+        !(GOVERNMENTS as readonly string[]).includes(p.id) &&
+        // mode-gated pick: only offered when the game option is on
+        (p.id !== 'out_of_box_thinking' || settings?.modes.outOfBoxThinking === true),
+    )
+      .slice()
+      .sort((a, b) => pickName(a).localeCompare(pickName(b))),
+  );
 
   // responsive columns like the mock: economy tiers | combat tiers + government | specials
   const columnA = tierFieldsets.slice(0, 5);
@@ -194,6 +201,7 @@
     { key: 'stickyBuild', label: 'Sticky build', help: 'Switching build items parks invested production on the old item instead of carrying it over.' },
     { key: 'antarans', label: 'Andromedan attacks', help: 'Raiders from another dimension strike the largest empire; build the portal to strike back and win.' },
     { key: 'randomEvents', label: 'Random events', help: 'Galactic windfalls and disasters. Lucky races dodge the bad ones.' },
+    { key: 'outOfBoxThinking', label: 'Out-of-the-box thinking', help: 'Unlocks a 2-point race pick: buy technologies you skipped in completed fields, each at the full field price in research points.' },
   ];
 </script>
 

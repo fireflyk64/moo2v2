@@ -240,11 +240,15 @@ interface ExtraResearchPayload {
 }
 
 const validateExtraResearch: Validator = (state, cmd) => {
-  if (!state.settings.modes.creativeVariant) return 'creative-variant mode is off';
   const p = cmd.payload as ExtraResearchPayload;
   const empire = state.empires.find((e) => e.id === cmd.playerId);
   if (!empire) return 'no empire';
-  if (!traitsOf(empire).creative) return 'only creative races may buy extra applications';
+  const traits = traitsOf(empire);
+  const creativePath = state.settings.modes.creativeVariant && traits.creative;
+  const outOfBoxPath = state.settings.modes.outOfBoxThinking === true && traits.outOfBoxThinking;
+  if (!creativePath && !outOfBoxPath) {
+    return 'buying skipped applications needs creative (creative-variant mode) or out-of-the-box thinking (its game option)';
+  }
   if (p.remove) {
     return empire.research.extraQueue.includes(p.appId) ? null : `${p.appId} not queued`;
   }

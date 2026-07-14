@@ -36,6 +36,8 @@ export interface RaceTraits {
   stealthyShips: boolean;
   transDimensional: boolean;
   warlord: boolean;
+  /** Out-of-the-Box Thinking: may buy skipped applications from completed fields with RP (gated by the outOfBoxThinking game mode) */
+  outOfBoxThinking: boolean;
 }
 
 function pickValue(picks: ReadonlySet<string>, base: string): number {
@@ -82,6 +84,7 @@ export function resolveTraits(pickIds: readonly string[]): RaceTraits {
     stealthyShips: picks.has('stealthy_ships'),
     transDimensional: picks.has('trans_dimensional'),
     warlord: picks.has('warlord'),
+    outOfBoxThinking: picks.has('out_of_box_thinking'),
   };
 }
 

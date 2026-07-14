@@ -275,6 +275,7 @@ export const EFFECTS: Record<string, EffectSpec> = {
 
 /** Race pick implementation ledger (checked by the coverage test). */
 export const PICK_STATUS: Record<string, { handler?: string; stub?: string }> = {
+  out_of_box_thinking: { handler: 'research' }, // buy skipped apps of completed fields with RP (commands.ts queue_extra_research)
   growth1: { handler: 'economy' },
   growth2: { handler: 'economy' },
   growth3: { handler: 'economy' },
