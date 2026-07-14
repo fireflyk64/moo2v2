@@ -55,7 +55,7 @@ export interface GameSettings {
   mirror?: boolean;
   /** home-system sibling world: 'good' = ultra-rich, 'min' = abundant */
   homeStart?: 'good' | 'min';
-  /** custom-race pick budget (classic 10; 14 for richer races) */
+  /** custom-race pick budget (classic 10; 12/14/16 for richer races) */
   pickPoints?: number;
   /** big-empire start: every player begins with a 10-20 colony bubble */
   bigStart?: boolean;

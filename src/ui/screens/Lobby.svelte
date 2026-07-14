@@ -304,7 +304,9 @@
         onchange={(e) => updateSetting('pickPoints', Number((e.target as HTMLSelectElement).value))}
       >
         <option value={10}>10 (classic)</option>
+        <option value={12}>12</option>
         <option value={14}>14</option>
+        <option value={16}>16</option>
       </select>
     </label>
     <label title="the galaxy is built from identical rotated wedges — every player starts on the edge with exactly the same nearby stars, planets and keepers">
