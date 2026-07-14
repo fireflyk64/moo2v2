@@ -53,6 +53,9 @@ export interface ColonyRow {
   stickyInvested: Record<string, number>;
   /** projected population change next turn, in popK (1000 = one colonist unit) */
   growthK: number;
+  /** projected UNCOVERED food shortage next turn (units), after freighter and
+   * chartered-hauler deliveries; > 0 means starvation penalty applies */
+  foodLack: number;
   /** buildings that may be sold this turn, with the BC refund for each */
   sellables: Array<{ id: string; refund: number }>;
   canSell: boolean;
@@ -135,12 +138,13 @@ export function colonyRow(state: GameState, colony: Colony, projectedFoodLack?: 
     popK += g.popK;
   }
   let growthK = 0;
+  let foodLack = 0;
   if (!colony.outpost && colony.groups.length > 0) {
     const maxPop = colonyMaxPop(state, colony);
     const totalUnits = colonyPopUnits(colony);
     // live estimate: use THIS turn's planned food/housing results, so moving
     // farmers around updates the projection immediately
-    const foodLack =
+    foodLack =
       projectedFoodLack ?? projectedFoodShortages(state, colony.owner).get(colony.id) ?? 0;
     const growthInputs = { foodLack, prodLack: output.prodLack, housingPP: output.housingPP };
     let projected = popK;
@@ -190,6 +194,7 @@ export function colonyRow(state: GameState, colony: Colony, projectedFoodLack?: 
     buildings: colony.buildings,
     outpost: colony.outpost,
     growthK,
+    foodLack,
     sellables: colony.buildings.map((b) => ({
       id: b,
       refund: Math.floor((itemCost(state, colony.owner, b) ?? 0) / 2),

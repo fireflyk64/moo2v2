@@ -121,8 +121,9 @@
   });
   const growthLabel = (k: number) => {
     const v = k / 1000;
-    // tiny-but-nonzero growth still reads as growth (+0.04, not +0.0)
-    const s = v !== 0 && Math.abs(v) < 0.1 ? v.toFixed(2) : v.toFixed(1);
+    // consistent precision below 1.0: "+0.09" vs "+0.05" must not render as
+    // "+0.1" vs "+0.05" (mixed precision made small dips look like halvings)
+    const s = v !== 0 && Math.abs(v) < 1 ? v.toFixed(2) : v.toFixed(1);
     return `${v >= 0 ? '+' : ''}${s}`;
   };
 
@@ -600,7 +601,14 @@
             </span>
           </td>
         {/each}
-        <td class:neg={row.output.foodNet < 0} data-testid="foodnet-{row.id}" title={ex.farm}>{row.output.foodNet >= 0 ? '+' : ''}{row.output.foodNet}</td>
+        <td
+          class:neg={row.output.foodNet < 0}
+          class:starving={row.foodLack > 0}
+          data-testid="foodnet-{row.id}"
+          title={row.output.foodNet < 0
+            ? `${ex.farm} — deficit ${-row.output.foodNet}: ${-row.output.foodNet - row.foodLack} covered by freighters/chartered haulers${row.foodLack > 0 ? `, ${row.foodLack} UNCOVERED (starvation)` : ''}`
+            : ex.farm}
+        >{row.output.foodNet >= 0 ? '+' : ''}{row.output.foodNet}{#if row.output.foodNet < 0 && row.foodLack === 0}<span class="fed" title="deficit fully covered by food shipments">✓</span>{/if}</td>
         <td data-testid="prod-{row.id}" title={ex.prod}>
           {row.output.prodToQueue || row.output.prod}{#if row.output.pollution > 0}<span class="poll">−{row.output.pollution}☁</span>{/if}
         </td>
@@ -822,6 +830,17 @@
   }
   .neg {
     color: var(--bad);
+  }
+  /* uncovered food shortage: starvation is imminent, shout louder than a
+     plain deficit that freighters are quietly covering */
+  td.starving {
+    font-weight: 700;
+    text-decoration: underline wavy var(--bad);
+  }
+  .fed {
+    color: var(--good, #5ee08a);
+    font-size: 0.75em;
+    margin-left: 0.15em;
   }
   .growth {
     font-size: 0.75rem;
