@@ -185,6 +185,7 @@
       hull,
       computer,
       shield,
+      armor: armorTier,
       specials: [...specials],
       weapons: weapons.map((w) => ({ weapon: w.weapon, count: w.count, mods: [...w.mods], arc: w.arc })),
       count: 3,

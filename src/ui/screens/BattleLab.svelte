@@ -363,7 +363,7 @@
               <label>armor
                 <select bind:value={g.armor} title="group armor tier">
                   {#each armorOptions as o (o.tier)}
-                    <option value={o.tier}>{o.tier}</option>
+                    <option value={o.tier}>{o.label}</option>
                   {/each}
                 </select>
               </label>

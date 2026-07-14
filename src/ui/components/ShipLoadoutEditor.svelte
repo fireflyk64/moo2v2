@@ -343,6 +343,7 @@
   </div>
   {#each weapons as w, i (i)}
     {@const wc = weaponChoices.find((x) => x.id === w.weapon)}
+    {@const fitted = stats && typeof stats !== 'string' ? stats.weapons[i] : undefined}
     <div class="weaponRow">
       <button class="mini removeBtn" title="remove weapon" onclick={() => onRemoveWeapon(i)}>✕</button>
       <input class="qty" type="number" min="1" max="50" bind:value={w.count} />
@@ -361,8 +362,8 @@
           {/each}
         </select>
       {/if}
-      <span class="mono">-</span>
-      <span class="mono">{stats && typeof stats !== 'string' ? stats.weapons[i]?.space ?? '-' : '-'}</span>
+      <span class="mono">{fitted ? fitted.costEach * fitted.count : '-'}</span>
+      <span class="mono">{fitted ? fitted.spaceEach * fitted.count : '-'}</span>
       <div class="mods">
         {#each wc?.availableMods ?? [] as mod (mod)}
           {@const locked = isModLocked(w.weapon, mod)}

@@ -36,8 +36,8 @@
   }
   function applyStyle() {
     if (shownStyle === currentStyle) return;
-    submit('set_ship_style', { style: shownStyle });
-    styleSel = null;
+    const res = submit('set_ship_style', { style: shownStyle });
+    if (!res.error) styleSel = null;
   }
 
   let note = $state('');
@@ -46,6 +46,7 @@
     note = '';
     const res = session().submit(kind, payload);
     if (res.error) note = res.error;
+    return res;
   }
 
   // ---------- trait reassignment: the one-time +4-pick respec ----------

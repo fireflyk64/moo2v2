@@ -108,12 +108,6 @@ export interface SpecialSystemInfo {
   spacePct: number;
 }
 
-// SPECIALS ids are canonical for simulation; some differ from application ids.
-const SPECIAL_APP_ALIAS: Readonly<Record<string, string>> = {
-  inertia_nullifier: 'inertial_nullifier',
-  warp_dissipater: 'warp_dissipator',
-};
-
 function prettySpecialId(id: string): string {
   return id
     .split('_')
@@ -122,8 +116,7 @@ function prettySpecialId(id: string): string {
 }
 
 export function specialSystemInfo(id: string): SpecialSystemInfo {
-  const appId = SPECIAL_APP_ALIAS[id] ?? id;
-  const app = applicationById.get(appId);
+  const app = applicationById.get(id);
   const name = app?.name ?? prettySpecialId(id);
   const description = app?.effectSummary ?? `${name}.`;
   return {
