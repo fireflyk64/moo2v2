@@ -380,11 +380,20 @@
     <details class="timespent">
       <summary>⏱ Time spent per screen (all empires)</summary>
       <table>
-        <thead><tr><th>empire</th><th>screen</th><th>time</th></tr></thead>
+        <thead><tr><th>empire</th><th>screen</th><th>time</th><th>visits</th><th>avg</th></tr></thead>
         <tbody>
           {#each gs.empires.filter((emp) => emp.telemetry) as emp (emp.id)}
-            {#each Object.entries(emp.telemetry ?? {}).sort((a, b) => b[1] - a[1]) as [screen, secs] (screen)}
-              <tr><td>{emp.raceName}</td><td>{screen}</td><td>{Math.floor(secs / 60)}m {secs % 60}s</td></tr>
+            {#each Object.entries(emp.telemetry ?? {})
+              .filter(([k]) => !k.startsWith('visits:'))
+              .sort((a, b) => b[1] - a[1]) as [screen, secs] (screen)}
+              {@const v = emp.telemetry?.[`visits:${screen}`] ?? 0}
+              <tr>
+                <td>{emp.raceName}</td>
+                <td>{screen}</td>
+                <td>{Math.floor(secs / 60)}m {secs % 60}s</td>
+                <td>{v > 0 ? v : '—'}</td>
+                <td>{v > 0 ? `${Math.round(secs / v)}s` : '—'}</td>
+              </tr>
             {/each}
           {/each}
         </tbody>

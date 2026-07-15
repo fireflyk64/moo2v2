@@ -8,8 +8,24 @@
   });
 
   let filter = $state('');
+
+  // category chips: the turn-297 game spent a third of its playtime on this
+  // screen re-scanning one flat list — let the reader jump straight to what
+  // they care about instead
+  const CATEGORIES: Record<string, string[]> = {
+    combat: ['battle_pending', 'battle_resolved', 'bombardment', 'colony_captured', 'invasion_repelled', 'monster_slain', 'guardian_defeated', 'antaran_raid', 'antarans_withdraw', 'colony_razed', 'empire_eliminated', 'ship_stranded_retreat'],
+    economy: ['building_complete', 'ship_built', 'freighters_built', 'colony_founded', 'freighter_upkeep', 'food_chartered', 'cp_overage', 'treasury_deficit', 'event_donation', 'event_depression', 'event_pirates', 'terraformed', 'planet_constructed'],
+    research: ['research_complete', 'design_updated', 'tech_stolen', 'tech_theft_suffered'],
+    danger: ['starvation', 'tech_theft_suffered', 'sabotage_suffered', 'bombardment', 'colony_razed', 'antaran_raid', 'event_plague', 'event_meteor', 'event_depression', 'event_pirates', 'treasury_deficit', 'colony_died', 'population_lost'],
+  };
+  let category = $state<'all' | keyof typeof CATEGORIES>('all');
+
   const rows = $derived.by(() => {
-    const all = [...app.reports].reverse(); // newest first
+    let all = [...app.reports].reverse(); // newest first
+    if (category !== 'all') {
+      const kinds = new Set(CATEGORIES[category]);
+      all = all.filter((r) => kinds.has(r.kind));
+    }
     if (!filter.trim()) return all;
     const f = filter.trim().toLowerCase();
     return all.filter((r) => r.kind.includes(f) || JSON.stringify(r.payload).toLowerCase().includes(f));
@@ -101,6 +117,14 @@
 
 <div class="bar">
   <input data-testid="report-filter" placeholder="filter reports…" bind:value={filter} />
+  {#each ['all', 'combat', 'economy', 'research', 'danger'] as cat (cat)}
+    <button
+      class="chip"
+      class:active={category === cat}
+      data-testid="report-cat-{cat}"
+      onclick={() => (category = cat as typeof category)}
+    >{cat}</button>
+  {/each}
   <span class="dim">{app.reports.length} reports</span>
   <button onclick={() => (app.reports.length = 0)}>Clear</button>
 </div>
@@ -110,7 +134,10 @@
   <table data-testid="reports">
     <tbody>
       {#each rows as r, i (i)}
-        <tr class:bad={['starvation', 'tech_theft_suffered', 'sabotage_suffered', 'bombardment', 'colony_razed', 'antaran_raid', 'event_plague', 'event_meteor', 'event_depression', 'event_pirates', 'treasury_deficit'].includes(r.kind)}>
+        {#if i === 0 || rows[i - 1]!.turn !== r.turn}
+          <tr class="turnhead"><td colspan="2">turn {r.turn}</td></tr>
+        {/if}
+        <tr class:bad={CATEGORIES['danger']!.includes(r.kind)}>
           <td class="turn">t{r.turn}</td>
           <td>{describe(r.kind, r.payload)}</td>
         </tr>
@@ -139,6 +166,25 @@
     opacity: 0.5;
     width: 3rem;
     font-family: monospace;
+  }
+  .turnhead td {
+    border-bottom: none;
+    padding-top: 0.6rem;
+    font-weight: 600;
+    opacity: 0.75;
+    font-size: 0.85em;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .chip {
+    font-size: 0.8em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 1rem;
+    opacity: 0.7;
+  }
+  .chip.active {
+    opacity: 1;
+    outline: 1px solid #6f86ff;
   }
   .bad td {
     color: #ff9d9d;

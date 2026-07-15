@@ -636,19 +636,24 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
     g.gun(c, 2);
     return;
   }
-  // main blade: ellipse with a rear carve -> forward-swept crescent
+  // main blade: ellipse with a carve -> swept crescent. Variants 0/2 carve
+  // the rear (the classic ")" blade); variants 1/3 flip the carve to the bow
+  // so the blade cups FORWARD — a "C"/"(" silhouette with the center dagger
+  // running out through the open mouth (bugs.md: two flipped-wing models
+  // per hull class)
   const bx = Math.round(L * 0.45);
   const brx = Math.round(L * 0.4);
+  const flipped = variant === 1 || variant === 3;
   g.ellipse(bx, brx, HH, R_HULL);
   const depth = variant === 1 ? 0.55 : variant === 2 ? 0.75 : 0.65;
-  g.carve(bx - Math.round(brx * depth), brx, HH - 1);
-  // center dagger to the nose
-  g.wedge(bx - 2, L - 1, Math.max(1, Math.round(HH * 0.28)), 0, R_HULL);
+  g.carve(bx + (flipped ? 1 : -1) * Math.round(brx * depth), brx, HH - 1);
   if (variant === 3 && k.tier >= 2) {
-    // double blade: smaller inner crescent
+    // double blade: smaller inner crescent, cupping forward like the main
     g.ellipse(bx - 3, Math.round(brx * 0.5), Math.round(HH * 0.55), R_HULL);
-    g.carve(bx - 3 - Math.round(brx * 0.35), Math.round(brx * 0.5), Math.round(HH * 0.45));
+    g.carve(bx - 3 + Math.round(brx * 0.35), Math.round(brx * 0.5), Math.round(HH * 0.45));
   }
+  // center dagger to the nose (after every carve so it always reaches)
+  g.wedge(bx - 2, L - 1, Math.max(1, Math.round(HH * 0.28)), 0, R_HULL);
   g.bevel();
   // luminous blade edge
   for (let d = 1; d <= HH - 1; d++) {
@@ -818,13 +823,26 @@ const planManta: Plan = (g, cls, k, r, variant) => {
   // tail spine
   const tailLen = Math.round(L * (variant === 3 ? 0.3 : 0.2));
   g.box(Math.max(0, bodyX - bodyR - tailLen), bodyX - bodyR + 2, 0, 0, R_HULL);
+  // variant 1: claw-arms — twin limbs reaching forward past the mouth from
+  // the wing shoulders, hooked inward at the tips like a hunting ray's
+  // claspers (bugs.md: one clawed model per hull class)
+  const armD = Math.max(2, HH - 2);
+  const armX1 = L - 3;
+  if (variant === 1) {
+    g.boxPair(bodyX + 2, armX1, armD, Math.min(HH, armD + 1), R_HULL);
+    g.linePair(armX1 + 1, armD, armX1 + 1, Math.max(1, armD - 2), R_HULL); // inward hook
+    g.linePair(armX1 + 2, Math.max(1, armD - 2), armX1 + 2, Math.max(1, armD - 3), R_HULL); // claw tip
+  }
   g.bevel();
   // eyes, gill vents and a short dorsal stripe
   g.sym(noseX + Math.round(L * 0.1), Math.max(1, Math.round(HH * 0.2)), R_GLOW);
   for (let i = 0; i < 3; i++) g.linePair(bodyX - 1 - i * 2, 1, bodyX - 2 - i * 2, Math.round(HH * 0.5), R_SHADE);
   g.box(Math.round(L * 0.34), Math.round(L * 0.58), 0, 0, R_ACCENT);
   g.sym(bodyX, HH - 1, R_ACCENT); // wingtips
-  if (variant === 1) g.sym(bodyX + 2, HH - 2, R_ACCENT);
+  if (variant === 1) {
+    g.sym(armX1 + 2, Math.max(1, armD - 3), R_ACCENT); // claw glints
+    g.gun(armX1 + 2, Math.max(1, armD - 3)); // claw-tip stingers
+  }
   if (k.tier >= 3) g.greeble(r, k.tier, [R_SHADE, R_GLOW]);
   g.engAuto(0);
   g.engAuto(Math.round(HH * 0.45));
@@ -1278,6 +1296,97 @@ const planBulwark: Plan = (g, cls, k, r, variant) => {
       for (let y = g.h - 1; y >= 0; y--) if (g.get(x, y) !== R_EMPTY) return y;
       return spine;
     };
+
+    // --- structural remixes (bugs.md variety pass): decals alone left the
+    //     destroyer/cruiser/battleship/titan models near-identical ---
+    if (cls === 'cruiser' && variant >= 2) {
+      // rounded head instead of the fork prow on two of the cruisers:
+      // v2 grafts a long dome, v3 a blunt one (mix and match)
+      const neckX = 36;
+      for (let x = neckX; x < g.w; x++) for (let y = 0; y < g.h; y++) g.set(x, y, R_EMPTY);
+      const rx = variant === 2 ? 10 : 7;
+      const ry = variant === 2 ? 5 : 6;
+      for (let i = 0; i <= rx; i++) {
+        const t = i / rx;
+        const hw = Math.round(ry * Math.sqrt(Math.max(0, 1 - t * t)));
+        for (let dy = -hw; dy <= hw; dy++) {
+          g.set(neckX + i, spine + dy, dy === -hw ? R_LIGHT : dy === hw ? R_SHADE : R_HULL);
+        }
+      }
+      g.set(neckX + 2, spine, R_GLOW); // helm eye behind the dome tip
+      g.set(neckX + 3, spine, R_GLOW);
+      g.guns[0] = { x: Math.min(g.w - 1, neckX + rx), y: spine };
+    }
+    if (cls === 'destroyer' && (variant === 1 || variant === 3)) {
+      // winged refits: solid swept wing ribbons — v1 rakes the pair aft-out
+      // (an arrowhead ">" read nose-first), v3 rakes it forward-out ("<")
+      const rootX = 14;
+      const len = 9;
+      const dir = variant === 1 ? -1 : 1;
+      for (let d = 3; d <= 8; d++) {
+        const x = rootX + dir * Math.round(((d - 3) * len) / 5);
+        for (let j = 0; j < 4; j++) g.sym(x + j, d, R_HULL); // 4-px chord
+      }
+      const tipX = rootX + dir * len;
+      for (let j = 0; j < 4; j++) g.sym(tipX + j, 8, R_ACCENT); // lit wingtips
+    }
+    if (cls === 'battleship' && variant === 2) {
+      // war-sail refit: a swept dorsal sail and ventral keel blade change
+      // the whole silhouette (not just the warpaint recolor below)
+      for (let x = 17; x <= 29; x++) {
+        const t = (x - 17) / 12;
+        const peak = Math.round(13 - Math.abs(t - 0.62) * 13);
+        for (let dy = 5; dy <= peak; dy++) {
+          g.set(x, spine - dy, R_HULL); // dorsal sail
+          g.set(x, spine + dy, R_HULL); // matching ventral keel
+        }
+      }
+      for (let x = 17; x <= 29; x++) {
+        const ty = topAt(x);
+        if (g.get(x, ty) === R_HULL) g.set(x, ty, R_LIGHT); // lit sail edge
+        const by = botAt(x);
+        if (g.get(x, by) === R_HULL) g.set(x, by, R_SHADE);
+      }
+      g.set(24, spine - 12, R_GLOW); // beacon at the sail crown
+    }
+    if (cls === 'battleship' && variant === 3) {
+      // bastion refit gains real geometry: rimmed armored flank sponsons
+      for (const s of [-1, 1]) {
+        for (let x = 8; x <= 22; x++) {
+          for (let dy = 9; dy <= 12; dy++) {
+            g.set(x, spine + s * dy, x === 8 || x === 22 || dy === 12 ? R_TRIM : R_HULL);
+          }
+        }
+        for (let x = 10; x <= 20; x += 5) {
+          g.set(x, spine + s * 10, R_GLOW); // sponson battery mouths
+          g.guns.push({ x, y: spine + s * 10 });
+        }
+      }
+    }
+    if (cls === 'titan' && variant === 1) {
+      // radical remix: the solid citadel becomes a twin-boom catamaran —
+      // the core is torn out, leaving armored booms bridged by two heavy
+      // spars over an exposed reactor channel
+      for (let x = 8; x <= 44; x++) {
+        for (let dy = -5; dy <= 5; dy++) {
+          if ((x >= 20 && x <= 23) || (x >= 34 && x <= 37)) continue; // spars
+          g.set(x, spine + dy, R_EMPTY);
+        }
+      }
+      for (let x = 8; x <= 44; x++) {
+        for (const s of [-6, 6]) {
+          if (g.get(x, spine + s) !== R_EMPTY && g.get(x, spine + s - Math.sign(s)) === R_EMPTY) {
+            g.set(x, spine + s, R_GLOW); // torn edges glow with reactor light
+          }
+        }
+      }
+      for (const sx of [21, 35]) {
+        g.set(sx, spine, R_GLOW); // spar reactor cores
+        g.set(sx + 1, spine, R_GLOW);
+      }
+      g.engines = g.engines.filter((e) => g.get(e.x, e.y) !== R_EMPTY);
+    }
+
     if (variant === 1) {
       // chevron refit: extra red war-stripes across the stern block
       for (const dx of [3, 4, 7, 8]) {

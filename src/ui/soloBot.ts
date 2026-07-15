@@ -51,6 +51,25 @@ const PROFILES: Record<BotPersonality, Profile> = {
 
 const PERSONALITIES: BotPersonality[] = ['techer', 'rusher', 'industrialist', 'expander', 'militarist'];
 
+/** building priority for the v2 brain, taken from the opening a winning human
+ * game actually played (bugs/moo2v2-SOLO-turn297.moo2save, turns 1–120);
+ * anything not listed falls back to cheapest-first */
+const BUILD_ORDER = [
+  'automated_factory',
+  'research_lab',
+  'hydroponic_farm',
+  'soil_enrichment',
+  'habitat_domes',
+  'population_growth_center',
+  'star_base',
+  'supercomputer',
+  'holo_simulator',
+  'pollution_processor',
+  'robo_miner_plant',
+  'stock_exchange',
+  'astro_university',
+];
+
 export interface SoloBotOptions {
   session: GameSession<GameState>;
   raceJson?: string;
@@ -172,12 +191,18 @@ export class SoloBot {
         if (!bot.knownApps.includes(app)) this.submit('debug_grant_app', { appId: app });
       }
     }
-    // keep the labs pointed somewhere so banked RP is not wasted
-    if (bot.research.fieldNum === null) {
+    // keep the labs pointed somewhere so banked RP is not wasted. Re-pick
+    // whenever the current selection has nothing left to teach — the old
+    // null-only gate let a turn-1 pick go stale for the whole game (the
+    // turn-297 save's bot sat on one field with zero scientists for 296
+    // turns and never learned a single app).
+    {
       const planned = this.session.getPlanned() ?? state;
       const choices = selectors.researchChoices(planned, me);
       const open = choices.filter((c) => c.apps.some((a) => !a.known));
-      if (open.length) {
+      const current = choices.find((c) => c.field.num === bot.research.fieldNum);
+      const stale = bot.research.fieldNum === null || !current || !current.apps.some((a) => !a.known);
+      if (open.length && stale) {
         // v2: cheapest field first — quick breakthroughs compound; techers
         // still take the cheapest (fast tech throughput); v1: random
         const pick =
@@ -244,8 +269,11 @@ export class SoloBot {
       const preset = techy ? 'blend' : 'industry';
       const jobs = selectors.presetJobs(planned, colony.id, preset);
       if (jobs) {
-        // shift up to scienceBias workers into research (kept fed)
-        const shifts = v2 ? prof.scienceBias : 1;
+        // shift workers into research (kept fed). Every profile keeps at
+        // least one scientist: a scienceBias of 0 used to mean literally
+        // zero RP forever, which in a pre-warp start locks the empire out
+        // of colony ships, hulls and range tech for the entire game.
+        const shifts = v2 ? Math.max(1, prof.scienceBias) : 1;
         for (let k = 0; k < shifts; k++) {
           const g = jobs.find((x) => x.workers > 0);
           if (g) {
@@ -273,11 +301,17 @@ export class SoloBot {
         if (!options.length) continue;
         if (v2) {
           // priorities: keep a real fleet (≥1 warship per colony — the wars
-          // are lost without one), then the cheapest unbuilt building
-          // (economy compounds), then anything else
+          // are lost without one), then buildings in the opening order a
+          // winning human game actually used (turn-297 save: factory, lab,
+          // farm, then growth/economy), then the cheapest of the rest
           const buildings = options
             .filter((b) => !SHIP_BUILDABLES.has(b) && !PROJECT_BUILDABLES.has(b) && !b.startsWith('design:') && !b.startsWith('refit:'))
-            .sort((a, b) => (itemCost(planned, me, a, colony) ?? 9999) - (itemCost(planned, me, b, colony) ?? 9999));
+            .sort((a, b) => {
+              const pa = BUILD_ORDER.indexOf(a);
+              const pb = BUILD_ORDER.indexOf(b);
+              if (pa !== pb) return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+              return (itemCost(planned, me, a, colony) ?? 9999) - (itemCost(planned, me, b, colony) ?? 9999);
+            });
           const designs = options
             .filter((b) => b.startsWith('design:'))
             .sort((a, b) => (itemCost(planned, me, a, colony) ?? 9999) - (itemCost(planned, me, b, colony) ?? 9999));
@@ -326,10 +360,34 @@ export class SoloBot {
 
   /** Non-cheating expansion: settle with real colony ships. Colony ships at a
    * star colonize the best free planet there or sail to the nearest reachable
-   * free system; while free planets exist, one colony ship stays queued. */
+   * free system; while free planets exist, one colony ship stays queued.
+   * Before any of that, settle our OWN systems with colony_base — it is known
+   * from the start, needs no ship and no fuel range (the human's very first
+   * build in the turn-297 save was a colony_base; the old brain never queued
+   * projects at all and left a free planet sitting in its home system). */
   private fairExpansion(me: number): void {
     const planned = this.session.getPlanned();
     if (!planned) return;
+    for (const colony of planned.colonies) {
+      if (colony.owner !== me || colony.outpost) continue;
+      const row = selectors.colonyRow(planned, colony);
+      if (row.buildable.includes('colony_base') && !row.queue.includes('colony_base')) {
+        this.submit('set_build_queue', { colonyId: colony.id, items: ['colony_base', ...row.queue] });
+      }
+    }
+
+    // scouts chart the nearest unexplored reachable star (the old brain never
+    // moved them: the turn-297 bot had explored exactly its home star)
+    const bot = planned.empires.find((e) => e.id === me);
+    const explored = new Set(bot?.exploredStars ?? []);
+    for (const scout of planned.ships) {
+      if (scout.owner !== me || scout.shipKind !== 'scout' || scout.location.kind !== 'star') continue;
+      const dest = selectors
+        .moveOptions(planned, me, scout.location.starId)
+        .find((o) => o.reachable && !explored.has(o.starId));
+      if (dest) this.submit('move_ships', { shipIds: [scout.id], destStarId: dest.starId });
+    }
+
     const freePlanets = planned.planets.filter(
       (p) =>
         p.body === 'planet' &&
@@ -352,6 +410,11 @@ export class SoloBot {
         .find((o) => o.reachable && freePlanets.some((p) => p.starId === o.starId));
       if (dest) this.submit('move_ships', { shipIds: [ship.id], destStarId: dest.starId });
     }
+
+    // outpost ships extend the fuel network toward whatever we cannot reach
+    // yet (free systems or the enemy) — without them a distant start leaves
+    // the bot permanently cordoned inside its 4-parsec bubble
+    this.extendRange(planned, me, freePlanets);
     // keep colony ships in the pipeline while there is room to grow —
     // the tuned brain runs TWO yards at once (expansion wins games)
     const queued = planned.colonies.reduce(
@@ -372,6 +435,74 @@ export class SoloBot {
         pipeline++;
       }
     }
+  }
+
+  /** Outpost stepping-stones: when wanted stars (free systems, the enemy)
+   * sit outside fuel range, keep one outpost ship working its way toward
+   * them — each outpost anchors the fuel network and widens the bubble. */
+  private extendRange(planned: GameState, me: number, freePlanets: Array<{ starId: number }>): void {
+    const anchor = planned.colonies.find((c) => c.owner === me && !c.outpost);
+    if (!anchor) return;
+    const anchorPlanet = planned.planets.find((p) => p.id === anchor.planetId);
+    if (!anchorPlanet) return;
+    const options = selectors.moveOptions(planned, me, anchorPlanet.starId);
+    const wanted = new Set<number>(freePlanets.map((p) => p.starId));
+    for (const c of planned.colonies) {
+      if (c.owner === me) continue;
+      const p = planned.planets.find((x) => x.id === c.planetId);
+      if (p) wanted.add(p.starId);
+    }
+    const unreachable = options.filter((o) => !o.reachable && wanted.has(o.starId));
+    if (!unreachable.length) return;
+    const goal = planned.stars.find((s) => s.id === unreachable[0]!.starId)!;
+
+    // sail/plant existing outpost ships: settle here if possible, otherwise
+    // head for the reachable star with an unsettled body nearest the goal
+    let sailing = 0;
+    for (const row of selectors.fleetRows(planned, me)) {
+      if (row.kind !== 'outpost_ship') continue;
+      if (row.canOutpostHere.length) {
+        this.submit('build_outpost', { shipId: row.ship.id, planetId: row.canOutpostHere[0] });
+        sailing++;
+        continue;
+      }
+      if (row.atStarId === null) {
+        sailing++; // already in transit
+        continue;
+      }
+      const dest = selectors
+        .moveOptions(planned, me, row.atStarId)
+        .filter(
+          (o) =>
+            o.reachable &&
+            planned.planets.some(
+              (p) => p.starId === o.starId && !planned.colonies.some((c) => c.planetId === p.id),
+            ) &&
+            !planned.monsters.some((m) => m.starId === o.starId),
+        )
+        .sort((a, b) => {
+          const sa = planned.stars.find((s) => s.id === a.starId)!;
+          const sb = planned.stars.find((s) => s.id === b.starId)!;
+          return starDistance(sa, goal) - starDistance(sb, goal) || a.starId - b.starId;
+        })[0];
+      if (dest) {
+        this.submit('move_ships', { shipIds: [row.ship.id], destStarId: dest.starId });
+        sailing++;
+      }
+    }
+    if (sailing > 0) return;
+
+    // none in flight: put one on the strongest yard that can build it
+    const queued = planned.colonies.some(
+      (c) => c.owner === me && c.queue.some((q) => q.item === 'outpost_ship'),
+    );
+    if (queued) return;
+    const yard = planned.colonies
+      .filter((c) => c.owner === me && !c.outpost)
+      .map((c) => selectors.colonyRow(planned, c))
+      .filter((r) => r.buildable.includes('outpost_ship'))
+      .sort((a, b) => (b.output.prodToQueue || b.output.prod) - (a.output.prodToQueue || a.output.prod))[0];
+    if (yard) this.submit('set_build_queue', { colonyId: yard.id, items: ['outpost_ship', ...yard.queue] });
   }
 
   private nearestFreePlanet(state: GameState, me: number): number | null {
@@ -421,17 +552,37 @@ export class SoloBot {
       const star = state.stars.find((s) => s.id === starId)!;
       return myStars.length ? Math.min(...myStars.map((s) => starDistance(s, star))) : 0;
     };
-    // "2 random planets as close to the player as possible, preferably owned"
-    const targets = [...humanStars].sort((a, b) => near(a) - near(b)).slice(0, 2);
+    // only stars the fleet can actually reach — the old bot hurled the same
+    // move at an out-of-range target every turn, every one silently
+    // rejected, and never laid a single course in 297 turns. Unreachable
+    // targets are extendRange's job (outpost chain), not the fleet's.
+    const from = (warships[0]!.location as { kind: 'star'; starId: number }).starId;
+    const reach = new Set(
+      selectors
+        .moveOptions(state, me, from)
+        .filter((o) => o.reachable)
+        .map((o) => o.starId),
+    );
+    const targets = [...humanStars]
+      .filter((id) => reach.has(id) || warships.some((s) => s.location.kind === 'star' && s.location.starId === id))
+      .sort((a, b) => near(a) - near(b))
+      .slice(0, 2);
     if (!targets.length) return;
-    const half = warships.slice(0, Math.max(1, Math.floor(warships.length / 2)));
+    // commit three quarters of the fleet — half split across two targets
+    // was too timid to ever crack a defended system
+    const strike = warships.slice(0, Math.max(1, Math.floor((warships.length * 3) / 4)));
     const groups: Record<number, number[]> = {};
-    half.forEach((s, i) => {
+    strike.forEach((s, i) => {
       const t = targets[i % targets.length]!;
       (groups[t] ??= []).push(s.id);
     });
     for (const [starId, shipIds] of Object.entries(groups)) {
-      this.submit('move_ships', { shipIds, destStarId: Number(starId) });
+      const already = shipIds.filter((id) => {
+        const s = state.ships.find((x) => x.id === id)!;
+        return s.location.kind === 'star' && s.location.starId === Number(starId);
+      });
+      const moving = shipIds.filter((id) => !already.includes(id));
+      if (moving.length) this.submit('move_ships', { shipIds: moving, destStarId: Number(starId) });
     }
   }
 

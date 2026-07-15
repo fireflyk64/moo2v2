@@ -233,9 +233,13 @@
   const pretty = (id: string) => id.replaceAll('_', ' ');
   const starName = (id: number) => gs?.stars.find((s) => s.id === id)?.name ?? `star ${id}`;
 
-  // ---- UI telemetry: seconds per screen, flushed with each commit ----
+  // ---- UI telemetry: seconds + visits per screen, flushed with each commit.
+  // Visits ride in the same payload under 'visits:<screen>' keys so future
+  // games can tell many-quick-checks from long-stares (the turn-297 analysis
+  // had only aggregate seconds, which could not distinguish the two) ----
   let dwellStart = Date.now();
   let dwell: Record<string, number> = {};
+  let visits: Record<string, number> = { colonies: 1 }; // the game opens on colonies
   let dwellTab: typeof tab = 'colonies'; // matches tab's initial value
   $effect(() => {
     if (tab === dwellTab) return;
@@ -243,13 +247,18 @@
     if (secs > 0) dwell[dwellTab] = (dwell[dwellTab] ?? 0) + Math.min(secs, 3600);
     dwellTab = tab;
     dwellStart = Date.now();
+    visits[tab] = (visits[tab] ?? 0) + 1;
   });
   function flushTelemetry() {
     const secs = Math.floor((Date.now() - dwellStart) / 1000);
     if (secs > 0) dwell[dwellTab] = (dwell[dwellTab] ?? 0) + Math.min(secs, 3600);
     dwellStart = Date.now();
-    const screens = Object.fromEntries(Object.entries(dwell).filter(([, v]) => v > 0));
+    const screens: Record<string, number> = Object.fromEntries(Object.entries(dwell).filter(([, v]) => v > 0));
+    for (const [k, v] of Object.entries(visits)) {
+      if (v > 0) screens[`visits:${k}`] = v; // sub-second visits still count
+    }
     dwell = {};
+    visits = {};
     if (Object.keys(screens).length) session().submit('record_telemetry', { screens });
   }
 
