@@ -1,9 +1,15 @@
-There's something weird with either freighters or starving planets. I had a barren world hydroponic farm +2 food 5 people -3 net with cloning centers. It was growing +0.1 after I build freighters the growth drops to +0.05
-battlefield size is too small. Can we make it larger. Most screens are larger and smaller screens can scroll around. I think the ships should start a bit farther away and also have to go farther to retreat
-planetary construction ship (only available based on startup checkbox flag) could be an advanced research after all current techs, and could fly around and construct planets and colonize them in one go.
-Also we should have a picks == 12 and picks == 16 option instead of just 10 or 14 in the dropdown
-"out of the box" race pick (can be activated by the host as a startup checkbox flag) that takes 2 picks and allows research of any research that was skipped for the full price of that research.
-planetary construction seems not to work and does not transform an asteroid or gas giant into a barren
-Advanced Governments technology has a "Not yet implemented" icon on it--that must be fixed.  The advanced governments don't do anything.
-The AI seems to not build or do anything?
-Or perhaps it stopped going things when out of curiosity I checked the "aggressive box" checkmark? It had 3 scouts and 1 system when I found it.
+This savegame: bugs/moo2v2-SOLO-turn297.moo2save has the enemy AI cordoned off to just a single planet. This failure of launch made the game profoundly unfun to play. Can you diagnose the bug and fix the AI to be much more optimized and aggressive. Perhaps the humans' play during this time can help inform AI play and build orders.
+
+Also the metrics that were being recorded about where the UI was being used: can you collate those and determine which screens the user spent most time on and how we could streamline their operation. We need this game to play as smoothly and quickly as possible so that we can get to turn 297 without trouble.
+
+If there weren't enough metrics saved to determine, please add the metrics necessary for future games so we can collect those stats.
+
+Also please update the Crescent faction ship styles to have two of the variants for each ship type have wings that are flipped along the axis (eg that are shaped like a C or ( shape rather than a ) shape.
+For the manta class give one of the variants for each ship claws or arms
+
+For the Bulwark destroyer and cruiser please make the more different and do some more mix and match with rounded heads instead of the fork head on 2 of the cruisers and wings going like > or like < for the destroyer.
+
+also for bullwark battleship change model 3 and 4 of the battleship to look different somehow than the other models so there is some variety between types and not just a few windows different.
+
+Also for bullwark titan model 2 please make it a radical remix of the other models or
+something completely different
