@@ -45,7 +45,7 @@ const PROFILES: Record<BotPersonality, Profile> = {
   techer: { scienceBias: 1, fleetRatio: 0.6, expand: 3, warlike: false, buyEager: false },
   rusher: { scienceBias: 0, fleetRatio: 1.5, expand: 1, warlike: true, buyEager: true },
   industrialist: { scienceBias: 0, fleetRatio: 1, expand: 2, warlike: false, buyEager: true },
-  expander: { scienceBias: 1, fleetRatio: 0.5, expand: 4, warlike: false, buyEager: false },
+  expander: { scienceBias: 1, fleetRatio: 0.5, expand: 6, warlike: false, buyEager: true },
   militarist: { scienceBias: 0, fleetRatio: 2, expand: 2, warlike: true, buyEager: true },
 };
 
@@ -182,6 +182,29 @@ export class SoloBot {
     if (!bot || !human) return;
     const rand = whim(state.turn, me);
 
+    // ---- concession: wars must be able to END. Bombard spares the last pop
+    // unit and invasions grind, so a truly beaten empire offers formal
+    // surrender (the winner absorbs the realm) instead of dragging a decided
+    // game out for hundreds of turns. Thresholds are deliberately brutal —
+    // a satisfying opponent fights hard and concedes only when crushed. ----
+    for (const prop of state.proposals ?? []) {
+      if (prop.to === me && prop.kind === 'surrender') {
+        this.submit('diplo_respond', { proposalId: prop.id, accept: true });
+      }
+    }
+    if (state.turn >= 250) {
+      const myCol = state.colonies.filter((c) => c.owner === me && !c.outpost).length;
+      const theirCol = state.colonies.filter((c) => c.owner === human.id && !c.outpost).length;
+      const myW = state.ships.filter((s) => s.owner === me && s.shipKind === 'design').length;
+      const theirW = state.ships.filter((s) => s.owner === human.id && s.shipKind === 'design').length;
+      const rel = state.relations.find(
+        (r) => r.a === Math.min(me, human.id) && r.b === Math.max(me, human.id),
+      );
+      const hopeless = rel?.status === 'war' && theirCol >= myCol * 2 + 5 && theirW >= myW * 4 + 8;
+      const alreadyOffered = (state.proposals ?? []).some((p) => p.from === me && p.kind === 'surrender');
+      if (hopeless && !alreadyOffered) this.submit('diplo_propose', { to: human.id, kind: 'surrender' });
+    }
+
     if (this.mode === 'parity') {
       // ---- stipend: broke bots get 100 BC (logged, no sim special case) ----
       if (bot.bc <= 0) this.submit('debug_add_bc', { amount: 100 });
@@ -252,6 +275,15 @@ export class SoloBot {
     );
     let warOrders = myWarships + queuedWarships;
     const myColonies = planned.colonies.filter((c) => c.owner === me && !c.outpost).length;
+    // command-point headroom: overage bleeds 10 BC/point/turn, and the
+    // tournament probe showed bots at cp 8/3 rebuilding dead warships into a
+    // permanent −30 BC/turn spiral. Only a rich treasury may run a deficit.
+    const cpSummary = selectors.empireSummary(planned, me);
+    // warlike profiles pay for menace: up to 4 points of overage (−40 BC/turn)
+    // is acceptable while the books are healthy — a hard gate left the
+    // militarist with zero warships (personalities distinctness gate)
+    const cpHeadroom =
+      cpSummary.cpSources - cpSummary.cpUsage + (prof.warlike && bot.bc > 100 ? 4 : 0);
     // v2 walks colonies by production so the shipyards get the military work
     const ordered = v2
       ? [...planned.colonies].sort((a, b) => {
@@ -262,18 +294,44 @@ export class SoloBot {
           return pb - pa || a.id - b.id;
         })
       : planned.colonies;
+    // v2 debt handling. Two levers, both reclaimed once solvent:
+    //   1. empire tax (prod -> BC at 2:1) while the treasury is negative —
+    //      the human's own fix in the benchmark game (set_tax_rate);
+    //   2. the strongest yards flip to trade goods, SCALED to the hole: the
+    //      297-turn tournament baseline showed one yard cannot out-earn an
+    //      empire-wide bleed (bots finished at −2000..−4600 BC, no fleet).
+    if (v2) {
+      const wantTax = bot.bc < -100 ? 30 : bot.bc < 0 ? 15 : 0;
+      if ((bot.taxRatePct ?? 0) !== wantTax) this.submit('set_tax_rate', { pct: wantTax });
+    }
+    const rescueYards = v2 && bot.bc < 0 ? Math.min(3, 1 + Math.floor(-bot.bc / 500)) : 0;
+    let yardRank = 0;
     for (const colony of ordered) {
       if (colony.owner !== me || colony.outpost) continue;
-      // developed worlds shift toward research; young ones industrialize
+      const rank = yardRank++;
+      const head0 = colony.queue[0]?.item;
+      // jobs: shipyard work keeps hands on the tools; developed worlds with
+      // nothing important to build flip to pure research (the tournament
+      // baseline plateaued at ~30 apps by turn 297 vs the human's 131 —
+      // industry/blend presets never freed the labs)
+      const buildingShips = !!head0 && (head0.startsWith('design:') || SHIP_BUILDABLES.has(head0));
+      const developed = colony.buildings.length >= 5;
       const techy = v2 && (prof.scienceBias >= 2 || colony.buildings.length >= 4);
-      const preset = techy ? 'blend' : 'industry';
+      const preset = v2 && developed && !buildingShips ? 'research' : techy ? 'blend' : 'industry';
       const jobs = selectors.presetJobs(planned, colony.id, preset);
       if (jobs) {
         // shift workers into research (kept fed). Every profile keeps at
-        // least one scientist: a scienceBias of 0 used to mean literally
-        // zero RP forever, which in a pre-warp start locks the empire out
-        // of colony ships, hulls and range tech for the entire game.
-        const shifts = v2 ? Math.max(1, prof.scienceBias) : 1;
+        // least one scientist — and GROWN colonies staff real labs (extra
+        // per 6 pop beyond the first 10): the tournament plateaued at ~38
+        // apps by turn 297 on token science, but front-loading scientists
+        // instead tanks the early economy (selfplay gate caught that).
+        const units = jobs.reduce((n, g) => n + g.farmers + g.workers + g.scientists, 0);
+        const shifts =
+          preset === 'research'
+            ? 0
+            : v2
+              ? Math.max(1, prof.scienceBias) + Math.max(0, Math.floor((units - 10) / 6))
+              : 1;
         for (let k = 0; k < shifts; k++) {
           const g = jobs.find((x) => x.workers > 0);
           if (g) {
@@ -283,18 +341,13 @@ export class SoloBot {
         }
         this.submit('set_jobs', { colonyId: colony.id, groups: jobs });
       }
-      // v2 debt rescue: a negative treasury bleeds forever (maintenance, CP
-      // overage, freighter upkeep). Flip the strongest yard to trade goods
-      // until solvent; the queue-empty branch below reclaims it once the
-      // books recover past a buffer (hysteresis).
-      if (v2 && colony === ordered[0]) {
-        const onTradeGoods = colony.queue[0]?.item === 'trade_goods';
-        if (bot.bc < 0 && !onTradeGoods) {
+      if (v2 && rank < rescueYards) {
+        if (bot.bc < 0 && head0 !== 'trade_goods') {
           this.submit('set_build_queue', { colonyId: colony.id, items: ['trade_goods'] });
           continue;
         }
-        if (onTradeGoods && bot.bc <= 50) continue; // still digging out
       }
+      if (v2 && head0 === 'trade_goods' && bot.bc <= 50) continue; // still digging out
       if (colony.queue.length === 0 || (v2 && colony.queue[0]?.item === 'trade_goods' && bot.bc > 50)) {
         const row = selectors.colonyRow(planned, colony);
         const options = row.buildable.filter((b) => b !== 'housing' && b !== 'trade_goods' && b !== 'spy');
@@ -317,17 +370,38 @@ export class SoloBot {
             .sort((a, b) => (itemCost(planned, me, a, colony) ?? 9999) - (itemCost(planned, me, b, colony) ?? 9999));
           const wantFleet = Math.ceil(myColonies * prof.fleetRatio);
           let item: string | undefined;
-          if (warOrders < wantFleet && designs.length) {
-            item = designs[0];
+          if (warOrders < wantFleet && designs.length && (cpHeadroom > warOrders - myWarships || bot.bc > 500)) {
+            // biggest hull this yard can finish in ~12 turns — cheapest-first
+            // meant frigate spam forever while the human fielded titans
+            const budget = (selectors.colonyRow(planned, colony).output.prodToQueue || 1) * 12;
+            const affordable = designs.filter((d) => (itemCost(planned, me, d, colony) ?? Infinity) <= budget);
+            item = affordable[affordable.length - 1] ?? designs[0];
             warOrders++;
+          } else if (
+            colony.buildings.length >= 4 &&
+            row.buildable.includes('housing') &&
+            row.popUnits * 10 < row.maxPop * 7
+          ) {
+            // people first: the benchmark human ran 197 pop by turn 297 vs
+            // the baseline bots' ~34 — pop drives prod, RP and BC, so an
+            // underpopulated world with its core built grows before it
+            // gold-plates (housing yields fade as the colony fills)
+            item = 'housing';
           } else if (buildings.length) {
             item = buildings[0];
           } else if (row.buildable.includes('housing') && row.popUnits + 2 < row.maxPop) {
             item = 'housing'; // fully built world with room: grow people
+          } else if (cpHeadroom > warOrders - myWarships && designs.length) {
+            item = designs[0];
+            warOrders++;
           } else {
-            item = designs[0] ?? options[Math.floor(rand() * options.length)];
+            // nothing to build and no command headroom: mint money instead —
+            // the ungated old fallback here queued (and bought!) a warship
+            // every single turn on tech-starved worlds, straight into the
+            // 10 BC/point CP-overage bleed
+            item = row.buildable.includes('trade_goods') ? 'trade_goods' : options[Math.floor(rand() * options.length)];
           }
-          if (item) this.submit('set_build_queue', { colonyId: colony.id, items: [item] });
+          if (item && colony.queue[0]?.item !== item) this.submit('set_build_queue', { colonyId: colony.id, items: [item] });
         } else {
           const item = options[Math.floor(rand() * options.length)]!;
           this.submit('set_build_queue', { colonyId: colony.id, items: [item] });
@@ -352,10 +426,17 @@ export class SoloBot {
     // parity bot's debug catch-up above only fires when the human is AHEAD;
     // without this it never used the colony ships it built and sat on one
     // system while the human matched its colony count. ----
-    this.fairExpansion(me);
+    this.fairExpansion(me, alwaysWar);
 
-    // ---- aggression: half the warfleet at the human's two nearest systems ----
-    if (alwaysWar) this.attack(state, me, human.id);
+    // ---- aggression: strike fleets + ground invasions. Bombard softens a
+    // colony but never kills the last pop unit — the 1000-turn tournament
+    // proved fleets of 100+ cannot END a war without boots: every one of 38
+    // matches timed out. Landings auto-resolve when loaded transports reach
+    // an enemy colony star with no defending warships. ----
+    if (alwaysWar) {
+      this.attack(state, me, human.id);
+      this.invade(planned, me, human.id, myWarships);
+    }
   }
 
   /** Non-cheating expansion: settle with real colony ships. Colony ships at a
@@ -365,7 +446,7 @@ export class SoloBot {
    * from the start, needs no ship and no fuel range (the human's very first
    * build in the turn-297 save was a colony_base; the old brain never queued
    * projects at all and left a free planet sitting in its home system). */
-  private fairExpansion(me: number): void {
+  private fairExpansion(me: number, alwaysWar = false): void {
     const planned = this.session.getPlanned();
     if (!planned) return;
     for (const colony of planned.colonies) {
@@ -411,10 +492,12 @@ export class SoloBot {
       if (dest) this.submit('move_ships', { shipIds: [ship.id], destStarId: dest.starId });
     }
 
-    // outpost ships extend the fuel network toward whatever we cannot reach
-    // yet (free systems or the enemy) — without them a distant start leaves
-    // the bot permanently cordoned inside its 4-parsec bubble
-    this.extendRange(planned, me, freePlanets);
+    // outpost ships extend the fuel network — but only when actually cordoned
+    // (no reachable free system, or nothing left to settle and the enemy is
+    // out of range). An unconditional chain starved the shipyards: a new
+    // outpost/colony prepend every few turns kept the queued warship third
+    // in line forever (militarist finished with zero warships).
+    this.extendRange(planned, me, freePlanets, alwaysWar);
     // keep colony ships in the pipeline while there is room to grow —
     // the tuned brain runs TWO yards at once (expansion wins games)
     const queued = planned.colonies.reduce(
@@ -440,29 +523,46 @@ export class SoloBot {
   /** Outpost stepping-stones: when wanted stars (free systems, the enemy)
    * sit outside fuel range, keep one outpost ship working its way toward
    * them — each outpost anchors the fuel network and widens the bubble. */
-  private extendRange(planned: GameState, me: number, freePlanets: Array<{ starId: number }>): void {
+  private extendRange(planned: GameState, me: number, freePlanets: Array<{ starId: number }>, wantWar: boolean): void {
     const anchor = planned.colonies.find((c) => c.owner === me && !c.outpost);
     if (!anchor) return;
     const anchorPlanet = planned.planets.find((p) => p.id === anchor.planetId);
     if (!anchorPlanet) return;
     const options = selectors.moveOptions(planned, me, anchorPlanet.starId);
-    const wanted = new Set<number>(freePlanets.map((p) => p.starId));
+    const reachable = new Set(options.filter((o) => o.reachable).map((o) => o.starId));
+    const myAnchorStars = new Set<number>();
+    for (const c of planned.colonies) {
+      if (c.owner !== me) continue;
+      const p = planned.planets.find((x) => x.id === c.planetId);
+      if (p) myAnchorStars.add(p.starId);
+    }
+    // chain only when actually cordoned: settling blocked, or (warpath with
+    // nothing left to settle) the enemy out of range — an unconditional
+    // chain starved the shipyards with a fresh outpost prepend every cycle
+    const freeBlocked =
+      freePlanets.length > 0 &&
+      !freePlanets.some((p) => reachable.has(p.starId) || myAnchorStars.has(p.starId));
+    const enemyStars = new Set<number>();
     for (const c of planned.colonies) {
       if (c.owner === me) continue;
       const p = planned.planets.find((x) => x.id === c.planetId);
-      if (p) wanted.add(p.starId);
+      if (p) enemyStars.add(p.starId);
     }
+    const enemyBlocked =
+      wantWar && freePlanets.length === 0 && enemyStars.size > 0 && ![...enemyStars].some((id) => reachable.has(id));
+    const wanted = freeBlocked ? new Set(freePlanets.map((p) => p.starId)) : enemyStars;
     const unreachable = options.filter((o) => !o.reachable && wanted.has(o.starId));
-    if (!unreachable.length) return;
-    const goal = planned.stars.find((s) => s.id === unreachable[0]!.starId)!;
-
-    // sail/plant existing outpost ships: settle here if possible, otherwise
-    // head for the reachable star with an unsettled body nearest the goal
+    // already-built ships always plant or keep moving (an idle hull is pure
+    // upkeep); the goal falls back to home so strays settle nearby
+    const goal = unreachable.length
+      ? planned.stars.find((s) => s.id === unreachable[0]!.starId)!
+      : planned.stars.find((s) => s.id === anchorPlanet.starId)!;
     let sailing = 0;
     for (const row of selectors.fleetRows(planned, me)) {
       if (row.kind !== 'outpost_ship') continue;
-      if (row.canOutpostHere.length) {
+      if (row.canOutpostHere.length && row.atStarId !== null && !myAnchorStars.has(row.atStarId)) {
         this.submit('build_outpost', { shipId: row.ship.id, planetId: row.canOutpostHere[0] });
+        myAnchorStars.add(row.atStarId);
         sailing++;
         continue;
       }
@@ -475,6 +575,7 @@ export class SoloBot {
         .filter(
           (o) =>
             o.reachable &&
+            !myAnchorStars.has(o.starId) &&
             planned.planets.some(
               (p) => p.starId === o.starId && !planned.colonies.some((c) => c.planetId === p.id),
             ) &&
@@ -491,6 +592,7 @@ export class SoloBot {
       }
     }
     if (sailing > 0) return;
+    if (!freeBlocked && !enemyBlocked) return; // not cordoned: build no new hulls
 
     // none in flight: put one on the strongest yard that can build it
     const queued = planned.colonies.some(
@@ -503,6 +605,90 @@ export class SoloBot {
       .filter((r) => r.buildable.includes('outpost_ship'))
       .sort((a, b) => (b.output.prodToQueue || b.output.prod) - (a.output.prodToQueue || a.output.prod))[0];
     if (yard) this.submit('set_build_queue', { colonyId: yard.id, items: ['outpost_ship', ...yard.queue] });
+  }
+
+  /** Ground war: keep a small troop lift, load 2-unit marine detachments at
+   * big rear colonies, and land them wherever the warfleet has cleared the
+   * sky over an enemy colony (landings resolve automatically). */
+  private invade(planned: GameState, me: number, enemyId: number, myWarships: number): void {
+    const starOf = (planetId: number) => planned.planets.find((p) => p.id === planetId)?.starId ?? null;
+    const enemyColonies = planned.colonies.filter((c) => c.owner === enemyId && !c.outpost);
+    if (!enemyColonies.length) return;
+    const myWarAt = new Set<number>();
+    const theirGuardAt = new Set<number>();
+    for (const s of planned.ships) {
+      if (s.location.kind !== 'star') continue;
+      if (s.owner === me && s.shipKind === 'design') myWarAt.add(s.location.starId);
+      if (s.owner === enemyId && (s.shipKind === 'design' || s.shipKind === 'scout')) theirGuardAt.add(s.location.starId);
+    }
+    // cleared targets, weakest militia first — landings must arrive as ONE
+    // wave big enough to win (piecemeal 2-troop drops just get repelled and
+    // burn the marines; the 600-turn mirror took 100 turns per colony that way)
+    const clearedTargets = enemyColonies
+      .map((c) => {
+        const sid = starOf(c.planetId);
+        const pop = c.groups.reduce((n, g) => n + Math.floor(g.popK / 1000), 0);
+        const militia = Math.ceil(pop / 2) + (c.buildings.includes('marine_barracks') ? 2 : 0);
+        return { starId: sid, militia };
+      })
+      .filter((t): t is { starId: number; militia: number } => t.starId !== null && myWarAt.has(t.starId!) && !theirGuardAt.has(t.starId!))
+      .sort((a, b) => a.militia - b.militia || a.starId - b.starId);
+    const targetStars = new Set(clearedTargets.map((t) => t.starId));
+    const best = clearedTargets[0] ?? null;
+
+    const transports = planned.ships.filter((s) => s.owner === me && s.shipKind === 'transport');
+    const loadedIdle = transports.filter(
+      (t) => t.cargoPopUnits > 0 && t.location.kind === 'star' && !targetStars.has(t.location.starId),
+    );
+    const waveTroops = loadedIdle.reduce((n, t) => n + t.cargoPopUnits, 0);
+    if (best && waveTroops > best.militia + 2) {
+      // launch the whole wave at the weakest cleared colony
+      for (const t of loadedIdle) {
+        if (t.location.kind === 'star' && t.location.starId === best.starId) continue;
+        this.submit('move_ships', { shipIds: [t.id], destStarId: best.starId });
+      }
+    }
+    for (const t of transports) {
+      if (t.location.kind !== 'star') continue;
+      const here = t.location.starId;
+      if (t.cargoPopUnits > 0) continue; // loaded lifts wait for the wave
+      // empty lift: draft marines from a big colony here, else head home
+      const source = planned.colonies.find((c) => {
+        if (c.owner !== me || c.outpost || starOf(c.planetId) !== here) return false;
+        const own = c.groups.find((g) => g.race === me && !g.unrest);
+        return !!own && Math.floor(own.popK / 1000) > 6;
+      });
+      if (source) {
+        this.submit('load_transports', { colonyId: source.id, shipId: t.id });
+        continue;
+      }
+      const dest = selectors.moveOptions(planned, me, here).find(
+        (o) =>
+          o.reachable &&
+          planned.colonies.some((c) => {
+            if (c.owner !== me || c.outpost || starOf(c.planetId) !== o.starId) return false;
+            const own = c.groups.find((g) => g.race === me && !g.unrest);
+            return !!own && Math.floor(own.popK / 1000) > 6;
+          }),
+      );
+      if (dest) this.submit('move_ships', { shipIds: [t.id], destStarId: dest.starId });
+    }
+
+    // troop-lift pipeline: sized to storm the weakest cleared target in one
+    // wave (2 troops per hull), only once a real fleet exists (transports
+    // are helpless alone), appended so it never starves the slipway
+    const wantLift = Math.min(8, Math.max(3, Math.ceil(((best?.militia ?? 8) + 3) / 2)));
+    const queued = planned.colonies.reduce(
+      (n, c) => n + (c.owner === me ? c.queue.filter((q) => q.item === 'transport').length : 0),
+      0,
+    );
+    if (myWarships < 4 || transports.length + queued >= wantLift) return;
+    const yard = planned.colonies
+      .filter((c) => c.owner === me && !c.outpost)
+      .map((c) => selectors.colonyRow(planned, c))
+      .filter((r) => r.buildable.includes('transport') && !r.queue.includes('transport'))
+      .sort((a, b) => (b.output.prodToQueue || b.output.prod) - (a.output.prodToQueue || a.output.prod))[0];
+    if (yard) this.submit('set_build_queue', { colonyId: yard.id, items: [...yard.queue, 'transport'] });
   }
 
   private nearestFreePlanet(state: GameState, me: number): number | null {
@@ -566,7 +752,7 @@ export class SoloBot {
     const targets = [...humanStars]
       .filter((id) => reach.has(id) || warships.some((s) => s.location.kind === 'star' && s.location.starId === id))
       .sort((a, b) => near(a) - near(b))
-      .slice(0, 2);
+      .slice(0, Math.min(4, 2 + Math.floor(warships.length / 12)));
     if (!targets.length) return;
     // commit three quarters of the fleet — half split across two targets
     // was too timid to ever crack a defended system
