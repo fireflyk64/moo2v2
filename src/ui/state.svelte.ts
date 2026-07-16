@@ -232,6 +232,7 @@ export function leaveGame(): void {
   app.version++;
   if (!g) return;
   g.solo?.close();
+  for (const b of g.soloBots) b.close(); // close() is idempotent (solo = soloBots[0])
   for (const b of g.bots) b.close();
   void (async () => {
     // play-by-mail: final upload + lock release must finish BEFORE the store

@@ -41,8 +41,10 @@ export interface ActiveGame {
   memoryOnly: boolean;
   params: RoomParams;
   startGame: () => void;
-  /** single-player mode: the bot opponent (aggression toggle lives here) */
+  /** single-player mode: the first bot opponent (legacy aggression handle) */
   solo: SoloBot | null;
+  /** single-player mode: ALL local bot opponents (1..N, in seat order) */
+  soloBots: SoloBot[];
   /** bots subbed in for absent players (host only; name-matched to seats) */
   bots: SoloBot[];
   /** play-by-mail session info (set by enterPbmGame); null in normal games */
@@ -189,6 +191,7 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
       params,
       startGame: () => hosted.host.startGame(generateSeed()),
       solo: null,
+      soloBots: [],
       bots: [],
       pbm: null,
     };
@@ -220,23 +223,39 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
       throw new Error('only the host can start');
     },
     solo: null,
+    soloBots: [],
     bots: [],
     pbm: null,
   };
 }
 
-/** Single-player mode: an in-process game against the simple bot — no
- * lobbylink server, no WebRTC. Persists like any room (code SOLO), so a
- * reload resumes the campaign. */
+/** Per-bot setup for solo games: play-style plus the scenario dressing
+ * (race archetype/preset, banner color, fleet silhouette). */
+export interface SoloBotSpec {
+  personality?: BotPersonality | 'auto';
+  /** archetype id (botRaces.ts) or stock preset id; SoloBot defaults hivex */
+  race?: string;
+  /** banner color #rrggbb */
+  color?: string;
+  /** fleet silhouette (shipstyles.ts id) */
+  shipStyle?: string;
+}
+
+/** Single-player mode: an in-process game against one or more bots — no
+ * lobbylink server, no WebRTC (every bot is a local MemoryHub session).
+ * Persists like any room (code SOLO), so a reload resumes the campaign;
+ * bots keep their stable names (Bot, Bot 2, ...) so resume re-seats them. */
 export async function enterSoloGame(
   name: string,
   botMode: BotMode = 'parity',
   personality: BotPersonality | 'auto' = 'militarist',
+  botSpecs?: SoloBotSpec[],
 ): Promise<ActiveGame> {
-  const params: RoomParams = { server: 'local', code: 'SOLO', name, playerCount: 2 };
-  const hub = new MemoryHub(2);
+  const specs: SoloBotSpec[] = botSpecs?.length ? botSpecs : [{ personality }];
+  const playerCount = 1 + specs.length;
+  const params: RoomParams = { server: 'local', code: 'SOLO', name, playerCount };
+  const hub = new MemoryHub(playerCount);
   const hostTransport = hub.join();
-  const botTransport = hub.join();
 
   const { store, sqlocal, memoryOnly } = await openRoomStore(params.code);
 
@@ -257,17 +276,26 @@ export async function enterSoloGame(
     store,
     // debugCommands power the parity bot's logged "grants" — the sim has no
     // bot cases; the fair bot never uses them
-    settings: { ...DEFAULT_SETTINGS, playerCount: 2, debugCommands: botMode === 'parity' },
+    settings: { ...DEFAULT_SETTINGS, playerCount, debugCommands: botMode === 'parity' },
     identity,
     ...(resume && resume.log.length ? { resume: { gameId: resume.gameId, log: resume.log } } : {}),
   });
-  const botSession = joinGame<GameState>({
-    transport: botTransport,
-    engine: createGameEngine() as unknown as EngineAdapter<GameState>,
-    store: null, // the human's store records the game; the bot keeps nothing
-    identity: { ...identity, name: 'Bot' },
+  const soloBots = specs.map((spec, i) => {
+    const botSession = joinGame<GameState>({
+      transport: hub.join(),
+      engine: createGameEngine() as unknown as EngineAdapter<GameState>,
+      store: null, // the human's store records the game; the bots keep nothing
+      identity: { ...identity, name: i === 0 ? 'Bot' : `Bot ${i + 1}` },
+    });
+    return new SoloBot({
+      session: botSession,
+      mode: botMode,
+      personality: spec.personality ?? personality,
+      ...(spec.race ? { race: spec.race } : {}),
+      ...(spec.color ? { color: spec.color } : {}),
+      ...(spec.shipStyle ? { shipStyle: spec.shipStyle } : {}),
+    });
   });
-  const solo = new SoloBot({ session: botSession, mode: botMode, personality });
 
   return {
     transport: hostTransport,
@@ -278,7 +306,8 @@ export async function enterSoloGame(
     memoryOnly,
     params,
     startGame: () => hosted.host.startGame(generateSeed()),
-    solo,
+    solo: soloBots[0] ?? null,
+    soloBots,
     bots: [],
     pbm: null,
   };

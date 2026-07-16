@@ -47,11 +47,25 @@ function bestSkill(empire: Empire, skill: LeaderSkillId): number {
   return best;
 }
 
-/** Colony-scope modifiers from the leader assigned to this colony (if any). */
-export function leaderColonyModifiers(empire: Empire, colonyId: number): Modifier[] {
+/** Colony-scope modifiers from colony leaders administering this colony's
+ * star system. Colony leaders are system administrators (MOO2 rule, bugs.md):
+ * a leader stationed at ANY of the empire's colonies in a system boosts every
+ * colony of that empire in the same system, not just their seat. */
+export function leaderColonyModifiers(state: GameState, empire: Empire, colonyId: number): Modifier[] {
+  const starOf = (cid: number): number | undefined => {
+    const col = state.colonies.find((c) => c.id === cid);
+    if (!col) return undefined;
+    return state.planets.find((p) => p.id === col.planetId)?.starId;
+  };
+  const myStar = starOf(colonyId);
   const mods: Modifier[] = [];
   for (const hired of empire.leaders) {
-    if (hired.colonyId !== colonyId) continue;
+    if (hired.colonyId === null) continue;
+    if (hired.colonyId !== colonyId) {
+      // system administration reaches sibling colonies the empire still owns
+      if (myStar === undefined || starOf(hired.colonyId) !== myStar) continue;
+      if (!state.colonies.some((c) => c.id === hired.colonyId && c.owner === empire.id)) continue;
+    }
     const row = leaderById.get(hired.leaderId);
     if (!row) continue;
     for (const sk of row.skills) {

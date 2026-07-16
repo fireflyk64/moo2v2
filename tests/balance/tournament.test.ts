@@ -43,6 +43,10 @@ const TURNS = Number(process.env['TOURNEY_TURNS'] ?? 297);
 const SEEDS = (process.env['TOURNEY_SEEDS'] ?? SOLO_SEED).split(',');
 const PHASES = (process.env['TOURNEY_PHASES'] ?? 'races,rr').split(',');
 const RACES = (process.env['TOURNEY_RACES'] ?? 'solari,ferron,lithor,hivex').split(',');
+// pick-point budget for every match; the arch phase is where it matters
+const PICKS = Number(process.env['TOURNEY_PICKS'] ?? 10);
+// budget-scaling bot archetypes (botRaces.ts) for the 'arch' phase
+const ARCHS = (process.env['TOURNEY_ARCHS'] ?? 'forgers,scholars,lithovores,cyborgs,creatives').split(',');
 const CHECKPOINTS = [...new Set([100, 200, 297, 500, TURNS])].filter((t) => t <= TURNS);
 const SEATINGS = Number(process.env['TOURNEY_SEATINGS'] ?? 2);
 const [SHARD_K, SHARD_N] = (process.env['TOURNEY_SHARD'] ?? '0/1').split('/').map(Number) as [number, number];
@@ -50,7 +54,7 @@ const PERSONALITIES: BotPersonality[] = ['balanced', 'techer', 'rusher', 'indust
 
 interface SeatCfg {
   personality: BotPersonality;
-  race: string; // preset id
+  race: string; // stock preset id OR bot archetype id (botRaces.ts)
 }
 
 interface SeatStats {
@@ -74,6 +78,17 @@ interface MatchResult {
   winner: number | null;
   checkpoints: Record<number, [SeatStats, SeatStats]>;
   final: [SeatStats, SeatStats];
+  /** % of the galaxy's planets claimed (colonies + outposts) at game end —
+   * the design goal is a pretty much FULL map by the time a game concludes */
+  mapFullPct: number;
+}
+
+function mapFullPct(state: GameState): number {
+  // real planets only, both sides of the ratio — outposts on asteroid belts
+  // and gas giants otherwise push a full map past 100%
+  const planetIds = new Set(state.planets.filter((p) => p.body === 'planet').map((p) => p.id));
+  const claimed = state.colonies.filter((c) => planetIds.has(c.planetId)).length;
+  return planetIds.size ? Math.round((claimed * 100) / planetIds.size) : 0;
 }
 
 function seatStats(state: GameState, id: number): SeatStats {
@@ -112,23 +127,26 @@ async function runMatch(phase: string, seed: string, a: SeatCfg, b: SeatCfg): Pr
       debugCommands: false,
       galaxySize: 'medium',
       startMode: 'pre_warp',
+      pickPoints: PICKS,
     },
     identity: identity('A'),
   });
   const client = joinGame<GameState>({ transport: hub.join(), engine, store: null, identity: identity('B') });
+  // race goes through the SoloBot `race` option (the production code path):
+  // archetype ids rescale to the match's pickPoints, preset ids stay fixed
   const botA = new SoloBot({
     session: hosted.session,
     mode: 'fair',
     brain: 'v2',
     personality: a.personality,
-    raceJson: JSON.stringify({ presetId: a.race }),
+    race: a.race,
   });
   const botB = new SoloBot({
     session: client,
     mode: 'fair',
     brain: 'v2',
     personality: b.personality,
-    raceJson: JSON.stringify({ presetId: b.race }),
+    race: b.race,
   });
   botA.setAggressive(true);
   botB.setAggressive(true);
@@ -170,6 +188,7 @@ async function runMatch(phase: string, seed: string, a: SeatCfg, b: SeatCfg): Pr
     winner: final.winner,
     checkpoints,
     final: [seatStats(final, 0), seatStats(final, 1)],
+    mapFullPct: mapFullPct(final),
   };
 }
 
@@ -203,7 +222,7 @@ describe.runIf(enabled)('AI tournament', () => {
         console.log(
           `[${phase}] ${a.personality}/${a.race} vs ${b.personality}/${b.race} seed=${seed.slice(0, 8)} ` +
             `t${r.finalTurn}${r.stalled ? ' STALL' : ''} winner=${r.winner ?? '-'} ` +
-            `A=${fmt(r.final[0])} B=${fmt(r.final[1])} ${(r.ms / 1000).toFixed(0)}s`,
+            `A=${fmt(r.final[0])} B=${fmt(r.final[1])} map=${r.mapFullPct}% ${(r.ms / 1000).toFixed(0)}s`,
         );
         return r;
       };
@@ -215,6 +234,16 @@ describe.runIf(enabled)('AI tournament', () => {
             const cfg: SeatCfg = { personality: 'balanced', race };
             await play('races', seed, cfg, baseline); // race in the human's seat
             if (SEATINGS > 1) await play('races', seed, baseline, cfg); // race in the bot's seat
+          }
+        }
+      }
+      if (PHASES.includes('arch')) {
+        // budget-scaling archetypes vs the stock baseline, at PICKS points
+        for (const seed of SEEDS) {
+          for (const arch of ARCHS) {
+            const cfg: SeatCfg = { personality: 'balanced', race: arch };
+            await play('arch', seed, cfg, baseline);
+            if (SEATINGS > 1) await play('arch', seed, baseline, cfg);
           }
         }
       }
@@ -260,6 +289,24 @@ describe.runIf(enabled)('AI tournament', () => {
         }
         lines.push('');
       }
+      if (PHASES.includes('arch')) {
+        lines.push(`## Archetype gauntlet (vs balanced solari, ${PICKS} pick points)`, '');
+        lines.push('| archetype | seat | t100 | t200 | final | map | result |', '|---|---|---|---|---|---|---|');
+        for (const r of results.filter((x) => x.phase === 'arch')) {
+          const archSeat = r.a.race !== 'solari' ? 0 : 1;
+          const s = (t: number) => (r.checkpoints[t] ? fmt(r.checkpoints[t]![archSeat as 0 | 1]) : '—');
+          const fin = r.final[archSeat as 0 | 1];
+          const arch = archSeat === 0 ? r.a.race : r.b.race;
+          const outcome = r.winner === null ? 'timeout' : r.winner === archSeat ? 'WIN' : 'loss';
+          lines.push(`| ${arch} | ${archSeat} | ${s(100)} | ${s(200)} | ${fmt(fin)} | ${r.mapFullPct}% | ${outcome} |`);
+          const mid = r.checkpoints[200]?.[archSeat as 0 | 1];
+          if (mid && (mid.colonies < 3 || mid.apps < 20)) {
+            violations.push(`arch: ${arch} (seat ${archSeat}) underdeveloped at t200: ${fmt(mid)}`);
+          }
+          if (r.stalled) violations.push(`arch: ${arch} (seat ${archSeat}) match stalled at t${r.finalTurn}`);
+        }
+        lines.push('');
+      }
       if (PHASES.includes('rr')) {
         lines.push('## Personality round-robin (solari mirror)', '');
         const table = new Map<string, { pts: number; wins: number; games: number; score: number }>();
@@ -294,6 +341,12 @@ describe.runIf(enabled)('AI tournament', () => {
           );
         }
         lines.push('');
+      }
+      // map fullness: games should end on a PRETTY MUCH FULL map — a low
+      // average says the bots stopped expanding, not that the galaxy ran out
+      if (results.length) {
+        const avgFull = Math.round(results.reduce((n, r) => n + r.mapFullPct, 0) / results.length);
+        lines.push(`## Map fullness`, '', `average ${avgFull}% of planets claimed at game end (per-match min ${Math.min(...results.map((r) => r.mapFullPct))}%, max ${Math.max(...results.map((r) => r.mapFullPct))}%)`, '');
       }
       if (violations.length) {
         lines.push('## Violations', '', ...violations.map((v) => `- ${v}`), '');

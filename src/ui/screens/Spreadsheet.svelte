@@ -182,14 +182,20 @@
       submitNoted('set_build_queue', { colonyId: row.id, items });
     }
   }
+  // UNION of the selection's buildables, with a how-many-will-get-it count.
+  // The old intersection hid climate-limited buildings entirely: one barren
+  // (or already-enriched) colony in the selection and soil enrichment
+  // vanished from the menu even for the terran/arid worlds that wanted it
+  // (bugs.md). bulkBuild/bulkQueue already skip colonies that can't take
+  // the item, so offering the union is safe.
   const bulkOptions = $derived.by(() => {
     const chosen = rows.filter((r) => selected.has(r.id));
     if (!chosen.length) return [];
-    const common = new Set(chosen[0]!.buildable);
-    for (const r of chosen.slice(1)) {
-      for (const item of [...common]) if (!r.buildable.includes(item)) common.delete(item);
-    }
-    return [...common].sort();
+    const counts = new Map<string, number>();
+    for (const r of chosen) for (const item of r.buildable) counts.set(item, (counts.get(item) ?? 0) + 1);
+    return [...counts.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([item, n]) => ({ item, n, total: chosen.length }));
   });
   const selectableRows = $derived(rows.filter((r) => !r.outpost));
   function selectAllFiltered() {
@@ -405,7 +411,7 @@
       }}
     >
       <option value="">set build for all…</option>
-      {#each bulkOptions as item (item)}<option value={item}>{label(item)}</option>{/each}
+      {#each bulkOptions as o (o.item)}<option value={o.item}>{label(o.item)}{o.n < o.total ? ` (${o.n} of ${o.total})` : ''}</option>{/each}
     </select>
     <select
       data-testid="bulk-queue-front"
@@ -417,7 +423,7 @@
       }}
     >
       <option value="">⤴ queue next for all…</option>
-      {#each bulkOptions as item (item)}<option value={item}>{label(item)}</option>{/each}
+      {#each bulkOptions as o (o.item)}<option value={o.item}>{label(o.item)}{o.n < o.total ? ` (${o.n} of ${o.total})` : ''}</option>{/each}
     </select>
     <select
       data-testid="bulk-queue-back"
@@ -429,7 +435,7 @@
       }}
     >
       <option value="">⤵ queue last for all…</option>
-      {#each bulkOptions as item (item)}<option value={item}>{label(item)}</option>{/each}
+      {#each bulkOptions as o (o.item)}<option value={o.item}>{label(o.item)}{o.n < o.total ? ` (${o.n} of ${o.total})` : ''}</option>{/each}
     </select>
     <span class="presets">
       jobs:
@@ -451,11 +457,15 @@
     <span
       class="research"
       data-testid="research-readout"
-      title="current research — updates live as you reassign citizens (progress % is banked RP vs the listed cost; the turn estimate uses the research per turn shown here)"
+      title="current research — updates live as you reassign citizens. '% of base' is banked RP vs the listed cost; the real discovery point hides between 1× and 2× that, so once the base is covered this switches to the actual chance of discovering by next turn"
     >
       {#if research.sum.researching}
         🔬 {pretty(research.sum.researching)}{research.sum.researchTarget ? ` → ${pretty(research.sum.researchTarget)}` : ''}
-        · {research.accumRP}/{research.sum.researchListedCost ?? '?'} RP{research.sum.researchProgressPct !== null ? ` (${research.sum.researchProgressPct}%)` : ''}
+        · {research.accumRP}/{research.sum.researchListedCost ?? '?'} RP{research.sum.researchOddsPct > 0
+          ? ` (${research.sum.researchOddsPct}% chance)`
+          : research.sum.researchProgressPct !== null
+            ? ` (${research.sum.researchProgressPct}% of base)`
+            : ''}
         · +{research.sum.researchPerTurn}/turn{research.sum.researchTurnsLeft !== null ? ` · ~${research.sum.researchTurnsLeft}t` : ''}
       {:else}
         🔬 <span class="neg">no research selected</span> · +{research.sum.researchPerTurn}/turn banked
@@ -464,6 +474,11 @@
   {/if}
 </div>
 
+<!-- bugs.md: the autopilot bar cluttered every visit to the colony screen.
+     It appears only alongside a full select-all (its scope is every colony
+     anyway) — but once ENABLED it stays visible so it can always be seen,
+     adjusted and switched off. -->
+{#if app.autopilot.enabled || (selectableRows.length > 0 && selectableRows.every((r) => selected.has(r.id)))}
 <div class="bar autopilot" data-testid="autopilot-bar">
   <label title="Slider autopilot: five weights run every colony each turn (jobs, buildings, housing, colony ships, warships) so you only manage research, ships and the map. Your manual queue edits stick until the next turn opens.">
     <input
@@ -505,6 +520,7 @@
     {/each}
   {/if}
 </div>
+{/if}
 
 <table data-testid="colony-table">
   <thead>

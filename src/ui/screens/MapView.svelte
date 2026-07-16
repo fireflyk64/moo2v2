@@ -472,6 +472,35 @@
       : [...selectedShipIds, id];
   }
 
+  // ---- fleet-selection hotkeys (bugs.md: ordering ships around was a
+  // checkmark game). A = select all / none at the selected star; Backspace
+  // cycles ship1 -> ship2 -> ... -> all, for peeling single ships off fast.
+  function selectAllShips() {
+    const ids = shipsHere.map((f) => f.ship.id);
+    const allIn = ids.length > 0 && ids.every((id) => selectedShipIds.includes(id));
+    selectedShipIds = allIn ? [] : ids;
+  }
+  function cycleShipSelection() {
+    const ids = shipsHere.map((f) => f.ship.id);
+    if (!ids.length) return;
+    const idx = selectedShipIds.length === 1 ? ids.indexOf(selectedShipIds[0]!) : -1;
+    if (idx >= 0 && idx < ids.length - 1) selectedShipIds = [ids[idx + 1]!];
+    else if (idx === ids.length - 1) selectedShipIds = [...ids];
+    else selectedShipIds = [ids[0]!];
+  }
+  function onMapKey(e: KeyboardEvent) {
+    const t = e.target as HTMLElement | null;
+    const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    if (typing || !shipsHere.length) return;
+    if (e.key === 'a' || e.key === 'A') {
+      e.preventDefault();
+      selectAllShips();
+    } else if (e.key === 'Backspace') {
+      e.preventDefault();
+      cycleShipSelection();
+    }
+  }
+
   function colonize(shipId: number, planetId: number) {
     const res = session().submit('colonize', { shipId, planetId });
     if (res.error) showNote(`⛔ ${res.error}`);
@@ -633,6 +662,8 @@
   }
   const prettify = (id: string) => id.replaceAll('_', ' ');
 </script>
+
+<svelte:window onkeydown={onMapKey} />
 
 <div class="wrap">
   <div class="mapcol">
@@ -1039,8 +1070,8 @@
       </ul>
       {#if shipsHere.length}
         <h4>
-          Your ships here
-          <label class="selall" title="select every ship at this system">
+          Your ships here <span class="dim keys" title="hotkeys: A selects all/none · Backspace cycles through single ships (then all)">A=all · ⌫=cycle</span>
+          <label class="selall" title="select every ship at this system (hotkey: A)">
             <input
               type="checkbox"
               data-testid="select-all-ships"
@@ -1102,6 +1133,11 @@
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
+  }
+  .keys {
+    font-size: 0.68rem;
+    font-weight: 400;
+    letter-spacing: 0.02em;
   }
   .foefleet {
     font-size: 0.8rem;

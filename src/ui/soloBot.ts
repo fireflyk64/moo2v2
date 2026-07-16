@@ -19,6 +19,7 @@ import { selectors, starDistance } from '@engine/index';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import type { GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
+import { botRaceById, botRacePicks } from './botRaces';
 
 export type BotMode = 'parity' | 'fair';
 /** fair-bot strategy generation: v1 = the original random-build brain (kept
@@ -72,6 +73,7 @@ export const BUILD_ORDER = [
 
 export interface SoloBotOptions {
   session: GameSession<GameState>;
+  /** explicit race config: wins over `race`; never rescaled to the budget */
   raceJson?: string;
   /** 'parity' (default) uses logged debug grants; 'fair' never cheats */
   mode?: BotMode;
@@ -79,6 +81,14 @@ export interface SoloBotOptions {
   brain?: BotBrain;
   /** play-style; 'auto' picks one deterministically from the seat */
   personality?: BotPersonality | 'auto';
+  /** bot race: an archetype id (botRaces.ts, rescales to the lobby's pick
+   * budget) or a stock preset id; default the hivex preset */
+  race?: string;
+  /** banner color (#rrggbb) — rides the raceJson like a human's choice */
+  color?: string;
+  /** fleet silhouette (shipstyles.ts id) — submitted as set_ship_style on
+   * the bot's first turn, exactly like a human using the Empires screen */
+  shipStyle?: string;
 }
 
 /** deterministic-enough tiny PRNG for bot whims (commands are logged anyway) */
@@ -101,6 +111,11 @@ export class SoloBot {
   private lastPlayedTurn = 0;
   private orderedBattles = new Set<string>();
   private unsub: (() => void) | null = null;
+  private readonly explicitRaceJson: string | null;
+  private readonly race: string | null;
+  private readonly color: string | null;
+  private readonly shipStyle: string | null;
+  private styleSubmitted = false;
 
   constructor(opts: SoloBotOptions) {
     this.session = opts.session;
@@ -110,19 +125,48 @@ export class SoloBot {
     // resolved lazily once the seat is assigned (auto varies by seat)
     this.personality = this.requestedPersonality === 'auto' ? 'balanced' : this.requestedPersonality;
     this.profile = PROFILES[this.personality];
-    const raceJson = opts.raceJson ?? JSON.stringify({ presetId: 'hivex' });
-    this.session.setRaceConfig(raceJson, true);
+    this.explicitRaceJson = opts.raceJson ?? null;
+    this.race = opts.race ?? null;
+    this.color = opts.color ?? null;
+    this.shipStyle = opts.shipStyle ?? null;
+    this.session.setRaceConfig(this.desiredRaceJson(), true);
     this.unsub = this.session.subscribe((ev) => {
       if (ev.type === 'lobby') {
-        // re-ready only while the roster does not yet show us ready — an
-        // unconditional send here would echo lobby updates forever
+        // re-send only while the roster disagrees with what we want — an
+        // unconditional send here would echo lobby updates forever. The
+        // comparison also rescales archetype picks whenever the host changes
+        // the pick-point setting (desiredRaceJson reads the live settings).
         const self = this.session.getRoster().find((p) => p.id === this.session.playerId);
-        if (self && (!self.ready || !self.raceJson)) this.session.setRaceConfig(raceJson, true);
+        const desired = this.desiredRaceJson();
+        if (self && (!self.ready || self.raceJson !== desired)) this.session.setRaceConfig(desired, true);
       }
       if (ev.type === 'started' || ev.type === 'turn-advanced' || ev.type === 'state' || ev.type === 'commit-status') {
         this.maybePlay();
       }
     });
+  }
+
+  /** The raceJson this bot wants right now: an explicit raceJson verbatim-ish
+   * (color/style merged in), an archetype scaled to the CURRENT pick budget,
+   * or a stock preset — always the same string for the same inputs, so the
+   * lobby-echo guard above can compare against the roster. */
+  private desiredRaceJson(): string {
+    const cfg: Record<string, unknown> = this.explicitRaceJson
+      ? (JSON.parse(this.explicitRaceJson) as Record<string, unknown>)
+      : {};
+    if (!this.explicitRaceJson) {
+      const budget = this.session.getSettings()?.pickPoints ?? 10;
+      const archetype = this.race ? botRaceById.get(this.race) : undefined;
+      const picks = this.race ? botRacePicks(this.race, budget) : null;
+      if (archetype && picks) {
+        cfg['picks'] = picks;
+        cfg['raceName'] = archetype.name;
+      } else {
+        cfg['presetId'] = this.race ?? 'hivex';
+      }
+    }
+    if (this.color) cfg['color'] = this.color;
+    return JSON.stringify(cfg);
   }
 
   close(): void {
@@ -174,6 +218,12 @@ export class SoloBot {
       this.personality = PERSONALITIES[me % PERSONALITIES.length]!;
       this.profile = PROFILES[this.personality];
       this.requestedPersonality = this.personality; // resolved once
+    }
+    // chosen fleet look: one ordinary set_ship_style, same as a human would
+    // send from the Empires screen (cosmetic only — no engine special case)
+    if (this.shipStyle && !this.styleSubmitted) {
+      this.styleSubmitted = true;
+      this.submit('set_ship_style', { style: this.shipStyle });
     }
     const prof = this.profile;
     const alwaysWar = this.aggressive || prof.warlike;

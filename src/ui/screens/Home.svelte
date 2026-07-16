@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { DEFAULT_SERVER, enterRoom, enterSoloGame } from '../net';
+  import { RACE_PRESETS } from '@engine/data/index';
+  import { SHIP_STYLES } from '@engine/shipstyles';
+  import { BOT_RACES } from '../botRaces';
+  import { PLAYER_COLORS } from '../colors';
+  import { DEFAULT_SERVER, enterRoom, enterSoloGame, type SoloBotSpec } from '../net';
   import { enterPbmGame, pbmToken } from '../pbm';
   import { describeSaveError, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
   import { app, bindActive } from '../state.svelte';
@@ -30,7 +34,18 @@
   }
 
   let botMode = $state<'parity' | 'fair'>('parity');
-  let botPersonality = $state<'auto' | 'techer' | 'rusher' | 'industrialist' | 'expander' | 'militarist'>('militarist');
+
+  // per-bot scenario config: play style, race (archetype or stock preset),
+  // fleet silhouette and banner color — 'auto' keeps the seat defaults
+  interface BotRow {
+    personality: 'auto' | 'techer' | 'rusher' | 'industrialist' | 'expander' | 'militarist';
+    race: string; // archetype/preset id, or 'auto' (hivex)
+    shipStyle: string; // style id or 'auto'
+    color: string; // #rrggbb or 'auto'
+  }
+  const COLOR_NAMES = ['blue', 'red', 'green', 'yellow', 'purple', 'cyan', 'orange', 'pink'];
+  const defaultBot = (): BotRow => ({ personality: 'militarist', race: 'forgers', shipStyle: 'auto', color: 'auto' });
+  let botRows = $state<BotRow[]>([defaultBot()]);
 
   async function goSolo() {
     if (!name) {
@@ -40,7 +55,13 @@
     app.error = '';
     app.connecting = true;
     try {
-      const active = await enterSoloGame(name, botMode, botPersonality);
+      const specs: SoloBotSpec[] = botRows.map((r) => ({
+        personality: r.personality,
+        ...(r.race !== 'auto' ? { race: r.race } : {}),
+        ...(r.shipStyle !== 'auto' ? { shipStyle: r.shipStyle } : {}),
+        ...(r.color !== 'auto' ? { color: r.color } : {}),
+      }));
+      const active = await enterSoloGame(name, botMode, specs[0]?.personality ?? 'militarist', specs);
       bindActive(active);
     } catch (e) {
       app.error = e instanceof Error ? e.message : String(e);
@@ -152,22 +173,56 @@
   </button>
   <span class="solorow">
     <button data-testid="solo" onclick={goSolo} disabled={app.connecting}
-      title="offline game against a simple bot — no server, no room code needed">
-      🤖 Single player vs bot
+      title="offline game against local bots — no server, no room code needed">
+      🤖 Single player vs {botRows.length > 1 ? `${botRows.length} bots` : 'bot'}
     </button>
-    <select data-testid="bot-mode" bind:value={botMode} title="parity: the bot keeps up via visible logged grants · fair: the bot plays with no help at all">
-      <option value="parity">parity bot (keeps up)</option>
-      <option value="fair">fair bot (no cheats)</option>
-    </select>
-    <select data-testid="bot-personality" bind:value={botPersonality} title="play style: expander grabs planets, rusher/militarist come at you early, techer out-researches, industrialist out-builds">
-      <option value="auto">random style</option>
-      <option value="techer">techer</option>
-      <option value="rusher">rusher</option>
-      <option value="industrialist">industrialist</option>
-      <option value="expander">expander</option>
-      <option value="militarist">militarist</option>
+    <select data-testid="bot-mode" bind:value={botMode} title="parity: bots keep up via visible logged grants · fair: bots play with no help at all">
+      <option value="parity">parity bots (keep up)</option>
+      <option value="fair">fair bots (no cheats)</option>
     </select>
   </span>
+  {#each botRows as bot, i (i)}
+    <span class="botrow" data-testid="bot-row-{i}">
+      <span class="botlabel">Bot {i + 1}</span>
+      <select data-testid="bot-personality-{i}" bind:value={bot.personality}
+        title="play style: expander grabs planets, rusher/militarist come at you early, techer out-researches, industrialist out-builds">
+        <option value="auto">random style</option>
+        <option value="techer">techer</option>
+        <option value="rusher">rusher</option>
+        <option value="industrialist">industrialist</option>
+        <option value="expander">expander</option>
+        <option value="militarist">militarist</option>
+      </select>
+      <select data-testid="bot-race-{i}" bind:value={bot.race}
+        title="bot archetypes rescale their race picks to the lobby's pick-point setting (repulsive + stacked traits); stock races use the fixed presets">
+        <optgroup label="bot archetypes (scale with picks)">
+          {#each BOT_RACES as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
+        </optgroup>
+        <optgroup label="stock races">
+          <option value="auto">Hivex Commune (default)</option>
+          {#each RACE_PRESETS.filter((p) => p.id !== 'hivex') as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+        </optgroup>
+      </select>
+      <select data-testid="bot-style-{i}" bind:value={bot.shipStyle} title="fleet silhouette family in battles">
+        <option value="auto">any hulls</option>
+        {#each SHIP_STYLES as s (s.id)}<option value={s.id}>{s.name} hulls</option>{/each}
+      </select>
+      <select data-testid="bot-color-{i}" bind:value={bot.color} title="banner color"
+        style="color:{bot.color === 'auto' ? 'inherit' : bot.color}">
+        <option value="auto">seat color</option>
+        {#each PLAYER_COLORS as c, ci (c)}<option value={c} style="color:{c}">■ {COLOR_NAMES[ci]}</option>{/each}
+      </select>
+      {#if botRows.length > 1}
+        <button class="botx" data-testid="bot-remove-{i}" title="remove this bot"
+          onclick={() => (botRows = botRows.filter((_, j) => j !== i))}>✕</button>
+      {/if}
+    </span>
+  {/each}
+  {#if botRows.length < 7}
+    <button class="botadd" data-testid="bot-add" onclick={() => (botRows = [...botRows, defaultBot()])}>
+      ＋ add another bot
+    </button>
+  {/if}
   <button data-testid="load-save" onclick={() => fileInput.click()} disabled={app.connecting}>
     Load saved game…
   </button>
@@ -314,6 +369,28 @@
   }
   .solorow button {
     flex: 1;
+  }
+  .botrow {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+    font-size: 0.85rem;
+  }
+  .botrow select {
+    flex: 1;
+    min-width: 0;
+  }
+  .botlabel {
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .botx {
+    padding: 0.1rem 0.4rem;
+  }
+  .botadd {
+    align-self: flex-start;
+    font-size: 0.8rem;
+    padding: 0.15rem 0.6rem;
   }
   .labline {
     margin: 1rem 0 0;

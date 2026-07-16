@@ -412,7 +412,7 @@
           <div class="who">
             <b>{row?.name}</b>
             <span class="title">{row?.title}</span>
-            <span class="kind">{row?.kind === 'ship' ? '🚀 ship officer' : '🏛 colony leader'}</span>
+            <span class="kind" title={row?.kind === 'ship' ? 'bonuses apply to the whole fleet' : 'system administrator: colony bonuses apply to every colony in the assigned star system'}>{row?.kind === 'ship' ? '🚀 ship officer' : '🏛 colony leader'}</span>
           </div>
           <div class="skills">
             {#each row?.skills ?? [] as s (s.skill)}
@@ -437,7 +437,7 @@
           <div class="who">
             <b>{row?.name}</b>
             <span class="title">{row?.title}</span>
-            <span class="kind">{row?.kind === 'ship' ? '🚀 ship officer' : '🏛 colony leader'}</span>
+            <span class="kind" title={row?.kind === 'ship' ? 'bonuses apply to the whole fleet' : 'system administrator: colony bonuses apply to every colony in the assigned star system'}>{row?.kind === 'ship' ? '🚀 ship officer' : '🏛 colony leader'}</span>
           </div>
           <div class="levelrow" title="{l.xp} xp">
             <span>lvl {l.level}</span>
@@ -453,6 +453,7 @@
             {#if row?.kind === 'colony'}
               <select
                 data-testid="assign-{l.leaderId}"
+                title="seat of office — bonuses cover every colony in that star system"
                 value={l.colonyId ?? -1}
                 onchange={(e) => {
                   const v = Number((e.target as HTMLSelectElement).value);

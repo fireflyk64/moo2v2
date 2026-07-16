@@ -199,8 +199,8 @@ export function colonyAccum(state: GameState, colony: Colony, empire: Empire): C
     const spec = effectsOf(app);
     fold(acc, spec?.modifiers, 'empire');
   }
-  // assigned colony leader (Phase 6)
-  fold(acc, leaderColonyModifiers(empire, colony.id), 'colony');
+  // colony leaders administer the whole star system (Phase 6; bugs.md)
+  fold(acc, leaderColonyModifiers(state, empire, colony.id), 'colony');
 
   // ---- coded colony handlers ----
   if (colony.buildings.includes('robotic_factory')) {

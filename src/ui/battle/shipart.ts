@@ -616,6 +616,94 @@ const planOrbital: Plan = (g, cls, k, r, variant) => {
   g.gun(L - 1, 0);
 };
 
+/** post-pass: reconnect any painted sections the crescent carves split off.
+ * Finds the shortest straight (horizontal/vertical) empty run between two
+ * 4-connected components — preferring runs nearest the spine — and fills it
+ * with a thin R_TRIM truss, mirrored about the spine so the art stays
+ * symmetric. Deterministic: pure grid scan, no RNG. */
+function bridgeComponents(g: G): void {
+  for (let guard = 0; guard < 32; guard++) {
+    // label 4-connected components of non-empty pixels
+    const label = new Int32Array(g.w * g.h).fill(-1);
+    let comps = 0;
+    for (let i = 0; i < g.px.length; i++) {
+      if (g.px[i] === R_EMPTY || label[i]! >= 0) continue;
+      const stack = [i];
+      label[i] = comps;
+      while (stack.length) {
+        const j = stack.pop()!;
+        const x = j % g.w;
+        const y = (j / g.w) | 0;
+        if (x > 0 && g.px[j - 1] !== R_EMPTY && label[j - 1]! < 0) { label[j - 1] = comps; stack.push(j - 1); }
+        if (x < g.w - 1 && g.px[j + 1] !== R_EMPTY && label[j + 1]! < 0) { label[j + 1] = comps; stack.push(j + 1); }
+        if (y > 0 && g.px[j - g.w] !== R_EMPTY && label[j - g.w]! < 0) { label[j - g.w] = comps; stack.push(j - g.w); }
+        if (y < g.h - 1 && g.px[j + g.w] !== R_EMPTY && label[j + g.w]! < 0) { label[j + g.w] = comps; stack.push(j + g.w); }
+      }
+      comps++;
+    }
+    if (comps <= 1) return;
+    // best straight truss: fewest filled cells first, then nearest the spine
+    let bestCost = Infinity;
+    let bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+    const consider = (x0: number, y0: number, x1: number, y1: number, len: number, d: number): void => {
+      const cost = len * 100 + d;
+      if (cost < bestCost) { bestCost = cost; bx0 = x0; by0 = y0; bx1 = x1; by1 = y1; }
+    };
+    for (let y = 0; y < g.h; y++) {
+      // gaps along a row
+      let prev = -1;
+      for (let x = 0; x < g.w; x++) {
+        if (g.get(x, y) === R_EMPTY) continue;
+        if (prev >= 0 && x - prev > 1 && label[y * g.w + prev] !== label[y * g.w + x]) {
+          consider(prev + 1, y, x - 1, y, x - prev - 1, Math.abs(y - g.cy));
+        }
+        prev = x;
+      }
+    }
+    for (let x = 0; x < g.w; x++) {
+      // gaps along a column
+      let prev = -1;
+      for (let y = 0; y < g.h; y++) {
+        if (g.get(x, y) === R_EMPTY) continue;
+        if (prev >= 0 && y - prev > 1 && label[prev * g.w + x] !== label[y * g.w + x]) {
+          consider(x, prev + 1, x, y - 1, y - prev - 1, Math.min(Math.abs(prev + 1 - g.cy), Math.abs(y - 1 - g.cy)));
+        }
+        prev = y;
+      }
+    }
+    // diagonal-only contacts: square off the corner with a single cell
+    for (let y = 0; y < g.h - 1; y++) {
+      for (let x = 0; x < g.w - 1; x++) {
+        const a = label[y * g.w + x]!;
+        if (a < 0) continue;
+        const dn = label[(y + 1) * g.w + x + 1]!;
+        if (dn >= 0 && dn !== a) consider(x + 1, y, x + 1, y, 1, Math.abs(y - g.cy));
+        const up = y > 0 ? label[(y - 1) * g.w + x + 1]! : -1;
+        if (up >= 0 && up !== a) consider(x + 1, y, x + 1, y, 1, Math.abs(y - g.cy));
+      }
+    }
+    if (bestCost !== Infinity) {
+      for (let x = bx0; x <= bx1; x++) {
+        for (let y = by0; y <= by1; y++) g.sym(x, Math.abs(y - g.cy), R_TRIM);
+      }
+      continue;
+    }
+    // no shared row/column: L-bridge the closest pair of cells (rare fallback)
+    let ax = 0, ay = 0, cx = 0, cy2 = 0, bestD = Infinity;
+    for (let j = 0; j < g.px.length; j++) {
+      if (label[j] !== 0) continue;
+      for (let i = 0; i < g.px.length; i++) {
+        if (label[i]! <= 0) continue;
+        const d = Math.abs((j % g.w) - (i % g.w)) + Math.abs(((j / g.w) | 0) - ((i / g.w) | 0));
+        if (d < bestD) { bestD = d; ax = j % g.w; ay = (j / g.w) | 0; cx = i % g.w; cy2 = (i / g.w) | 0; }
+      }
+    }
+    if (bestD === Infinity) return;
+    for (let x = Math.min(ax, cx); x <= Math.max(ax, cx); x++) g.sym(x, Math.abs(ay - g.cy), R_TRIM);
+    for (let y = Math.min(ay, cy2); y <= Math.max(ay, cy2); y++) g.sym(cx, Math.abs(y - g.cy), R_TRIM);
+  }
+}
+
 /** crescent: flowing curved blades */
 const planCrescent: Plan = (g, cls, k, r, variant) => {
   const L = k.w;
@@ -633,6 +721,7 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
     g.ring(c, 2.4, 1.4, R_ACCENT);
     g.sym(c - 2, HH - 2, R_GLOW);
     g.sym(c + 1, Math.round(HH * 0.5), R_GLOW);
+    bridgeComponents(g);
     g.gun(c, 2);
     return;
   }
@@ -669,6 +758,7 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
   g.band(Math.round(L * 0.52), 0, 0, R_GLOW);
   g.sym(bx, HH - 1, R_GLOW); // blade tip lights
   if (k.tier >= 3) g.greeble(r, k.tier, [R_SHADE, R_GLOW]);
+  bridgeComponents(g); // truss any sections the carve split off (keeps engines anchored to real geometry)
   g.engAuto(Math.round(HH * 0.45));
   if (k.tier >= 4) g.engAuto(HH - 2);
   g.gun(L - 1, 0);

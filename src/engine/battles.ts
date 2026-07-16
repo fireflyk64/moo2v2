@@ -29,6 +29,7 @@ export function retreatDestination(
   state: GameState,
   ownerId: number,
   fromStarId: number,
+  opts?: { excludeFrom?: boolean },
 ): { starId: number; arrivalTurn: number } | null {
   const empire = state.empires.find((e) => e.id === ownerId);
   const from = state.stars.find((st) => st.id === fromStarId);
@@ -38,7 +39,13 @@ export function retreatDestination(
     if (c.owner !== ownerId || c.outpost) continue;
     const p = state.planets.find((pl) => pl.id === c.planetId);
     if (!p) continue;
-    if (p.starId === fromStarId) return null; // already at the nearest colony: stay
+    if (p.starId === fromStarId) {
+      // fleeing noncombatants shun the besieged colony (bugs.md): the next
+      // nearest colony is their haven; without the flag, stay — this IS the
+      // nearest colony
+      if (opts?.excludeFrom) continue;
+      return null;
+    }
     const star = state.stars.find((st) => st.id === p.starId);
     if (!star) continue;
     const d = starDistance(from, star);
@@ -76,6 +83,25 @@ export function setRelation(state: GameState, a: number, b: number, status: 'pea
 /** Combat-capable: designed warships and (lightly armed) scouts. */
 function isWarship(ship: Ship): boolean {
   return ship.shipKind === 'design' || ship.shipKind === 'scout';
+}
+
+/** Does this empire field ANY combat unit at this star? Warship/scout
+ * present, or a colony whose base/batteries can actually fight (mirrors
+ * buildBattleInput's defender construction). */
+function fieldsCombat(state: GameState, empireId: number, starId: number): boolean {
+  if (
+    state.ships.some(
+      (s) => s.owner === empireId && s.location.kind === 'star' && s.location.starId === starId && isWarship(s),
+    )
+  ) {
+    return true;
+  }
+  const empire = state.empires.find((e) => e.id === empireId);
+  if (!empire) return false;
+  const colony = state.colonies.find(
+    (c) => c.owner === empireId && state.planets.some((p) => p.id === c.planetId && p.starId === starId),
+  );
+  return !!colony && baseToCombat(state, empire, colony, BASE_COMBAT_ID + colony.id) !== null;
 }
 
 /** S7: detect pairwise battles at each star (attacker = non-colony side or higher id).
@@ -149,7 +175,10 @@ export function detectBattles(state: GameState): PendingBattle[] {
         const aCol = colonyOwners.has(a);
         const bCol = colonyOwners.has(b);
         if (!aWar && !bWar) continue;
-        // defender = colony owner; else lower id defends
+        // defender = colony owner; else the side WITHOUT warships defends
+        // (a lower-id fleet catching a naked convoy used to be labeled the
+        // "defender", and with no attacker warships the battle silently never
+        // happened); else lower id defends
         let attacker: number;
         let defender: number;
         if (aCol && !bCol) {
@@ -158,18 +187,28 @@ export function detectBattles(state: GameState): PendingBattle[] {
         } else if (bCol && !aCol) {
           defender = b;
           attacker = a;
+        } else if (aWar && !bWar) {
+          defender = b;
+          attacker = a;
+        } else if (bWar && !aWar) {
+          defender = a;
+          attacker = b;
         } else {
           defender = a;
           attacker = b;
         }
         if (!shipsHere.some((s) => s.owner === attacker && isWarship(s))) continue; // attacker must bring warships
+        // a defenseless defender (no warships, no base/batteries that fight)
+        // is never prompted for battle orders — there is nothing to order
+        // (bugs.md). Passive orders pre-fill exactly like the NPC sides'.
+        const defenderFights = fieldsCombat(state, defender, star.id);
         battles.push({
           id: `b${state.turn}-${star.id}-${attacker}v${defender}`,
           starId: star.id,
           attacker,
           defender,
           ordersA: null,
-          ordersD: null,
+          ordersD: defenderFights ? null : { ...npcOrders },
         });
         made = true; // one battle per star per turn; others queue next turn
       }
@@ -501,17 +540,20 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
       }
     }
   }
-  // loser's unarmed ships at the star are lost if the winner holds the field —
-  // UNLESS their escorts withdrew alive (a retreating fleet covers its
-  // noncombatants out) or the winner ordered mercy (spareNoncombatants)
+  // loser's unarmed ships at the star: if ANY combatant of theirs was in the
+  // fight (won, died, or withdrew — a battle line, however it fared, covers
+  // the noncombatants' escape; bugs.md), or the winner ordered mercy
+  // (spareNoncombatants), they flee to the nearest OTHER own colony instead
+  // of being lost. Only noncombatants caught with no battle line at all are
+  // run down when the winner holds the field.
   if (result.winner !== null) {
     const loser = result.winner === 0 ? battle.defender : battle.attacker;
     const loserSide = result.winner === 0 ? 1 : 0;
     const winnerOrders = result.winner === 0 ? built.input.ordersA : built.input.ordersD;
     const spared = winnerOrders.spareNoncombatants === true;
-    const escortsEscaped = result.outcomes.some(
-      (o) => o.side === loserSide && o.retreated && !o.destroyed,
-    );
+    // ships AND the defense base count as a battle line (monsters don't own
+    // noncombatants, so the monster fence is irrelevant here)
+    const loserFought = result.outcomes.some((o) => o.side === loserSide && o.shipId < MONSTER_COMBAT_ID);
     for (const ship of state.ships) {
       if (
         ship.owner === loser &&
@@ -519,10 +561,10 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
         ship.location.starId === battle.starId &&
         !isWarship(ship)
       ) {
-        if (escortsEscaped || spared) {
-          // fall back with the fleet toward the nearest own colony (spared
-          // ships flee too — the winner let them go, not stay and blockade)
-          const dest = retreatDestination(state, loser, battle.starId);
+        if (loserFought || spared) {
+          // flee toward the nearest own colony that is NOT the contested one
+          // (staying put only when no other haven exists)
+          const dest = retreatDestination(state, loser, battle.starId, { excludeFrom: true });
           if (dest) {
             ship.location = {
               kind: 'transit',
@@ -596,8 +638,12 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
   }
   // full input + seed label: the viewer re-runs the identical sim as playback.
   // Only the PARTICIPANTS get the replay — spectators would otherwise see
-  // both fleets' full compositions for free.
-  const audience = [battle.attacker, battle.defender].filter((id) => id >= 0);
+  // both fleets' full compositions for free. A walkover (one side fielded no
+  // combat unit at all) gets no replay: watching nobody fight isn't a show
+  // (bugs.md) — the battle_resolved report above still carries the outcome,
+  // including any bombardment.
+  const walkover = !built.input.ships.some((s) => s.side === 0) || !built.input.ships.some((s) => s.side === 1);
+  const audience = walkover ? [] : [battle.attacker, battle.defender].filter((id) => id >= 0);
   for (const viewer of audience) {
     events.push({
       visibleTo: viewer,

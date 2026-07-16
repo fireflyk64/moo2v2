@@ -163,6 +163,12 @@
     if (next !== edgeLatch) edgeLatch = next;
   });
   const edgeShown = $derived(fastActive || iCommitted || (gs?.turn ?? 0) !== edgeLatch.turn ? '' : edgeLatch.level);
+  /** solo (vs local bots) game: the bots commit instantly, so "everyone else
+   * has committed" is true every single turn — pure noise, never shown */
+  const soloGame = $derived.by(() => {
+    void app.version;
+    return (getActive()?.soloBots.length ?? 0) > 0;
+  });
   const memoryOnly = $derived.by(() => {
     void app.version;
     return getActive()?.memoryOnly ?? false;
@@ -406,11 +412,13 @@
       {#if researchIdle}
         ⚠ no research!
       {:else}
-        {pretty(summary.researching ?? '')}{summary.researchProgressPct !== null
-          ? ` (${summary.researchProgressPct}%${summary.researchTurnsLeft !== null ? ` · ${summary.researchTurnsLeft}t` : ''})`
-          : summary.researchTurnsLeft !== null
-            ? ` (${summary.researchTurnsLeft}t)`
-            : ''}
+        {pretty(summary.researching ?? '')}{summary.researchOddsPct > 0
+          ? ` (${summary.researchOddsPct}% chance${summary.researchTurnsLeft !== null ? ` · ${summary.researchTurnsLeft}t` : ''})`
+          : summary.researchProgressPct !== null
+            ? ` (${summary.researchProgressPct}% of base${summary.researchTurnsLeft !== null ? ` · ${summary.researchTurnsLeft}t` : ''})`
+            : summary.researchTurnsLeft !== null
+              ? ` (${summary.researchTurnsLeft}t)`
+              : ''}
       {/if}
     </button>
     {#if getActive()?.solo}
@@ -420,7 +428,7 @@
           data-testid="bot-aggressive"
           checked={botAggressive}
           onchange={(e) => {
-            getActive()?.solo?.setAggressive((e.target as HTMLInputElement).checked);
+            for (const bot of getActive()?.soloBots ?? []) bot.setAggressive((e.target as HTMLInputElement).checked);
             botAggressive = (e.target as HTMLInputElement).checked;
           }}
         />
@@ -450,9 +458,10 @@
   {#if edgeShown}
     <div class="edge {edgeShown}" aria-hidden="true"></div>
   {/if}
-  {#if edgeShown === 'red'}
-    <div class="banner urgent" data-testid="all-waiting">⏳ Everyone else has committed — the galaxy waits on you!</div>
-  {/if}
+  <!-- "the galaxy waits on you" lives ON the chat footer now (bugs.md): a
+       translucent click-through wash instead of a banner line, so it never
+       reflows the layout — and never shows in solo games, where the bots
+       have always already committed -->
   {#if !app.hostConnected}
     <div class="banner warn" data-testid="host-offline">
       ⚠ Host offline — the game is paused. It resumes when the host returns (or load their save file to re-host).
@@ -612,6 +621,9 @@
     </div>
   {/if}
   <footer>
+    {#if edgeShown === 'red' && !soloGame}
+      <div class="allwaiting" data-testid="all-waiting" aria-hidden="true">⏳ Everyone else has committed — the galaxy waits on you!</div>
+    {/if}
     <select data-testid="chat-to" bind:value={chatTo} title="everyone or a direct message">
       <option value={-1}>all</option>
       {#each roster.filter((p) => p.id !== session().playerId) as p (p.id)}
@@ -793,6 +805,21 @@
     gap: 0.5rem;
     align-items: center;
     z-index: 10;
+  }
+  /* urgency wash over the chat bar: translucent + click-through, so the
+     layout never shifts and the chat stays usable underneath */
+  .allwaiting {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(190, 40, 40, 0.4);
+    color: #ffe2e2;
+    font-weight: 600;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
+    z-index: 3;
   }
   .chatlog {
     display: flex;

@@ -16,7 +16,7 @@ import { levelForXp, skillMagnitude, MAX_LEADERS_PER_KIND } from '@engine/data/l
 import { colonyOutput } from '@engine/economy';
 import { validateCommand, applyCommand } from '@engine/commands';
 import { driveSpeed } from '@engine/movement';
-import type { GameState, TurnEvent } from '@engine/types';
+import type { Colony, GameState, TurnEvent } from '@engine/types';
 
 const SEED = '0123456789abcdef0123456789abcdef';
 
@@ -92,13 +92,47 @@ describe('leader effects', () => {
     const before = colonyOutput(state, colony);
     // science leader: research has no pollution term to mask the gain
     empire.leaders.push({ leaderId: 'emo', level: 5, xp: 300, colonyId: colony.id }); // +15% sci
-    const mods = leaderColonyModifiers(empire, colony.id);
+    const mods = leaderColonyModifiers(state, empire, colony.id);
     expect(mods).toEqual([{ target: 'sci_pct', amount: 15, scope: 'colony' }]);
     const after = colonyOutput(state, colony);
     expect(after.research).toBeGreaterThan(before.research);
     // unassigned leaders contribute nothing
     empire.leaders[0]!.colonyId = null;
     expect(colonyOutput(state, colony).research).toBe(before.research);
+  });
+
+  it('colony leaders administer the whole star system, not just their seat', () => {
+    const state = newGame();
+    const empire = state.empires[0]!;
+    const home = state.colonies.find((c) => c.owner === 0)!;
+    const homePlanet = state.planets.find((p) => p.id === home.planetId)!;
+    const otherStar = state.stars.find((s) => s.id !== homePlanet.starId)!;
+    // plant a copy of the homeworld colony around a given star
+    const plant = (starId: number): Colony => {
+      const planetId = state.nextId++;
+      state.planets.push({ ...homePlanet, id: planetId, starId, orbit: 5, homeworldOf: null, special: null });
+      const colony: Colony = structuredClone(home);
+      colony.id = state.nextId++;
+      colony.planetId = planetId;
+      colony.name = `Test ${colony.id}`;
+      state.colonies.push(colony);
+      return colony;
+    };
+    const sibling = plant(homePlanet.starId); // same system as the leader's seat
+    const faraway = plant(otherStar.id); // another system entirely
+    const siblingBefore = colonyOutput(state, sibling).research;
+    const farawayBefore = colonyOutput(state, faraway).research;
+    // science leader seated at the homeworld (+15% sci at level 5)
+    empire.leaders.push({ leaderId: 'emo', level: 5, xp: 300, colonyId: home.id });
+    const boost = [{ target: 'sci_pct', amount: 15, scope: 'colony' }];
+    expect(leaderColonyModifiers(state, empire, home.id)).toEqual(boost); // own seat
+    expect(leaderColonyModifiers(state, empire, sibling.id)).toEqual(boost); // sibling in system
+    expect(leaderColonyModifiers(state, empire, faraway.id)).toEqual([]); // other system: nothing
+    expect(colonyOutput(state, sibling).research).toBeGreaterThan(siblingBefore);
+    expect(colonyOutput(state, faraway).research).toBe(farawayBefore);
+    // a seat lost to the enemy stops administering the system
+    home.owner = 1;
+    expect(leaderColonyModifiers(state, empire, sibling.id)).toEqual([]);
   });
 
   it('empire and combat bonuses accumulate by kind', () => {

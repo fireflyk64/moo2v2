@@ -7,8 +7,10 @@
 // L2  Leaders are colony leaders or ship officers by their rank: Admiral /
 //     Commander / Captain / Commodore ranks are ship officers; civil ranks
 //     (Director, Magistrate, Commissioner, Lord, Governor, Administrator) are
-//     colony leaders. Colony leaders are assigned to one colony; ship officers
-//     command fleet-wide (bonuses apply to all of the empire's warships).
+//     colony leaders. Colony leaders are seated at one colony but administer
+//     the whole star system (their colony-scope bonuses reach every colony the
+//     empire owns in that system); ship officers command fleet-wide (bonuses
+//     apply to all of the empire's warships).
 // L3  Hiring: points = Σ (enhanced ? 2 : 1) over skills. Hire cost =
 //     50 + 25×points BC (Famous discount applies), salary = points BC/turn.
 //     Max 4 colony leaders + 4 ship officers per empire.
