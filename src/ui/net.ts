@@ -54,6 +54,16 @@ export interface ActiveGame {
     /** final upload + lock release; called by leaveGame */
     stop: () => Promise<void>;
   } | null;
+  /** how this solo game was configured — lets 🔄 restart rebuild it exactly */
+  soloSetup: SoloSetup | null;
+}
+
+export interface SoloSetup {
+  name: string;
+  botMode: BotMode;
+  specs: SoloBotSpec[];
+  /** room code the campaign persists under (default SOLO) */
+  code: string;
 }
 
 /** Host-side: let a bot take over an absent player's seat. The bot helloes
@@ -194,6 +204,7 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
       soloBots: [],
       bots: [],
       pbm: null,
+      soloSetup: null,
     };
   }
 
@@ -226,6 +237,7 @@ export async function enterRoom(params: RoomParams): Promise<ActiveGame> {
     soloBots: [],
     bots: [],
     pbm: null,
+    soloSetup: null,
   };
 }
 
@@ -243,21 +255,36 @@ export interface SoloBotSpec {
 
 /** Single-player mode: an in-process game against one or more bots — no
  * lobbylink server, no WebRTC (every bot is a local MemoryHub session).
- * Persists like any room (code SOLO), so a reload resumes the campaign;
- * bots keep their stable names (Bot, Bot 2, ...) so resume re-seats them. */
+ * Persists like any room (code SOLO by default; opts.code lets several bot
+ * campaigns coexist, one per tab), so a reload resumes the campaign; bots
+ * keep their stable names (Bot, Bot 2, ...) so resume re-seats them. */
 export async function enterSoloGame(
   name: string,
   botMode: BotMode = 'parity',
   personality: BotPersonality | 'auto' = 'militarist',
   botSpecs?: SoloBotSpec[],
+  opts?: {
+    /** room code the campaign persists under (default SOLO) */
+    code?: string;
+    /** abandon any stored campaign under this code and start over */
+    fresh?: boolean;
+  },
 ): Promise<ActiveGame> {
   const specs: SoloBotSpec[] = botSpecs?.length ? botSpecs : [{ personality }];
   const playerCount = 1 + specs.length;
-  const params: RoomParams = { server: 'local', code: 'SOLO', name, playerCount };
+  const code = opts?.code?.trim() || 'SOLO';
+  const params: RoomParams = { server: 'local', code, name, playerCount };
   const hub = new MemoryHub(playerCount);
   const hostTransport = hub.join();
 
   const { store, sqlocal, memoryOnly } = await openRoomStore(params.code);
+  if (opts?.fresh) {
+    // retire the stored campaign so loadResume starts a new galaxy; the old
+    // game stays in the database (a downloaded save can still resurrect it)
+    for (const g of await store.listGames()) {
+      if (g.room_code === params.code && g.status === 'active') await store.setGameStatus(g.game_id, 'abandoned');
+    }
+  }
 
   const identity = {
     name,
@@ -310,5 +337,22 @@ export async function enterSoloGame(
     soloBots,
     bots: [],
     pbm: null,
+    soloSetup: { name, botMode, specs, code: params.code },
   };
+}
+
+/** Tear down a solo game and start a fresh campaign in the same room with the
+ * same bots. Unlike leaveGame, the store handle is released BEFORE re-entry
+ * (awaited), so the new game reopens the same OPFS database instead of
+ * falling back to memory-only persistence. */
+export async function restartSoloGame(active: ActiveGame): Promise<ActiveGame> {
+  const setup = active.soloSetup;
+  if (!setup) throw new Error('not a single-player game');
+  for (const b of active.soloBots) b.close();
+  active.transport.close();
+  await active.store?.destroy().catch(() => undefined);
+  return enterSoloGame(setup.name, setup.botMode, setup.specs[0]?.personality ?? 'militarist', setup.specs, {
+    code: setup.code,
+    fresh: true,
+  });
 }

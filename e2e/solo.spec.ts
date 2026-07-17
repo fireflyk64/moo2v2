@@ -62,3 +62,59 @@ test('solo vs bot runs from the production bundle with zero network', async ({ b
 
   await ctx.close();
 });
+
+// New solo-game controls: the room code names the campaign (so several bot
+// games can run in different tabs), 🔄 restart abandons and re-lobbies, and
+// bot games never show the red "everyone is waiting on you" screen edge.
+test('room-coded campaigns, no red edge, restart, and two concurrent tabs', async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  page.on('dialog', (d) => void d.accept());
+
+  await page.goto(`${APP}/`);
+  await page.getByTestId('name').fill('Resty');
+  await page.getByTestId('room').fill('BOTA');
+  await page.getByTestId('solo').click();
+  await expect(page.getByTestId('start')).toBeEnabled({ timeout: 20_000 });
+  await page.getByTestId('start').click();
+  await expect(page.getByTestId('turn')).toHaveText('Turn 1', { timeout: 20_000 });
+  await page.getByTestId('commit').click();
+  await expect(page.getByTestId('turn')).toHaveText('Turn 2', { timeout: 20_000 });
+
+  // the bot has already committed and we have not — in a solo game that must
+  // NOT paint the red urgency edge or the "galaxy waits on you" wash
+  await expect(page.locator('div.edge')).toHaveCount(0);
+  await expect(page.getByTestId('all-waiting')).toHaveCount(0);
+
+  // --- restart: abandons the turn-2 campaign, fresh lobby, fresh galaxy ---
+  await page.getByTestId('restart-game').click();
+  await expect(page.getByTestId('start')).toBeEnabled({ timeout: 20_000 });
+  await page.getByTestId('start').click();
+  await expect(page.getByTestId('turn')).toHaveText('Turn 1', { timeout: 20_000 });
+  await page.getByTestId('commit').click();
+  await expect(page.getByTestId('turn')).toHaveText('Turn 2', { timeout: 20_000 });
+
+  // --- a second tab runs a DIFFERENT campaign at the same time: its own
+  // room code means its own database — both persist, neither goes RAM-only
+  const page2 = await ctx.newPage();
+  await page2.goto(`${APP}/`);
+  await page2.getByTestId('name').fill('Resty');
+  await page2.getByTestId('room').fill('BOTB');
+  await page2.getByTestId('solo').click();
+  await expect(page2.getByTestId('start')).toBeEnabled({ timeout: 20_000 });
+  await page2.getByTestId('start').click();
+  await expect(page2.getByTestId('turn')).toHaveText('Turn 1', { timeout: 20_000 });
+  await expect(page.getByTestId('memory-only')).toHaveCount(0);
+  await expect(page2.getByTestId('memory-only')).toHaveCount(0);
+  await page2.close();
+
+  // --- reload + re-enter BOTA: the RESTARTED campaign resumes (turn 2),
+  // not the abandoned one ---
+  await page.reload();
+  await page.getByTestId('name').fill('Resty');
+  await page.getByTestId('room').fill('BOTA');
+  await page.getByTestId('solo').click();
+  await expect(page.getByTestId('turn')).toHaveText('Turn 2', { timeout: 30_000 });
+
+  await ctx.close();
+});

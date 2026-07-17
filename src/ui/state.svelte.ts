@@ -214,13 +214,10 @@ function ingestTurnEvents(
   }
 }
 
-export function leaveGame(): void {
-  const g = activeGame;
-  activeGame = null;
-  app.screen = 'home';
+/** Scrub per-game UI state: reports/replays/an open viewer leaking into the
+ * next game shows the previous game's battles under the new game's turns. */
+export function resetGameUiState(): void {
   app.chat = [];
-  // scrub per-game UI state: reports/replays/an open viewer leaking into the
-  // next game shows the previous game's battles under the new game's turns
   app.replays = [];
   app.groundBattles = [];
   app.reports = [];
@@ -230,6 +227,13 @@ export function leaveGame(): void {
   app.contactFlash = null;
   app.focusStarId = null;
   app.version++;
+}
+
+export function leaveGame(): void {
+  const g = activeGame;
+  activeGame = null;
+  app.screen = 'home';
+  resetGameUiState();
   if (!g) return;
   g.solo?.close();
   for (const b of g.soloBots) b.close(); // close() is idempotent (solo = soloBots[0])

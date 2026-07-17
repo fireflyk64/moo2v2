@@ -261,7 +261,11 @@ export class SoloBot {
     if (state.turn >= 250) {
       const myCol = state.colonies.filter((c) => c.owner === me && !c.outpost).length;
       const theirCol = state.colonies.filter((c) => c.owner === human.id && !c.outpost).length;
-      const hopeless = atWar && theirCol >= myCol * 2 + 5 && theirWarCount >= myWarCount * 4 + 8;
+      // 2×+4 warships, not the old 4×+8: the round-11 survival brain flees
+      // doomed battles, so a crushed empire keeps a token fleet forever and
+      // the 4× deficit never arrives — every round-11 rr game timed out with
+      // the winner 2-3× ahead on everything else
+      const hopeless = atWar && theirCol >= myCol * 2 + 5 && theirWarCount >= myWarCount * 2 + 4;
       const alreadyOffered = (state.proposals ?? []).some((p) => p.from === me && p.kind === 'surrender');
       if (hopeless && !alreadyOffered) this.submit('diplo_propose', { to: human.id, kind: 'surrender' });
     }
@@ -498,8 +502,54 @@ export class SoloBot {
     // matches timed out. Landings auto-resolve when loaded transports reach
     // an enemy colony star with no defending warships. ----
     if (alwaysWar) {
-      this.attack(state, me, human.id);
+      if (outgunned) this.rally(state, me, human.id);
+      else this.attack(state, me, human.id);
       this.invade(planned, me, human.id, myWarships);
+    }
+  }
+
+  /** Survival mode while outgunned: piecemeal strikes (and newborn hulls
+   * trickling out of camped shipyards one at a time) just feed the enemy —
+   * the round-10 probe watched a creative build 38 warships across 300 turns
+   * and field 0, every single hull dying within 3 turns of launch. Instead,
+   * mass everything at ONE defended home star (preferring stars free of
+   * enemy campers, then wherever most of the fleet already sits) and stay
+   * there until the odds recover; doomed battles are fled, not fought (see
+   * orderBattles). */
+  private rally(state: GameState, me: number, humanId: number): void {
+    const warships = state.ships.filter((s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star');
+    if (!warships.length) return;
+    const starOf = (planetId: number) => state.planets.find((p) => p.id === planetId)?.starId ?? null;
+    const myStars = [...new Set(state.colonies.filter((c) => c.owner === me).map((c) => starOf(c.planetId)))].filter(
+      (id): id is number => id !== null,
+    );
+    if (!myStars.length) return;
+    const enemyAt = new Map<number, number>();
+    const mineAt = new Map<number, number>();
+    for (const s of state.ships) {
+      if (s.shipKind !== 'design' || s.location.kind !== 'star') continue;
+      const at = s.location.starId;
+      if (s.owner === humanId) enemyAt.set(at, (enemyAt.get(at) ?? 0) + 1);
+      if (s.owner === me) mineAt.set(at, (mineAt.get(at) ?? 0) + 1);
+    }
+    const muster = [...myStars].sort(
+      (a, b) =>
+        (enemyAt.get(a) ?? 0) - (enemyAt.get(b) ?? 0) ||
+        (mineAt.get(b) ?? 0) - (mineAt.get(a) ?? 0) ||
+        a - b,
+    )[0]!;
+    const movers = warships.filter((s) => (s.location as { starId: number }).starId !== muster);
+    if (!movers.length) return;
+    // fuel range still applies: unreachable strays hold position (they are
+    // already at, or fleeing toward, some colony of ours)
+    const byStar = new Map<number, number[]>();
+    for (const s of movers) {
+      const from = (s.location as { starId: number }).starId;
+      (byStar.get(from) ?? byStar.set(from, []).get(from)!).push(s.id);
+    }
+    for (const [from, ids] of byStar) {
+      const reachable = selectors.moveOptions(state, me, from).some((o) => o.reachable && o.starId === muster);
+      if (reachable) this.submit('move_ships', { shipIds: ids, destStarId: muster });
     }
   }
 
@@ -836,7 +886,11 @@ export class SoloBot {
     }
   }
 
-  /** battles: charge when aggressive, otherwise hold the line */
+  /** battles: charge when aggressive, otherwise hold the line — but a
+   * hopeless defense (enemy hulls > 2×mine + 1 on the field) warps out
+   * instead of dying: retreated ships fall back to the nearest own colony
+   * and live to mass with the rally (the alternative was the round-10
+   * grinder: single newborn hulls fed one by one to a 9-ship camp). */
   private orderBattles(state: GameState): void {
     const me = this.session.playerId;
     for (const b of state.pendingBattles) {
@@ -844,13 +898,21 @@ export class SoloBot {
       const mine = b.attacker === me ? b.ordersA : b.ordersD;
       if (mine !== null || this.orderedBattles.has(b.id)) continue;
       this.orderedBattles.add(b.id); // once — resubmitting on every event would echo forever
+      const foe = b.attacker === me ? b.defender : b.attacker;
+      const hullsAt = (owner: number) =>
+        state.ships.filter(
+          (s) => s.owner === owner && s.shipKind === 'design' && s.location.kind === 'star' && s.location.starId === b.starId,
+        ).length;
+      // 2×+1, not lower: a 1.5× probe fled every defense, let the enemy eat
+      // the undefended colonies one by one, and got ELIMINATED by t590
+      const doomed = foe >= 0 && hullsAt(foe) > hullsAt(me) * 2 + 1;
       this.submit('battle_orders', {
         battleId: b.id,
         orders: {
-          stance: this.aggressive || this.profile.warlike ? 'charge' : 'hold_range',
+          stance: doomed ? 'evade_retreat' : this.aggressive || this.profile.warlike ? 'charge' : 'hold_range',
           priority: this.profile.fleetRatio >= 1.5 ? 'deadliest' : 'nearest',
           retreatThresholdPct: this.profile.warlike ? 15 : 25,
-          bombard: (this.aggressive || this.profile.warlike) && b.attacker === me,
+          bombard: !doomed && (this.aggressive || this.profile.warlike) && b.attacker === me,
         },
       });
     }

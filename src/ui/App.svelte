@@ -150,6 +150,11 @@
     z-index: 1;
     padding: 0;
     min-height: 100vh;
+    /* column flex so the game shell's <section> can grow and push the sticky
+       chat footer to the true bottom — otherwise short pages leave an
+       unsightly dead strip below the chat */
+    display: flex;
+    flex-direction: column;
   }
 
   /* ---------- shared control styling (global design system) ---------- */

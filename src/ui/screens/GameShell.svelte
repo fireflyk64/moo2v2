@@ -1,7 +1,8 @@
 <script lang="ts">
   import { selectors, gameEngine } from '@engine/index';
   import { FAST_MAX_AHEAD } from '@protocol/messages';
-  import { app, getActive, leaveGame } from '../state.svelte';
+  import { app, bindActive, getActive, leaveGame, resetGameUiState } from '../state.svelte';
+  import { restartSoloGame } from '../net';
   import { governColonies } from '../governor';
   import { syncEmpireColors } from '../colors';
   import { latchEdge, type EdgeLatch, type EdgeLevel } from '../commitEdge';
@@ -145,6 +146,12 @@
       .sort((x, y) => x.through - y.through);
     return behind[0] ?? null;
   });
+  /** solo (vs local bots) game: the bots commit instantly, so "everyone else
+   * has committed" is true every single turn — pure noise, never shown */
+  const soloGame = $derived.by(() => {
+    void app.version;
+    return (getActive()?.soloBots.length ?? 0) > 0;
+  });
   /** commit urgency: red = everyone else committed and they are waiting on you;
    * green = others have started committing. Latched one-way per turn so an
    * opponent cycling commit/uncommit cannot flash the screen. */
@@ -162,13 +169,9 @@
     const next = latchEdge(edgeLatch, gs?.turn ?? 0, gs?.phase ?? 'planning', commitEdge);
     if (next !== edgeLatch) edgeLatch = next;
   });
-  const edgeShown = $derived(fastActive || iCommitted || (gs?.turn ?? 0) !== edgeLatch.turn ? '' : edgeLatch.level);
-  /** solo (vs local bots) game: the bots commit instantly, so "everyone else
-   * has committed" is true every single turn — pure noise, never shown */
-  const soloGame = $derived.by(() => {
-    void app.version;
-    return (getActive()?.soloBots.length ?? 0) > 0;
-  });
+  const edgeShown = $derived(
+    fastActive || soloGame || iCommitted || (gs?.turn ?? 0) !== edgeLatch.turn ? '' : edgeLatch.level,
+  );
   const memoryOnly = $derived.by(() => {
     void app.version;
     return getActive()?.memoryOnly ?? false;
@@ -333,6 +336,24 @@
       flashSaveNote(describeSaveError(e));
     }
   }
+
+  let restarting = $state(false);
+  async function restartGame() {
+    const active = getActive();
+    if (!active?.soloSetup || restarting) return;
+    if (!confirm('Restart: abandon this campaign and set up a fresh galaxy with the same bots?')) return;
+    restarting = true;
+    try {
+      const next = await restartSoloGame(active);
+      resetGameUiState();
+      bindActive(next);
+    } catch (e) {
+      app.error = e instanceof Error ? e.message : String(e);
+      app.screen = 'home';
+    } finally {
+      restarting = false;
+    }
+  }
 </script>
 
 {#if gs && summary}
@@ -449,6 +470,12 @@
       {/if}
       {#if saveNote}<span class="dim" data-testid="save-note">{saveNote}</span>{/if}
       {#if app.rejectedNote}<span class="dim" data-testid="rejected-note">{app.rejectedNote}</span>{/if}
+      {#if getActive()?.soloSetup}
+        <button data-testid="restart-game" disabled={restarting} onclick={restartGame}
+          title="abandon this campaign and start a fresh galaxy against the same bots">
+          {restarting ? '…' : '🔄 Restart'}
+        </button>
+      {/if}
       <button data-testid="leave-room" onclick={leaveGame}
         title={pbmInfo ? 'mail in: uploads your progress and hands the room to the next player' : 'leave this room (the game stays saved; rejoin any time)'}>
         {pbmInfo ? '📬 mail in & leave' : '⏏ leave'}
@@ -621,7 +648,7 @@
     </div>
   {/if}
   <footer>
-    {#if edgeShown === 'red' && !soloGame}
+    {#if edgeShown === 'red'}
       <div class="allwaiting" data-testid="all-waiting" aria-hidden="true">⏳ Everyone else has committed — the galaxy waits on you!</div>
     {/if}
     <select data-testid="chat-to" bind:value={chatTo} title="everyone or a direct message">
@@ -794,6 +821,9 @@
   }
   section {
     padding: 0.6rem 1rem 1.2rem;
+    /* fill the leftover viewport height (main is a column flex) so the chat
+       footer sits flush at the bottom instead of floating above a gap */
+    flex: 1 0 auto;
   }
   footer {
     position: sticky;

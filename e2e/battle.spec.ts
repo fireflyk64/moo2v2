@@ -101,6 +101,9 @@ test('war, battle orders dialog, deterministic resolve, replay viewer', async ({
   await expect(a.locator('[data-testid="battle-viewer"] canvas')).toBeVisible({ timeout: 15_000 });
   await a.getByTestId('battle-skip').click();
   await expect(a.getByTestId('battle-summary')).toBeVisible();
+  // a fresh replay re-simulates under the SAME engine that resolved it — the
+  // "recorded under an older version" divergence banner must never show here
+  await expect(a.getByTestId('battle-diverged')).toHaveCount(0);
   await a.getByTestId('battle-close').click();
 
   await ctxA.close();

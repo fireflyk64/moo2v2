@@ -43,10 +43,17 @@
   const sideCount = (side: 0 | 1) => input.ships.filter((s) => s.side === side).length;
 
   // precompute all frames by re-running the identical deterministic sim
+  let diverged = $state(false);
   function computeFrames(): void {
     frames = [];
     try {
-      runBattle(input, rngFor(replay.seed, ...input.seedLabel), (f) => frames.push(structuredClone(f)));
+      const result = runBattle(input, rngFor(replay.seed, ...input.seedLabel), (f) => frames.push(structuredClone(f)));
+      // a replay recorded under a DIFFERENT engine version re-simulates under
+      // today's rules (e.g. the 0.13.0 battlefield enlargement) — when the
+      // outcome no longer matches the recorded summary, say so instead of
+      // silently showing a battle that never happened that way
+      const resimWinner = result.winner === null ? null : result.winner === 0 ? input.attacker : input.defender;
+      diverged = result.ticks !== summary['ticks'] || resimWinner !== summary['winner'];
     } catch (e) {
       simError = `replay unavailable: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -628,6 +635,12 @@
     {/if}
     {#if simError}
       <p class="err">{simError}</p>
+    {/if}
+    {#if diverged && !simError}
+      <p class="err" data-testid="battle-diverged">
+        ⚠ This battle was fought under an older game version — the re-simulated playback diverges from what actually
+        happened (the summary below is the real outcome).
+      </p>
     {/if}
     {#if totalFrames === 0 && !simError}
       <p class="err">No combat occurred — one side had no active ships on the field.</p>

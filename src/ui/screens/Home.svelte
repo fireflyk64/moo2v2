@@ -61,7 +61,9 @@
         ...(r.shipStyle !== 'auto' ? { shipStyle: r.shipStyle } : {}),
         ...(r.color !== 'auto' ? { color: r.color } : {}),
       }));
-      const active = await enterSoloGame(name, botMode, specs[0]?.personality ?? 'militarist', specs);
+      // the room code differentiates bot campaigns (blank = the classic SOLO
+      // room), so several single-player games can run in different tabs
+      const active = await enterSoloGame(name, botMode, specs[0]?.personality ?? 'militarist', specs, { code });
       bindActive(active);
     } catch (e) {
       app.error = e instanceof Error ? e.message : String(e);
@@ -173,8 +175,8 @@
   </button>
   <span class="solorow">
     <button data-testid="solo" onclick={goSolo} disabled={app.connecting}
-      title="offline game against local bots — no server, no room code needed">
-      🤖 Single player vs {botRows.length > 1 ? `${botRows.length} bots` : 'bot'}
+      title="offline game against local bots — no server needed. The room code names the campaign (blank = SOLO): use different codes to keep several bot games going in different tabs, and re-enter a code to resume that campaign">
+      🤖 Single player vs {botRows.length > 1 ? `${botRows.length} bots` : 'bot'}{code.trim() ? ` · ${code.trim()}` : ''}
     </button>
     <select data-testid="bot-mode" bind:value={botMode} title="parity: bots keep up via visible logged grants · fair: bots play with no help at all">
       <option value="parity">parity bots (keep up)</option>
