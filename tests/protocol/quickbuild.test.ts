@@ -138,6 +138,17 @@ describe('map-view quick builds', () => {
     const moving = state().ships.filter((s) => s.owner === 0 && s.shipKind === 'scout' && s.location.kind === 'transit');
     expect(moving.length).toBe(sent);
 
+    // ---- v2-bot debt handling (autopilot parity): a negative treasury
+    // raises the tax and flips the strongest unpinned yard to trade goods ----
+    state().empires[0]!.bc = -600;
+    governColonies(hosted.session, DEFAULT_WEIGHTS, new Set());
+    expect(state().empires[0]!.taxRatePct).toBe(30);
+    expect(
+      state()
+        .colonies.filter((c) => c.owner === 0 && !c.outpost)
+        .some((c) => c.queue[0]?.item === 'trade_goods'),
+    ).toBe(true);
+
     await hub.settle();
   }, 120_000);
 });

@@ -24,7 +24,8 @@ import { NEXT_TERRAFORM } from './terraform';
 import { grantApp } from './research';
 import { colonyMaxPop, colonyPopUnits, organicUnitsOf, traitsOf } from './economy';
 import type { CombatShipInit, CombatWeapon } from './combat';
-import type { GameState, MonsterUnit, Planet, TurnEvent } from './types';
+import type { Climate, GameState, Minerals, MonsterUnit, Planet, TurnEvent } from './types';
+import type { Rng } from './rng';
 
 export const MONSTER_EMPIRE = -2;
 export const ANTARAN_EMPIRE = -3;
@@ -169,6 +170,71 @@ function systemPrizeworthy(state: GameState, starId: number): boolean {
   );
 }
 
+// ---- guarded-world prizes (design brief: "worlds behind monsters are
+// almost always incredible") ----
+
+const CLIMATE_RANK: Record<Climate, number> = {
+  gaia: 9, terran: 8, ocean: 7, swamp: 6, arid: 5, tundra: 4, desert: 3, barren: 2, energized: 1, hostile: 0,
+};
+const MINERAL_RANK: Record<Minerals, number> = {
+  ultra_poor: 0, poor: 1, abundant: 2, rich: 3, ultra_rich: 4,
+};
+
+interface PrizeUpgrade {
+  climate: Climate | null;
+  minerals: Minerals | null;
+  special: string | null;
+  minSize: number;
+  heavyG: boolean;
+}
+
+/** What a keeper is worth fighting for: usually terran (sometimes gaia),
+ * usually rich or ultra-rich, size 4-5, often heavy-G when dense — and now
+ * and then it hides artifacts or a splinter colony. */
+function rollPrizeUpgrade(rng: Rng): PrizeUpgrade {
+  const c = rng.int(100);
+  const climate: Climate | null = c < 22 ? 'gaia' : c < 75 ? 'terran' : null;
+  const m = rng.int(100);
+  const minerals: Minerals | null = m < 45 ? 'ultra_rich' : m < 85 ? 'rich' : null;
+  const s = rng.int(100);
+  const special = s < 18 ? 'ancient_artifacts' : s < 26 ? 'splinter_colony' : null;
+  const minSize = rng.int(100) < 40 ? 5 : 4;
+  const heavyG = rng.int(100) < (minerals === 'ultra_rich' ? 50 : minerals === 'rich' ? 25 : 10);
+  return { climate, minerals, special, minSize, heavyG };
+}
+
+/** Apply a rolled upgrade to a planet — strictly upward (a natural gaia or
+ * ultra-rich roll is never downgraded), specials never overwrite. */
+function applyPrizeUpgrade(planet: Planet, up: PrizeUpgrade): void {
+  if (up.climate && CLIMATE_RANK[up.climate] > CLIMATE_RANK[planet.climate]) planet.climate = up.climate;
+  if (up.minerals && MINERAL_RANK[up.minerals] > MINERAL_RANK[planet.minerals]) planet.minerals = up.minerals;
+  planet.sizeClass = Math.max(planet.sizeClass, up.minSize);
+  if (up.heavyG) planet.gravity = 'high';
+  if (
+    up.special &&
+    planet.special === null &&
+    !(up.special === 'splinter_colony' && ['hostile', 'energized', 'barren'].includes(planet.climate))
+  ) {
+    planet.special = up.special;
+  }
+}
+
+/** The system's most livable real planet — the one the keeper is guarding. */
+function bestPlanetAt(state: GameState, starId: number): Planet | null {
+  let best: Planet | null = null;
+  let bestScore = -1;
+  for (const p of state.planets) {
+    if (p.starId !== starId || p.body !== 'planet') continue;
+    const score = CLIMATE_RANK[p.climate] * 10 + p.sizeClass;
+    // planets iterate in ascending id order, so ties keep the lowest id
+    if (score > bestScore) {
+      best = p;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 /** The galaxy generator guarantees every home can reach every other by
  * hopping colonizable systems <= HOP_RANGE apart. Monster keepers must not
  * cut that path (or leave a home with no unguarded system in reach), so each
@@ -253,6 +319,9 @@ export function seedMonsters(state: GameState): void {
       }
       const kind = GUARDABLE[rng.int(GUARDABLE.length)]!;
       state.monsters.push({ id: state.nextId++, kind, starId: star.id, dmgStructure: 0 });
+      // whatever the keeper coils around becomes worth the fight
+      const prize = bestPlanetAt(state, star.id);
+      if (prize) applyPrizeUpgrade(prize, rollPrizeUpgrade(rng));
     }
   }
   state.monsters.sort((a, b) => a.id - b.id);
@@ -319,8 +388,13 @@ function seedMonstersMirror(state: GameState): void {
         continue;
       }
       const kind = GUARDABLE[rng.int(GUARDABLE.length)]!;
+      // one upgrade roll per symmetry group, applied to every wedge copy so
+      // the mirrored neighborhoods stay identical
+      const up = rollPrizeUpgrade(rng);
       for (const star of members.sort((a, b) => a.id - b.id)) {
         state.monsters.push({ id: state.nextId++, kind, starId: star.id, dmgStructure: 0 });
+        const prize = bestPlanetAt(state, star.id);
+        if (prize) applyPrizeUpgrade(prize, up);
       }
     }
   }

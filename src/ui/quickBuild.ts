@@ -140,8 +140,12 @@ export function cancelPin(session: GameSession<GameState>, pins: Pins, colony: C
 
 /** Drop pins whose item no longer sits in the queue (completed, or removed by
  * a manual spreadsheet edit) and pins on colonies that are gone or captured.
+ * The engine refreshes auto designs as research lands and migrates queue
+ * entries design:old → design:new — a pin on the old id follows the same
+ * migration so the player's ship keeps its status bar (and its yard).
  * Returns true when anything changed. */
 export function reconcilePins(state: GameState, empireId: number, pins: Pins): boolean {
+  const empire = state.empires.find((e) => e.id === empireId);
   let changed = false;
   for (const key of Object.keys(pins)) {
     const colonyId = Number(key);
@@ -154,7 +158,16 @@ export function reconcilePins(state: GameState, empireId: number, pins: Pins): b
     const counts = new Map<string, number>();
     for (const q of colony.queue) counts.set(q.item, (counts.get(q.item) ?? 0) + 1);
     const kept: string[] = [];
-    for (const it of pins[colonyId] ?? []) {
+    for (let it of pins[colonyId] ?? []) {
+      if ((counts.get(it) ?? 0) === 0 && it.startsWith('design:') && empire) {
+        // follow the auto-refresh: same hull, current auto design
+        const old = empire.designs.find((d) => `design:${d.id}` === it);
+        const successor = old && empire.designs.find((d) => d.auto && !d.obsolete && d.hull === old.hull);
+        if (successor && (counts.get(`design:${successor.id}`) ?? 0) > 0) {
+          it = `design:${successor.id}`;
+          changed = true;
+        }
+      }
       const n = counts.get(it) ?? 0;
       if (n > 0) {
         counts.set(it, n - 1);

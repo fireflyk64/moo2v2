@@ -79,12 +79,18 @@ describe('galaxy connectivity guarantee (bug: path between all players at range 
     }
   });
 
-  it('no size-1 planets, and home systems never carry a wormhole', () => {
+  it('planet sizes skew large (design brief: 4 usual, 5 common, tiny a rarity), homes never carry a wormhole', () => {
+    const sizeCounts = [0, 0, 0, 0, 0, 0]; // index = sizeClass
+    let planets = 0;
     for (const seed of SEEDS) {
       for (const players of [2, 4] as const) {
         const g = generateGalaxy(seed, settingsOf({ galaxySize: 'large', playerCount: players }), traitsFor(players));
         for (const p of g.planets) {
-          if (p.body === 'planet') expect(p.sizeClass).toBeGreaterThanOrEqual(2);
+          if (p.body !== 'planet') continue;
+          expect(p.sizeClass).toBeGreaterThanOrEqual(1);
+          expect(p.sizeClass).toBeLessThanOrEqual(5);
+          sizeCounts[p.sizeClass]!++;
+          planets++;
         }
         const homeStarIds = new Set(g.homePlanets.map((pid) => g.planets.find((p) => p.id === pid)!.starId));
         for (const s of g.stars) {
@@ -92,19 +98,44 @@ describe('galaxy connectivity guarantee (bug: path between all players at range 
         }
       }
     }
+    // large+huge are the clear majority; small worlds are the exception and
+    // tiny ones a curiosity (weights 1/4/20/45/30)
+    expect((sizeCounts[4]! + sizeCounts[5]!) / planets).toBeGreaterThan(0.6);
+    expect(sizeCounts[4]!).toBeGreaterThan(sizeCounts[3]!);
+    expect((sizeCounts[1]! + sizeCounts[2]!) / planets).toBeLessThan(0.12);
   });
 
-  it('empty systems are rare (a visited star usually offers something)', () => {
+  it('dead space is very rare: few empty systems, ~1% black holes, planets outnumber belts+giants', () => {
     let stars = 0;
     let empty = 0;
+    let blackHoles = 0;
+    let worlds = 0;
+    let rocks = 0;
+    let rockOnlySystems = 0;
+    let systemsWithBodies = 0;
     for (const seed of SEEDS) {
       const g = generateGalaxy(seed, settingsOf({ galaxySize: 'large', playerCount: 2 }), traitsFor(2));
       for (const s of g.stars) {
         stars++;
-        if (!g.planets.some((p) => p.starId === s.id)) empty++;
+        if (s.color === 'black_hole') blackHoles++;
+        const bodies = g.planets.filter((p) => p.starId === s.id);
+        if (!bodies.length) {
+          empty++;
+          continue;
+        }
+        systemsWithBodies++;
+        if (!bodies.some((p) => p.body === 'planet')) rockOnlySystems++;
+      }
+      for (const p of g.planets) {
+        if (p.body === 'planet') worlds++;
+        else rocks++;
       }
     }
-    expect(empty / stars).toBeLessThan(0.15);
+    expect(empty / stars).toBeLessThan(0.08);
+    expect(blackHoles / stars).toBeLessThan(0.04);
+    // belts + gas giants are seasoning, not the main course
+    expect(worlds / (worlds + rocks)).toBeGreaterThan(0.62);
+    expect(rockOnlySystems / systemsWithBodies).toBeLessThan(0.12);
   });
 
   it('prize systems (ultra-rich / gaia / specials) are guarded far more often than plain ones', () => {
@@ -145,6 +176,47 @@ describe('galaxy connectivity guarantee (bug: path between all players at range 
     expect(prizeTotal).toBeGreaterThan(10);
     expect(prizeGuarded / prizeTotal).toBeGreaterThan(0.35);
     expect(plainGuarded / Math.max(1, plainTotal)).toBeLessThan(0.2);
+  });
+
+  it('every guarded world is a prize: size 4+, and usually terran/gaia or rich+', () => {
+    const CLIMATE_RANK: Record<string, number> = {
+      gaia: 9, terran: 8, ocean: 7, swamp: 6, arid: 5, tundra: 4, desert: 3, barren: 2, energized: 1, hostile: 0,
+    };
+    let guardedSystems = 0;
+    let incredible = 0;
+    for (const seed of SEEDS) {
+      const state: GameState = gameEngine.init({
+        seed,
+        settings: settingsOf({ galaxySize: 'huge', playerCount: 2 }),
+        players: [
+          { id: 0, name: 'A', raceJson: JSON.stringify({ presetId: 'solari' }) },
+          { id: 1, name: 'B', raceJson: JSON.stringify({ presetId: 'solari' }) },
+        ],
+        dataVersion: 'test',
+      });
+      for (const m of state.monsters) {
+        const star = state.stars.find((s) => s.id === m.starId)!;
+        if (star.name === 'Orion') continue; // fixed prize layout of its own
+        const worlds = state.planets.filter((p) => p.starId === m.starId && p.body === 'planet');
+        if (!worlds.length) continue;
+        const best = [...worlds].sort(
+          (a, b) => CLIMATE_RANK[b.climate]! * 10 + b.sizeClass - (CLIMATE_RANK[a.climate]! * 10 + a.sizeClass),
+        )[0]!;
+        guardedSystems++;
+        expect(best.sizeClass).toBeGreaterThanOrEqual(4);
+        if (
+          best.climate === 'gaia' ||
+          best.climate === 'terran' ||
+          best.minerals === 'rich' ||
+          best.minerals === 'ultra_rich' ||
+          best.special !== null
+        ) {
+          incredible++;
+        }
+      }
+    }
+    expect(guardedSystems).toBeGreaterThan(5);
+    expect(incredible / guardedSystems).toBeGreaterThan(0.85);
   });
 });
 

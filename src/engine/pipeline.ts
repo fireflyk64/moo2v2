@@ -16,11 +16,12 @@ import { commandPoints, inRange, supportStars } from './movement';
 import { availableHulls, defaultDesign, designLoadoutKey } from './shipdesign';
 import { ceilDiv } from './imath';
 import { applyTerraformStep, constructAsBarren, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
-import { busyFreighters, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, organicUnitsOf, traitsOf } from './economy';
+import { busyFreighters, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, maxPopulation, organicUnitsOf, traitsOf } from './economy';
 import { applyFoundingSpecials, normalizeJobsForGroup } from './commands';
 import { rngFor } from './rng';
-import { applyResearch } from './research';
-import { ANDROID_RACE, type Colony, type GameState, type TurnEvent } from './types';
+import { applyResearch, appPickableBy, availableFields, grantApp } from './research';
+import { applicationsOfField } from './data/index';
+import { ANDROID_RACE, NATIVE_RACE, type Colony, type GameState, type TurnEvent } from './types';
 
 export interface AdvanceResult {
   events: TurnEvent[];
@@ -37,6 +38,7 @@ export function advanceTurn(state: GameState): AdvanceResult {
   s4_research(state, outputs, events);
   // S5 spawn happens inside s3 (completions instantiate immediately at the colony's star)
   s6_movement(state, events);
+  s6b_discoveries(state, events);
 
   // S7 encounters
   const battles = detectBattles(state);
@@ -670,6 +672,95 @@ function s6_movement(state: GameState, events: TurnEvent[]): void {
       }
     }
     state.popTransits = remaining;
+  }
+}
+
+// ---------- S6b discovery payouts ----------
+
+/** Unclaimed planet specials pay out to the first empire that VISITS the
+ * system — a ship (or colony) present and no hostile keeper, so guarded
+ * prizes pay only after the monster falls (planet_specials.md):
+ * - ancient_artifacts: one free technology for the discoverer; the planet's
+ *   +2-research special itself stays forever.
+ * - splinter_colony: the settlement joins the discoverer outright with up to
+ *   3 farm-only native units (they never relocate — NATIVE_RACE rules).
+ * When two empires arrive the same turn, the lower empire id claims (the
+ * same deterministic tiebreak the rest of the engine uses). */
+function s6b_discoveries(state: GameState, events: TurnEvent[]): void {
+  const romans = ['I', 'II', 'III', 'IV', 'V'];
+  for (const planet of state.planets) {
+    if (planet.body !== 'planet') continue;
+    const splinter = planet.special === 'splinter_colony' && !state.colonies.some((c) => c.planetId === planet.id);
+    const artifact = planet.special === 'ancient_artifacts' && planet.artifactsLooted !== true;
+    if (!splinter && !artifact) continue;
+    if (hostileMonsterAt(state, planet.starId)) continue;
+    let claimant: number | null = null;
+    for (const ship of state.ships) {
+      if (ship.owner < 0 || ship.location.kind !== 'star' || ship.location.starId !== planet.starId) continue;
+      if (claimant === null || ship.owner < claimant) claimant = ship.owner;
+    }
+    for (const colony of state.colonies) {
+      const p = state.planets.find((x) => x.id === colony.planetId);
+      if (p?.starId !== planet.starId) continue;
+      if (claimant === null || colony.owner < claimant) claimant = colony.owner;
+    }
+    if (claimant === null) continue;
+    const empire = state.empires.find((e) => e.id === claimant);
+    if (!empire || empire.eliminated) continue;
+
+    if (artifact) {
+      planet.artifactsLooted = true;
+      // one free technology from the fields the empire could research right
+      // now (near-term knowledge, not an endgame lottery); hyper-advanced
+      // repeatables excluded. Nothing learnable = the cache is just dust.
+      const candidates: string[] = [];
+      for (const field of availableFields(empire)) {
+        if (field.id.startsWith('advf_')) continue;
+        for (const app of applicationsOfField(field.id)) {
+          if (!empire.knownApps.includes(app.id) && appPickableBy(empire, app.id)) candidates.push(app.id);
+        }
+      }
+      candidates.sort();
+      if (candidates.length) {
+        const rng = rngFor(state.seed, state.turn, 'artifact', planet.id);
+        const appId = candidates[rng.int(candidates.length)]!;
+        grantApp(empire, appId);
+        events.push({
+          visibleTo: claimant,
+          kind: 'artifact_tech',
+          payload: { planetId: planet.id, starId: planet.starId, appId },
+        });
+      }
+    }
+
+    if (splinter) {
+      planet.special = null;
+      const star = state.stars.find((s) => s.id === planet.starId)!;
+      const units = Math.max(1, Math.min(3, maxPopulation(planet, traitsOf(empire))));
+      const colony: Colony = {
+        id: allocId(state, claimant),
+        planetId: planet.id,
+        owner: claimant,
+        name: `${star.name} ${romans[planet.orbit - 1] ?? planet.orbit}`,
+        groups: [{ race: NATIVE_RACE, popK: units * 1000, farmers: units, workers: 0, scientists: 0, unrest: false }],
+        buildings: [],
+        queue: [],
+        storedProd: 0,
+        stickyInvested: {},
+        boughtThisTurn: false,
+        foodLackPrev: 0,
+        prodLackPrev: 0,
+        housingPPPrev: 0,
+        outpost: false,
+      };
+      state.colonies.push(colony);
+      state.colonies.sort((a, b) => a.id - b.id);
+      events.push({
+        visibleTo: claimant,
+        kind: 'splinter_joined',
+        payload: { colonyId: colony.id, starId: planet.starId, units },
+      });
+    }
   }
 }
 

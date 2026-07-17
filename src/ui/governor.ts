@@ -76,6 +76,14 @@ export function governColonies(
   const queuedWar = myColonies.reduce((n, c) => n + c.queue.filter((q) => q.item.startsWith('design:')).length, 0);
   const summary = selectors.empireSummary(planned, me);
   const cpHeadroom = summary.cpSources - summary.cpUsage;
+
+  // v2-bot debt handling (soloBot.ts): tax while the treasury is negative and
+  // flip the strongest yards to trade goods, scaled to the hole — one yard
+  // cannot out-earn an empire-wide bleed. Both levers release once solvent.
+  const wantTax = empire.bc < -100 ? 30 : empire.bc < 0 ? 15 : 0;
+  if (summary.taxRatePct !== wantTax) submit('set_tax_rate', { pct: wantTax });
+  const rescueYards = empire.bc < 0 ? Math.min(3, 1 + Math.floor(-empire.bc / 500)) : 0;
+  let yardRank = 0;
   let warOrders = myWarships + queuedWar;
   // slider 4 ≈ one warship per colony; 10 ≈ militarist-grade 2.5 per colony
   const wantFleet = w.military > 0 ? Math.ceil(myColonies.length * (w.military / 4)) : 0;
@@ -106,13 +114,21 @@ export function governColonies(
   for (const colony of ordered) {
     const row = rows.get(colony.id)!;
     const realYard = row.output.prodToQueue >= 5; // weak worlds grow instead of shipbuilding
+    const rank = yardRank++;
+    const head0 = colony.queue[0]?.item;
 
     // developed worlds flip to pure research when the slider cares (the solo
-    // bot's rule); everyone else works the weight-picked preset
-    const preset = colony.buildings.length >= 5 && w.research >= 3 ? 'research' : preset0;
+    // bot's rule) — but a shipyard mid-hull keeps hands on the tools;
+    // everyone else works the weight-picked preset
+    const buildingShips = !!head0 && (head0.startsWith('design:') || SHIP_BUILDABLES.has(head0));
+    const preset = colony.buildings.length >= 5 && w.research >= 3 && !buildingShips ? 'research' : preset0;
     const jobs = selectors.presetJobs(planned, colony.id, preset);
     if (jobs) {
-      for (let k = 0; k < (preset === 'research' ? 0 : sciShifts); k++) {
+      // slider-picked scientist shifts, plus the v2 bot's growth term: big
+      // colonies staff real labs (an extra scientist per 6 pop beyond 10)
+      const units = jobs.reduce((n, g) => n + g.farmers + g.workers + g.scientists, 0);
+      const shifts = preset === 'research' ? 0 : sciShifts + Math.max(0, Math.floor((units - 10) / 6));
+      for (let k = 0; k < shifts; k++) {
         const g = jobs.find((x) => x.workers > 0);
         if (g) {
           g.workers--;
@@ -122,14 +138,27 @@ export function governColonies(
       submit('set_jobs', { colonyId: colony.id, groups: jobs });
     }
 
-    // player-pinned builds outrank the sliders: keep hands off the queue
-    // (still worth buying the head out — it is the player's own order)
+    // v2-bot buyout rule: colony ships get bought outright when the treasury
+    // covers them with a buffer; everything else at 2:1
+    const buyLimit = head0 === 'colony_ship' ? empire.bc - 60 : Math.floor(empire.bc / 2);
+
+    // player-pinned builds outrank the sliders (and even debt rescue): keep
+    // hands off the queue, still buy the player's own order out
     if (pinned?.has(colony.id)) {
-      if (row.canBuy && row.buyPrice !== null && row.buyPrice <= Math.floor(empire.bc / 2)) {
+      if (row.canBuy && row.buyPrice !== null && row.buyPrice <= buyLimit) {
         submit('buy_production', { colonyId: colony.id });
       }
       continue;
     }
+
+    // debt rescue: the strongest unpinned yards mint money until solvent
+    if (rank < rescueYards) {
+      if (empire.bc < 0 && head0 !== 'trade_goods' && row.buildable.includes('trade_goods')) {
+        submit('set_build_queue', { colonyId: colony.id, items: ['trade_goods'] });
+      }
+      continue;
+    }
+    if (head0 === 'trade_goods' && empire.bc <= 50) continue; // still digging out
 
     // settling our own system needs no ship and no fuel — but only a yard
     // that can actually FINISH a colony base gets one prepended (a 1-pop
@@ -153,14 +182,13 @@ export function governColonies(
     // because the governor itself prepends it on modest yards (a >30-turn
     // base would otherwise be wiped and re-prepended every turn, discarding
     // the queue tail each cycle).
-    const head0 = colony.queue[0]?.item;
     const redecidable = head0 === 'trade_goods' || head0 === 'housing';
     const stalled =
       !!head0 && !redecidable && head0 !== 'colony_base' && (row.turnsLeft === null || row.turnsLeft > 30);
     const busy = colony.queue.length > 0 && !redecidable && !stalled;
     if (busy) {
       // something is on the slipway: leave it alone, just consider buying it out
-      if (row.canBuy && row.buyPrice !== null && row.buyPrice <= Math.floor(empire.bc / 2)) {
+      if (row.canBuy && row.buyPrice !== null && row.buyPrice <= buyLimit) {
         submit('buy_production', { colonyId: colony.id });
       }
       continue;

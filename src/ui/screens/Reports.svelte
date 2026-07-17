@@ -109,7 +109,8 @@
         ? `new default ${String(p['hull']).replaceAll('_', ' ')} design available: ${p['name']}`
         : `⚙ default design "${p['name']}" refitted with our latest technology (new builds use it; refit older ships at a starbase)`;
       case 'natives_joined': return `natives joined ${colonyOf(p['colonyId'])} — they will work the farms (${p['units']} pop)`;
-      case 'splinter_joined': return `a splinter colony rejoined our society at ${colonyOf(p['colonyId'])} (+${p['units']} pop)`;
+      case 'splinter_joined': return `🏠 a splinter colony at ${starOf(p['starId'])} has joined our empire — ${p['units']} native farmer${Number(p['units']) === 1 ? '' : 's'} (they never relocate)`;
+      case 'artifact_tech': return `🏺 ancient artifacts at ${starOf(p['starId'])} yield a technology: ${String(p['appId'] ?? '').replaceAll('_', ' ')}`;
       default: return `${kind} ${JSON.stringify(p)}`;
     }
   }

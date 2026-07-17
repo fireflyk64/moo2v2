@@ -426,27 +426,7 @@ function advancedStart(state: GameState, homePlanets: number[], traits: RaceTrai
   for (const empire of state.empires) {
     const mine = state.colonies.filter((c) => c.owner === empire.id);
     const empireNet = () => mine.reduce((sum, c) => sum + colonyOutput(state, c).foodNet, 0);
-    let guard = 0;
-    while (empireNet() < 0 && guard++ < 1000) {
-      let best: { colony: Colony; gain: number } | null = null;
-      for (const c of mine) {
-        const g = c.groups[0];
-        if (!g || g.workers < 1 || !farmingViable(state, c)) continue;
-        const before = colonyOutput(state, c).foodNet;
-        g.workers--;
-        g.farmers++;
-        const after = colonyOutput(state, c).foodNet;
-        g.workers++;
-        g.farmers--;
-        const gain = after - before;
-        if (gain > 0 && (!best || gain > best.gain || (gain === best.gain && c.id < best.colony.id))) {
-          best = { colony: c, gain };
-        }
-      }
-      if (!best) break; // nothing left to convert: fields alone cannot feed us
-      best.colony.groups[0]!.workers--;
-      best.colony.groups[0]!.farmers++;
-    }
+    promoteFarmersUntilFed(state, empire.id, mine, empireNet);
     // a developed empire built hydroponics where fields cannot feed everyone:
     // pre-built farms (a start CONDITION, like the average start's star base —
     // the tech set stays exactly the default) on the hungriest colonies until
@@ -714,32 +694,51 @@ function bigEmpireStart(state: GameState): void {
   for (const empire of empires) {
     const mine = state.colonies.filter((c) => c.owner === empire.id && !c.outpost);
     const empireNet = () => mine.reduce((sum, c) => sum + colonyOutput(state, c).foodNet, 0);
-    let guard = 0;
-    while (empireNet() < 0 && guard++ < 1000) {
-      let best: { colony: Colony; gain: number } | null = null;
-      for (const c of mine) {
-        const g = c.groups[0];
-        if (!g || g.workers < 1 || !farmingViable(state, c)) continue;
-        const before = colonyOutput(state, c).foodNet;
-        g.workers--;
-        g.farmers++;
-        const after = colonyOutput(state, c).foodNet;
-        g.workers++;
-        g.farmers--;
-        const gain = after - before;
-        if (gain > 0 && (!best || gain > best.gain || (gain === best.gain && c.id < best.colony.id))) {
-          best = { colony: c, gain };
-        }
-      }
-      if (!best) break; // nothing left to convert: freighters cover the rest
-      best.colony.groups[0]!.workers--;
-      best.colony.groups[0]!.farmers++;
-    }
+    promoteFarmersUntilFed(state, empire.id, mine, empireNet);
     let deficit = 0;
     for (const c of mine) {
       const net = colonyOutput(state, c).foodNet;
       if (net < 0) deficit += -net;
     }
     empire.freighters = ceilDiv(deficit, 5) * 5; // whole fleets, never short
+  }
+}
+
+/** Start-condition feeder shared by the advanced and big starts: promote the
+ * OWNER-race workers (natives sort first in groups but never change jobs) to
+ * farmers on whichever world gains the most food, until the empire nets zero.
+ * Integer rounding can make a single conversion gain nothing while two would
+ * (gravity/race food coefficients round per colony), so a stalled pass
+ * retries with a double conversion before giving up. */
+function promoteFarmersUntilFed(
+  state: GameState,
+  empireId: number,
+  mine: Colony[],
+  empireNet: () => number,
+): void {
+  let guard = 0;
+  while (empireNet() < 0 && guard++ < 1000) {
+    let best: { colony: Colony; gain: number; step: number } | null = null;
+    for (const step of [1, 2] as const) {
+      for (const c of mine) {
+        const g = c.groups.find((x) => x.race === empireId);
+        if (!g || g.workers < step || !farmingViable(state, c)) continue;
+        const before = colonyOutput(state, c).foodNet;
+        g.workers -= step;
+        g.farmers += step;
+        const after = colonyOutput(state, c).foodNet;
+        g.workers += step;
+        g.farmers -= step;
+        const gain = after - before;
+        if (gain > 0 && (!best || gain > best.gain || (gain === best.gain && c.id < best.colony.id))) {
+          best = { colony: c, gain, step };
+        }
+      }
+      if (best) break; // single conversions still work: no need to double up
+    }
+    if (!best) break; // nothing left to convert: fields alone cannot feed us
+    const g = best.colony.groups.find((x) => x.race === empireId)!;
+    g.workers -= best.step;
+    g.farmers += best.step;
   }
 }

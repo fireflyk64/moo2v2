@@ -397,20 +397,16 @@ export function applyFoundingSpecials(
     planet.special = null;
   }
   if (planet.special === 'splinter_colony') {
-    // a colony that once broke off from the settlers' society rejoins: +3
-    // population units of the owner's race (clamped to the world's ceiling),
-    // working the mills on day one
+    // normally a splinter colony joins its DISCOVERER outright (pipeline
+    // s6b_discoveries). This branch is the fallback for founding paths that
+    // land directly on the planet (developed starts at init): the splinter
+    // folk integrate as up to 3 farm-only native units — same deal, no free
+    // labor force of the owner's race
     const units = Math.min(3, Math.max(0, colonyMaxPop(state, colony) - popUnitsOf(colony)));
     if (units > 0) {
-      const own = colony.groups.find((g) => g.race === colony.owner);
-      if (own) {
-        own.popK += units * 1000;
-        own.workers += units;
-      } else {
-        colony.groups.push({ race: colony.owner, popK: units * 1000, farmers: 0, workers: units, scientists: 0, unrest: false });
-        colony.groups.sort((a, b) => a.race - b.race);
-      }
-      events?.push({ visibleTo: colony.owner, kind: 'splinter_joined', payload: { colonyId: colony.id, units } });
+      colony.groups.push({ race: NATIVE_RACE, popK: units * 1000, farmers: units, workers: 0, scientists: 0, unrest: false });
+      colony.groups.sort((a, b) => a.race - b.race);
+      events?.push({ visibleTo: colony.owner, kind: 'splinter_joined', payload: { colonyId: colony.id, starId: planet.starId, units } });
     }
     planet.special = null;
   }

@@ -45,6 +45,10 @@ export interface Planet {
   minerals: Minerals;
   gravity: Gravity;
   special: string | null; // planet_specials id
+  /** ancient_artifacts: the one-time free-tech payout was already claimed by
+   * the first visitor (the +2-research special itself stays forever).
+   * Optional so older planets/states simply read as unclaimed=false. */
+  artifactsLooted?: boolean;
   homeworldOf: number | null; // empireId
   /** completed terraforming steps (raises the next step's cost) */
   terraformSteps: number;

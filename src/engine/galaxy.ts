@@ -38,38 +38,46 @@ export const MAP_SIZE: Record<GameStateSettings['galaxySize'], { w: number; h: n
 const MIN_STAR_DIST = 150; // centiparsecs
 const MIN_HOME_DIST = 900;
 
-// weight tables (average-age defaults)
+// weight tables (average-age defaults). Deliberate divergence from classic
+// MOO2 mapgen (documented, F13): dead space is not fun — black holes are a
+// rarity (classic ~4-6%), brown dwarfs scarce, and orbits fill with real
+// planets far more often than the classic 60/20/20 body split.
 const COLOR_WEIGHTS: Array<[StarColor, number]> = [
-  ['blue', 8],
-  ['white', 12],
-  ['yellow', 20],
-  ['orange', 18],
-  ['red', 30],
-  ['brown', 6],
-  ['black_hole', 6],
+  ['blue', 9],
+  ['white', 13],
+  ['yellow', 22],
+  ['orange', 20],
+  ['red', 32],
+  ['brown', 3],
+  ['black_hole', 1],
 ];
 
 /** planets per star by color: weights for 0..5 planets */
 const PLANET_COUNT_WEIGHTS: Record<StarColor, number[]> = {
-  // empty systems are deliberately rare — a visited star should usually offer
-  // SOMETHING (bug: "stars with nothing are too common")
-  blue: [4, 14, 21, 27, 22, 12],
-  white: [4, 14, 23, 27, 20, 12],
-  yellow: [2, 11, 22, 30, 23, 12],
-  orange: [4, 17, 26, 27, 17, 9],
-  red: [8, 25, 28, 22, 12, 5],
-  brown: [30, 45, 15, 10, 0, 0],
+  // empty systems are deliberately VERY rare — a visited star should nearly
+  // always offer something (bug: "stars with nothing are too common")
+  blue: [2, 12, 21, 28, 24, 13],
+  white: [2, 12, 23, 28, 22, 13],
+  yellow: [1, 9, 22, 31, 24, 13],
+  orange: [2, 14, 26, 29, 19, 10],
+  red: [4, 20, 29, 26, 15, 6],
+  brown: [12, 40, 26, 16, 6, 0],
   black_hole: [100, 0, 0, 0, 0, 0],
 };
 
+// rock-only systems were everywhere at 62/18/20 — most orbit rolls should be
+// worlds someone could live on, with belts/giants as seasoning (and outpost
+// anchors), not the main course
 const BODY_WEIGHTS: Array<[BodyType, number]> = [
-  ['planet', 62],
-  ['asteroids', 18],
-  ['gas_giant', 20],
+  ['planet', 72],
+  ['asteroids', 12],
+  ['gas_giant', 16],
 ];
 
-// no size-1 worlds (bug), and the average shifts up half a class
-const SIZE_WEIGHTS: number[] = [0, 22, 34, 28, 16]; // tiny(never)..huge
+// size distribution per the design brief: large (4) is the usual roll, huge
+// (5) common, medium (3) occasional, small rare — and a tiny world is a
+// once-a-galaxy curiosity, not a recurring disappointment
+const SIZE_WEIGHTS: number[] = [1, 4, 20, 45, 30]; // tiny..huge
 
 /** climate weights vary with orbit distance band (inner/mid/outer) */
 const CLIMATE_WEIGHTS: Record<'inner' | 'mid' | 'outer', Array<[Climate, number]>> = {
@@ -273,9 +281,10 @@ function rollSpecial(rng: Rng, climate: Climate): string | null {
   if (r < 5) return 'gem_deposits';
   if (r < 7) return 'space_debris';
   if (r < 8) return 'ancient_artifacts';
-  // natives need a world where farms can grow at all
+  // natives and splinter folk need a world where farms can grow at all
+  // (splinter colonists are farm-only natives once they join)
   if (r < 10) return ['hostile', 'energized', 'barren'].includes(climate) ? null : 'natives';
-  if (r < 11) return 'splinter_colony';
+  if (r < 11) return ['hostile', 'energized', 'barren'].includes(climate) ? null : 'splinter_colony';
   return null;
 }
 
@@ -292,13 +301,14 @@ function rollPlanetSpecs(rng: Rng, color: StarColor, minBodies = 0): PlanetSpec[
     const body = weighted(rng, BODY_WEIGHTS);
     const sizeClass = 1 + weighted(rng, SIZE_WEIGHTS.map((wgt, i) => [i, wgt] as [number, number]));
     const climate: Climate = body === 'planet' ? weighted(rng, CLIMATE_WEIGHTS[orbitBand(orbit)]) : 'barren';
+    const minerals = weighted(rng, MINERAL_WEIGHTS[color]);
     specs.push({
       orbit,
       body,
       sizeClass: body === 'planet' ? sizeClass : 3,
       climate,
-      minerals: weighted(rng, MINERAL_WEIGHTS[color]),
-      gravity: rollGravity(rng, body === 'planet' ? sizeClass : 3),
+      minerals,
+      gravity: rollGravity(rng, body === 'planet' ? sizeClass : 3, minerals),
       special: body === 'planet' ? rollSpecial(rng, climate) : null,
       homeworldOf: null,
       terraformSteps: 0,
@@ -577,6 +587,9 @@ function placeHomeworlds(
       minerals: traits.richHomeworld ? 'rich' : traits.poorHomeworld ? 'poor' : 'abundant',
       gravity: traits.gravityPref, // homeworld always matches the race
       special: traits.artifactsHomeworld ? 'ancient_artifacts' : null,
+      // the pick buys the research bonus, never a free-tech lottery ticket —
+      // and your own home system must not pay out on the turn-1 scan
+      ...(traits.artifactsHomeworld ? { artifactsLooted: true } : {}),
       homeworldOf: e,
       terraformSteps: 0,
     };
@@ -745,9 +758,12 @@ function generateMirrorGalaxy(
   return { stars, planets, homePlanets: homePlanetIds(planets, n), nextId };
 }
 
-function rollGravity(rng: Rng, sizeClass: number): Gravity {
-  // bigger planets skew heavy, small skew light
-  const roll = rng.int(100) + sizeClass * 10;
+function rollGravity(rng: Rng, sizeClass: number, minerals: Minerals = 'abundant'): Gravity {
+  // bigger AND denser planets skew heavy, small/poor skew light — classic
+  // mapgen ties gravity to size + mineral richness, so ultra-rich prizes
+  // usually come with the heavy-G tax
+  const density = minerals === 'ultra_rich' ? 14 : minerals === 'rich' ? 7 : minerals === 'poor' ? -5 : minerals === 'ultra_poor' ? -10 : 0;
+  const roll = rng.int(100) + sizeClass * 10 + density;
   if (roll < 38) return 'low';
   if (roll < 88) return 'normal';
   return 'high';
