@@ -657,9 +657,11 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
 /** Simple bombardment: each 20 points of bomb damage kills one pop unit; every
  * other threshold destroys a building instead (documented combat-redesign rule). */
 function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): Record<string, unknown> {
-  const colony = state.colonies.find(
+  const holdings = state.colonies.filter(
     (c) => c.owner === battle.defender && state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
   );
+  // a populated colony absorbs the barrage before any outpost dome does
+  const colony = holdings.find((c) => !c.outpost) ?? holdings[0];
   if (!colony) return { skipped: true };
   const attacker = state.empires.find((e) => e.id === battle.attacker)!;
   let bombDamage = 0;
@@ -678,16 +680,18 @@ function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): 
   bombDamage = Math.floor(bombDamage);
   // stellar safety shield: half of the barrage is deflected
   if (colony.buildings.includes('stellar_safety_shield')) bombDamage = Math.floor(bombDamage / 2);
-  // an undefended outpost has no population to protect it: enough bombs raze
-  // it outright (otherwise a cheap outpost denies the planet forever)
+  // an undefended outpost has no population to protect it: ANY victorious
+  // fleet levels the dome — gating this on bomb hardpoints let a cheap
+  // outpost deny the planet forever to bomb-less fleets. One dome falls per
+  // bombardment; with several, the one squatting on a colonizable planet
+  // goes first (outposts are otherwise identical and that one hurts most).
   if (colony.outpost) {
-    if (bombDamage >= 20) {
-      state.colonies = state.colonies.filter((c) => c.id !== colony.id);
-      const report = { colonyId: colony.id, bombDamage, outpostDestroyed: true };
-      events.push({ visibleTo: -1, kind: 'bombardment', payload: report });
-      return report;
-    }
-    return { skipped: true };
+    const doomed =
+      holdings.find((c) => state.planets.some((p) => p.id === c.planetId && p.body === 'planet')) ?? colony;
+    state.colonies = state.colonies.filter((c) => c.id !== doomed.id);
+    const report = { colonyId: doomed.id, bombDamage, outpostDestroyed: true };
+    events.push({ visibleTo: -1, kind: 'bombardment', payload: report });
+    return report;
   }
   const rng = rngFor(state.seed, state.turn, 'bombard', battle.id);
   let popKilled = 0;

@@ -65,7 +65,7 @@
       }
       case 'battle_pending': return `battle brewing: ${nameOf(p['attacker'])} vs ${nameOf(p['defender'])}`;
       case 'battle_resolved': return `battle at ${starOf(p['starId'])}: winner ${p['winner'] === null ? 'none' : nameOf(p['winner'])}`;
-      case 'bombardment': return `${colonyOf(p['colonyId'])} was bombarded (${p['popKilled']} pop lost)`;
+      case 'bombardment': return p['outpostDestroyed'] ? `an outpost was destroyed by orbital bombardment` : `${colonyOf(p['colonyId'])} was bombarded (${p['popKilled']} pop lost)`;
       case 'colony_captured': return `${colonyOf(p['colonyId'])} captured by ${nameOf(p['to'])}`;
       case 'invasion_repelled': return `invasion repelled at ${colonyOf(p['colonyId'])}`;
       case 'assimilated': return `conquered citizens of ${colonyOf(p['colonyId'])} have settled in`;

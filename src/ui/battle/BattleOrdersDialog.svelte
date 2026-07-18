@@ -111,6 +111,17 @@
       : { mine: count(battle.defender), theirs: count(battle.attacker), theirBase };
   });
 
+  // when the defender holds ONLY outposts here, the bombard order is really
+  // "destroy the outpost" — any winning fleet levels the dome, no bombs needed
+  const outpostTarget = $derived.by(() => {
+    const gs = session().getState();
+    if (!gs || battle.defender < 0) return false;
+    const holdings = gs.colonies.filter(
+      (c) => c.owner === battle.defender && gs.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
+    );
+    return holdings.length > 0 && holdings.every((c) => c.outpost);
+  });
+
   function submit() {
     session().submit('battle_orders', {
       battleId: battle.id,
@@ -169,9 +180,9 @@
           <input type="range" min="0" max="90" step="5" bind:value={retreatThresholdPct} />
         </label>
         {#if isAttacker}
-          <label class="row">
-            <input type="checkbox" bind:checked={bombard} />
-            Bombard the colony if the pass is won
+          <label class="row" title={outpostTarget ? 'an outpost has no population to protect it — a winning fleet destroys it outright' : undefined}>
+            <input type="checkbox" data-testid="battle-bombard" bind:checked={bombard} />
+            {outpostTarget ? '💥 Destroy the outpost if the pass is won' : 'Bombard the colony if the pass is won'}
           </label>
         {/if}
         <label class="row" title="if you win the field, the enemy's unarmed ships (colony/outpost ships, transports) are normally captured and destroyed — check to let them go">
@@ -180,7 +191,7 @@
         </label>
       </div>
       <button data-testid="battle-submit" onclick={submit}>Lock in orders (Enter)</button>
-      <p class="keys">⌨ ↑↓/1-6 stance · T target · ←→ retreat · {isAttacker ? 'B bombard · ' : ''}N spare civilians · Enter lock in</p>
+      <p class="keys">⌨ ↑↓/1-6 stance · T target · ←→ retreat · {isAttacker ? (outpostTarget ? 'B destroy outpost · ' : 'B bombard · ') : ''}N spare civilians · Enter lock in</p>
     {/if}
   </div>
 </div>

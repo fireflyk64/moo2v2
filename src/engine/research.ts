@@ -211,7 +211,10 @@ export function applyResearch(
   if (r.accumRP >= cost) {
     r.accumRP -= cost;
     r.fieldNum = null;
-    r.targetApp = null;
+    // completeField reads r.targetApp to grant the chosen application — it
+    // may only be cleared AFTER (clearing first granted the field's first
+    // app no matter what the player picked)
     completeField(state, empire, field, rng, events);
+    r.targetApp = null;
   }
 }
