@@ -1,6 +1,6 @@
 <script lang="ts">
   import { appPickableBy, selectors, traitsOf } from '@engine/index';
-  import { applicationsOfField, applicationById, fieldByNum, fieldById, fieldsOfSubject, type Subject } from '@engine/data/index';
+  import { applicationsOfField, applicationById, fieldByNum, fieldById, fieldsOfSubject, SUBJECTS, type Subject } from '@engine/data/index';
   import { EFFECTS, EFFECT_ALIASES } from '@engine/data/effectsMap';
   import { app, getActive, savePerGame } from '../state.svelte';
 
@@ -53,6 +53,20 @@
   // research order, done/current/upcoming marked
   let previewSubject = $state<string | null>(null);
   const togglePreview = (subject: string) => (previewSubject = previewSubject === subject ? null : subject);
+
+  // bugs.md: the full VISUAL tech tree — every subject as a ladder, past
+  // picks and future options at a glance (open by default, remembered)
+  let showTree = $state(typeof localStorage !== 'undefined' && localStorage.getItem('moo2.techtree') !== '0');
+  function toggleTree() {
+    showTree = !showTree;
+    try {
+      localStorage.setItem('moo2.techtree', showTree ? '1' : '0');
+    } catch {
+      // private mode: toggle holds for this tab
+    }
+  }
+  /** subjects the tree renders — SUBJECTS already excludes the special bucket */
+  const TREE_SUBJECTS = SUBJECTS;
 
   let researchNote = $state('');
   let researchNoteTimer: ReturnType<typeof setTimeout> | null = null;
@@ -188,6 +202,59 @@
           <option value={p.id}>{p.name} ({p.cost} RP, {pretty(p.fieldId)})</option>
         {/each}
       </select>
+    </div>
+  {/if}
+
+  <div class="treebar">
+    <button data-testid="toggle-techtree" onclick={toggleTree}>🌳 Tech tree {showTree ? '▾' : '▸'}</button>
+    {#if showTree}
+      <span class="dim">✓ researched · 🔬 in progress · ● available now · ⏭ queued · faded = locked behind earlier fields · hover an application for its effect</span>
+    {/if}
+  </div>
+  {#if showTree}
+    <div class="fulltree" data-testid="techtree">
+      {#each TREE_SUBJECTS as subject (subject)}
+        <div class="tcol">
+          <h4>{SUBJECT_EMOJI[subject] ?? '🔬'} {subject.replace('_', ' ')}</h4>
+          {#each fieldsOfSubject(subject) as f (f.id)}
+            {@const done = empire.completedFields.includes(f.num)}
+            {@const current = empire.research.fieldNum === f.num}
+            {@const offered = choices.some((c) => c.field.num === f.num)}
+            {@const queued = queuedNums.has(f.num)}
+            <div
+              class="tnode"
+              class:done
+              class:current
+              class:offered={offered && !current && !done}
+              class:queued
+              class:locked={!done && !current && !offered}
+              data-testid="tnode-{f.id}"
+            >
+              <div class="thead">
+                <b>{pretty(f.id)}</b>
+                <span class="tcost">{f.cost}</span>
+                <span class="tmark">{done ? '✓' : current ? '🔬' : queued ? '⏭' : offered ? '●' : ''}</span>
+                {#if !done && !current && !queued}
+                  <button
+                    class="tq"
+                    title="queue this field — starts automatically once unlocked and its turn comes"
+                    onclick={() => enqueue(f.num, f.id, null)}
+                  >⏭</button>
+                {/if}
+              </div>
+              <div class="tapps">
+                {#each applicationsOfField(f.id) as a (a.id)}
+                  <span
+                    class:got={empire.knownApps.includes(a.id)}
+                    class:want={current && empire.research.targetApp === a.id}
+                    title={appTitle(a.id)}
+                  >{a.name}{empire.knownApps.includes(a.id) ? ' ✓' : current && empire.research.targetApp === a.id ? ' ◎' : ''}</span>
+                {/each}
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/each}
     </div>
   {/if}
 
@@ -369,6 +436,124 @@
     height: 100%;
     background: linear-gradient(90deg, #2c7a4e, var(--good));
     transition: width 0.4s ease;
+  }
+  /* ---- full visual tech tree: one ladder per subject on a shared rail ---- */
+  .treebar {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin: 0.4rem 0 0.6rem;
+    flex-wrap: wrap;
+  }
+  .fulltree {
+    display: flex;
+    gap: 0.9rem;
+    overflow-x: auto;
+    padding: 0.2rem 0.2rem 0.8rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .tcol {
+    min-width: 168px;
+    flex: 1 0 168px;
+    position: relative;
+    padding-left: 13px;
+  }
+  /* the rail: research in a subject is a strict ladder — the line IS the tree */
+  .tcol::before {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 2.1rem;
+    bottom: 0.4rem;
+    width: 2px;
+    background: var(--line);
+  }
+  .tcol h4 {
+    margin: 0 0 0.45rem;
+    text-transform: capitalize;
+    font-size: 0.85rem;
+    color: var(--accent-soft);
+    white-space: nowrap;
+  }
+  .tnode {
+    position: relative;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 0.3rem 0.45rem 0.35rem;
+    margin-bottom: 0.45rem;
+    font-size: 0.72rem;
+  }
+  .tnode::before {
+    content: '';
+    position: absolute;
+    left: -13.5px;
+    top: 0.55rem;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--line);
+    border: 2px solid var(--bg);
+  }
+  .tnode.done::before {
+    background: var(--good);
+  }
+  .tnode.current::before {
+    background: var(--glow-color);
+    box-shadow: 0 0 8px var(--glow-color);
+  }
+  .tnode.offered::before {
+    background: var(--gold);
+  }
+  .tnode.queued::before {
+    background: var(--accent-soft);
+  }
+  .tnode.done {
+    border-color: color-mix(in srgb, var(--good) 45%, var(--line));
+  }
+  .tnode.current {
+    border-color: var(--glow-color);
+    box-shadow: var(--glow);
+  }
+  .tnode.offered {
+    border-color: color-mix(in srgb, var(--gold) 55%, var(--line));
+  }
+  .tnode.locked {
+    opacity: 0.55;
+  }
+  .thead {
+    display: flex;
+    align-items: baseline;
+    gap: 0.3rem;
+  }
+  .thead b {
+    text-transform: capitalize;
+    flex: 1;
+    min-width: 0;
+  }
+  .tcost {
+    color: var(--text-dim);
+    font-size: 0.66rem;
+  }
+  .tq {
+    padding: 0 0.3rem;
+    font-size: 0.62rem;
+    line-height: 1.3;
+  }
+  .tapps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 0.5rem;
+    margin-top: 0.2rem;
+    color: var(--text-dim);
+  }
+  .tapps .got {
+    color: var(--good);
+  }
+  .tapps .want {
+    color: var(--glow-color);
+    font-weight: 600;
   }
   .subjects {
     display: grid;

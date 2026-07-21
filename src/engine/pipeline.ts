@@ -72,14 +72,19 @@ export function resolveCombat(state: GameState): AdvanceResult {
       if (side >= 0) foughtAt.add(`${side}:${battle.starId}`);
     }
     // the invade order: a victorious attacker lands its marine transports
-    // right after the (optional) bombardment
-    const ordersA = battle.ordersA as { invade?: boolean } | null;
-    if (resolved.result.winner === 0 && ordersA?.invade === true && battle.defender >= 0) {
+    // right after the (optional) bombardment. An engagement choice targets
+    // the landing at the ENGAGED colony; deep space (null) means the marines
+    // stay aboard — the fleet chose to fight away from the planet; absent =
+    // legacy target (first populated colony), exactly as before.
+    const ordersA = battle.ordersA as { invade?: boolean; engagePlanetId?: number | null } | null;
+    if (resolved.result.winner === 0 && ordersA?.invade === true && battle.defender >= 0 && ordersA.engagePlanetId !== null) {
       const colony = state.colonies.find(
         (c) =>
           c.owner === battle.defender &&
           !c.outpost &&
-          state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
+          (ordersA.engagePlanetId !== undefined
+            ? c.planetId === ordersA.engagePlanetId
+            : state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId)),
       );
       if (colony) landInvasion(state, colony, battle.attacker, events);
     }

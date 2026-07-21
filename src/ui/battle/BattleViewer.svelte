@@ -5,7 +5,7 @@
   // deaths are layered VFX (effects.ts) split across a normal layer and an
   // additive glow layer so energy weapons genuinely glow. All effects are
   // deterministic in (tick, seed): scrubbing re-renders identical frames.
-  import { Application, Container, Graphics, Sprite } from 'pixi.js';
+  import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js';
   import { onDestroy, onMount } from 'svelte';
   import { FIELD_H, FIELD_W, FP, runBattle, shipStyleOf, type BattleInput, type BattleTickFrame, type CombatShipInit } from '@engine/index';
   import { rngFor } from '@engine/rng';
@@ -19,6 +19,7 @@
     drawShieldCollapse, drawShieldHit, drawSlug, drawTorpedo, drawTrail, drawWarpStreak, fxHash,
     MISSILE_TINT, TORPEDO_TINT,
   } from './effects';
+  import { makeBattleBackdrop, type BackdropPlanet } from './backdrop';
 
   const { replay, onclose }: { replay: ReplayEntry; onclose: () => void } = $props();
 
@@ -75,13 +76,13 @@
   let uiG: Graphics; // bars, markers, bystanders
   let elapsed = 0;
 
-  // deterministic decorative starfield for the battle backdrop
+  // sparse deterministic twinkle points animated over the canvas backdrop
   const stars: Array<{ x: number; y: number; r: number; a: number }> = [];
   {
     let s = 1234567;
     const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-    for (let i = 0; i < 110; i++) {
-      stars.push({ x: rnd() * CW, y: rnd() * CH, r: rnd() * 1.4 + 0.3, a: rnd() * 0.5 + 0.15 });
+    for (let i = 0; i < 36; i++) {
+      stars.push({ x: rnd() * CW, y: rnd() * CH, r: rnd() * 1.1 + 0.3, a: rnd() * 0.5 + 0.15 });
     }
   }
 
@@ -180,34 +181,48 @@
     return { x, y, angle: useNext ? lerpAngle(a0, a1, frac) : a0 };
   }
 
+  /** the contested world: the defender's colony planet at the battle star,
+   * else the system's most notable body — shown looming in the backdrop like
+   * the classic battle screen. Null outside a live session (battle lab). */
+  function battlePlanet(): BackdropPlanet | null {
+    const s = gs();
+    const starId = summary['starId'];
+    if (!s || typeof starId !== 'number') {
+      // battle lab / detached replays have no star — loom a deterministic
+      // sample world so the sandbox still shows the backdrop art
+      const climates = ['terran', 'ocean', 'desert', 'barren', 'gaia', 'tundra', 'swamp', 'arid', 'hostile', 'energized'];
+      let hsh = 0;
+      for (const ch of replay.battleId) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
+      return { seed: hsh, climate: climates[hsh % climates.length]!, body: 'planet', sizeClass: 3 };
+    }
+    const planets = s.planets.filter((p) => p.starId === starId);
+    if (!planets.length) return null;
+    // engagement (0.22.0): the input names the engaged planet outright —
+    // loom that one; an explicit deep-space fight (null) skips the colony
+    // and shows the system's notable body in the distance instead
+    if (typeof input.planetId === 'number') {
+      const ep = planets.find((pp) => pp.id === input.planetId);
+      if (ep) return { seed: ep.id, climate: ep.climate, body: ep.body, sizeClass: ep.sizeClass };
+    }
+    const defCol =
+      input.planetId === null
+        ? undefined
+        : s.colonies.find((c) => c.owner === input.defender && planets.some((p) => p.id === c.planetId));
+    const p = defCol
+      ? planets.find((pp) => pp.id === defCol.planetId)!
+      : [...planets].sort(
+          (a, b) => (b.body === 'planet' ? b.sizeClass + 10 : b.body === 'gas_giant' ? 5 : 0) - (a.body === 'planet' ? a.sizeClass + 10 : a.body === 'gas_giant' ? 5 : 0),
+        )[0]!;
+    return { seed: p.id, climate: p.climate, body: p.body, sizeClass: p.sizeClass };
+  }
+
   function drawBackdrop(): void {
     bgG.clear();
-    bgG.rect(0, 0, CW, CH).fill({ color: 0x04060e });
-    // nebula washes
-    const blobs: Array<[number, number, number, number, number]> = [
-      [CW * 0.22, CH * 0.3, 170, 0x1b2450, 0.16],
-      [CW * 0.7, CH * 0.72, 210, 0x2a1b47, 0.13],
-      [CW * 0.55, CH * 0.18, 130, 0x0f2b3d, 0.14],
-      [CW * 0.85, CH * 0.35, 100, 0x321c33, 0.1],
-    ];
-    for (const [bx, by, br, bc, ba] of blobs) {
-      for (let i = 3; i >= 1; i--) {
-        bgG.circle(bx, by, (br * i) / 3).fill({ color: bc, alpha: ba / i });
-      }
-    }
-    for (const st of stars) {
-      bgG.circle(st.x, st.y, st.r).fill({ color: 0xdde6ff, alpha: st.a });
-    }
-    // a few bright stars with cross flares
-    for (let i = 0; i < stars.length; i += 27) {
-      const st = stars[i]!;
-      bgG.moveTo(st.x - 3, st.y).lineTo(st.x + 3, st.y).stroke({ color: 0xdde6ff, width: 0.6, alpha: st.a * 0.7 });
-      bgG.moveTo(st.x, st.y - 3).lineTo(st.x, st.y + 3).stroke({ color: 0xdde6ff, width: 0.6, alpha: st.a * 0.7 });
-    }
-    // range band guides around the defender edge (dotted)
+    // range band guides around the defender edge (dotted) — drawn over the
+    // pixel-art canvas backdrop (nebula weather + planet, backdrop.ts)
     for (const [gx, ga] of [[PAD + W * 0.66, 0.5], [PAD + W * 0.33, 0.3]] as const) {
       for (let y = 4; y < CH; y += 14) {
-        bgG.moveTo(gx, y).lineTo(gx, y + 6).stroke({ color: 0x1c2444, width: 1, alpha: ga });
+        bgG.moveTo(gx, y).lineTo(gx, y + 6).stroke({ color: 0x2a3454, width: 1, alpha: ga });
       }
     }
   }
@@ -465,7 +480,7 @@
     uiG.clear();
 
     // twinkle a sparse subset of stars
-    for (let i = 0; i < stars.length; i += 9) {
+    for (let i = 0; i < stars.length; i += 3) {
       const st = stars[i]!;
       const tw = 0.5 + 0.5 * Math.sin((f.tick + frac) * 0.35 + i);
       glowG.circle(st.x, st.y, st.r * 0.9).fill({ color: 0xdde6ff, alpha: st.a * tw * 0.5 });
@@ -556,13 +571,15 @@
     host.appendChild(pixi.canvas);
     const stage = new Container();
     pixi.stage.addChild(stage);
+    // pixel-art canvas backdrop: nebula weather + the contested planet
+    const bgSprite = new Sprite(Texture.from(makeBattleBackdrop(`${replay.seed}|${replay.battleId}`, CW, CH, battlePlanet())));
     bgG = new Graphics();
     shipC = new Container();
     fxG = new Graphics();
     glowG = new Graphics();
     glowG.blendMode = 'add';
     uiG = new Graphics();
-    stage.addChild(bgG, shipC, fxG, glowG, uiG);
+    stage.addChild(bgSprite, bgG, shipC, fxG, glowG, uiG);
     drawBackdrop();
     for (const s of input.ships) views.set(s.shipId, buildView(s));
     ready = true;

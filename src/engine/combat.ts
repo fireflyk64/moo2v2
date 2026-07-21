@@ -98,6 +98,18 @@ export interface BattleOrders {
    * ships, transports) alive instead of capturing-and-scuttling them.
    * Optional for wire/save compatibility; absent = false (classic behavior). */
   spareNoncombatants?: boolean;
+  /** WHERE the fight happens (0.22.0 engagement choice).
+   * Attacker: planetId of a defender colony at the star to assault (that
+   * colony's defenses join and take the bombardment/invasion), or null for a
+   * deep-space fleet engagement away from any planet (no colony defenses, no
+   * post-battle bombardment/landing).
+   * Defender: only consulted when the attacker chose deep space — planetId
+   * of an OWN colony to hold at (the battle then happens under its guns,
+   * exactly like the classic behavior), or null to meet the fleet.
+   * ABSENT = legacy semantics: the first defender colony's defenses join,
+   * bombardment picks its classic target — old logs and timeout defaults
+   * reproduce today's outcomes byte-for-byte. */
+  engagePlanetId?: number | null;
 }
 
 export const DEFAULT_ORDERS: BattleOrders = {
@@ -154,6 +166,10 @@ export interface BattleInput {
   seedLabel: Array<string | number>;
   attacker: number; // empireId
   defender: number;
+  /** the ENGAGED planet: where the fight happens (its colony's defenses are
+   * in `ships`); null = deep space / no colony involved. Display-only for
+   * the viewer backdrop — the sim itself never reads it. */
+  planetId?: number | null;
   ships: CombatShipInit[];
   /** non-combat ships present at the star: display-only extras for the replay
    * viewer (they never enter the sim; the loser's are captured after the pass) */

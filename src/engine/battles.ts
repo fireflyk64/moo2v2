@@ -1,7 +1,7 @@
 // Battles: encounter detection (S7), building combat inputs from state,
 // applying outcomes (S9), and post-victory bombardment (S10).
 
-import { DEFAULT_ORDERS, runBattle, type BattleInput, type BattleOrders, type BattleResult, type CombatShipInit, type BattleTickFrame } from './combat';
+import { DEFAULT_ORDERS, runBattle, type BattleInput, type BattleOrders, type BattleResult, type CombatShipInit, type BattleTickFrame, type ShipOutcome } from './combat';
 import { hullById, weaponById, type WeaponRow } from './data/index';
 import { colonyPopUnits } from './economy';
 import { starDistance } from './galaxy';
@@ -12,7 +12,7 @@ import { rngFor } from './rng';
 import { BASE_COMBAT_ID, MONSTER_COMBAT_ID } from './ids';
 import { baseDesign, designStats, knownWeapons, HULLS_BUILDABLE, BASE_HULLS, type ShipDesign } from './shipdesign';
 import { shipStyleOf } from './shipstyles';
-import { ANTARAN_EMPIRE, antaranRaze, factionOf, guardianReward, monstersAt, monsterToCombat, MONSTER_SPECS } from './npc';
+import { ANTARAN_EMPIRE, MONSTER_EMPIRE, antaranRaze, factionOf, guardianReward, monstersAt, monsterToCombat, MONSTER_SPECS } from './npc';
 import type { Colony, Empire, GameState, PendingBattle, Ship, TurnEvent } from './types';
 
 export function relationKey(a: number, b: number): [number, number] {
@@ -382,6 +382,31 @@ function baseToCombat(state: GameState, empire: Empire, colony: Colony, syntheti
 export interface BuiltBattle {
   input: BattleInput;
   baseColonyId: number | null; // colony whose base fights (destroyed if base dies)
+  /** engagement (0.22.0): id of the ENGAGED defender colony (its defenses
+   * fight, it takes the bombardment/invasion); null = deep-space fleet action
+   * (no colony involved, no bombardment/landing); undefined = legacy orders —
+   * classic colony selection everywhere. */
+  engagedColonyId?: number | null;
+}
+
+/** Resolve WHERE the battle happens from both sides' engagement choices.
+ * The attacker's choice dominates: a planet = assault that colony (the
+ * defender auto-defends it); null = deep space, unless the defender chose to
+ * hold at one of its colonies — then the fight happens under that colony's
+ * guns (classic semantics, so "hold" never softens a siege). An ABSENT
+ * attacker field means legacy orders: undefined (classic selection). */
+function resolveEngagement(state: GameState, battle: PendingBattle): Colony | null | undefined {
+  const oA = battle.ordersA as BattleOrders | null;
+  const choiceA = oA?.engagePlanetId;
+  if (choiceA === undefined) return undefined; // legacy orders / timeout defaults
+  const holdings = state.colonies.filter(
+    (c) => c.owner === battle.defender && state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
+  );
+  if (choiceA !== null) return holdings.find((c) => c.planetId === choiceA) ?? undefined;
+  const oD = battle.ordersD as BattleOrders | null;
+  const choiceD = oD?.engagePlanetId;
+  if (choiceD !== null && choiceD !== undefined) return holdings.find((c) => c.planetId === choiceD) ?? null;
+  return null; // both sides meet in deep space
 }
 
 export function buildBattleInput(state: GameState, battle: PendingBattle): BuiltBattle {
@@ -406,11 +431,17 @@ export function buildBattleInput(state: GameState, battle: PendingBattle): Built
     for (const m of monstersAt(state, battle.starId, battle.defender)) ships.push(monsterToCombat(m, 1));
   }
   let baseColonyId: number | null = null;
-  const defColony = defender
-    ? state.colonies.find(
-        (c) => c.owner === battle.defender && state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
-      )
-    : undefined;
+  // engagement decides WHICH colony's defenses join the fight — deep space
+  // means none at all; legacy orders keep the classic first-colony pick
+  const engaged = resolveEngagement(state, battle);
+  const defColony =
+    engaged !== undefined
+      ? (engaged ?? undefined)
+      : defender
+        ? state.colonies.find(
+            (c) => c.owner === battle.defender && state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
+          )
+        : undefined;
   if (defColony && defender) {
     const base = baseToCombat(state, defender, defColony, BASE_COMBAT_ID + defColony.id);
     if (base) {
@@ -451,6 +482,8 @@ export function buildBattleInput(state: GameState, battle: PendingBattle): Built
       seedLabel: [state.turn, 'battle', battle.id],
       attacker: battle.attacker,
       defender: battle.defender,
+      // the engaged planet looms in the viewer backdrop; null = deep space
+      planetId: defColony ? defColony.planetId : null,
       ships: ships.sort((a, b) => a.shipId - b.shipId),
       bystanders,
       // both sides default to CHARGE — the old hold_range defender default
@@ -459,7 +492,66 @@ export function buildBattleInput(state: GameState, battle: PendingBattle): Built
       ordersD: (battle.ordersD as BattleOrders | null) ?? DEFAULT_ORDERS,
     },
     baseColonyId,
+    engagedColonyId: engaged === undefined ? undefined : engaged === null ? null : engaged.id,
   };
+}
+
+/** Fleet-mass ladder in frigate-equivalents (user rule: 12 frigates = 6
+ * destroyers = 3 cruisers = 2 battleships = 1 titan). Scouts and civilian
+ * hulls weigh nothing — only designed warships count. */
+export const HULL_WEIGHT: Record<string, number> = {
+  frigate: 1,
+  destroyer: 2,
+  cruiser: 4,
+  battleship: 6,
+  titan: 12,
+  doomstar: 24,
+};
+
+/** A fleet massing this many hull-weight points clears an ordinary monster
+ * lair outright (deterministic, zero losses) — see resolveBattle. */
+export const MONSTER_CLEAR_WEIGHT = 12;
+
+/** Bombardment fleet-mass tiers (per-turn damage caps): weight below
+ * MEDIUM is a small fleet, MEDIUM..STRONG-1 medium, STRONG+ strong. */
+export const MEDIUM_FLEET_WEIGHT = 6;
+export const STRONG_FLEET_WEIGHT = 12;
+
+/** Total hull weight the empire's designed warships mass at this star.
+ * Scouts and non-combat hulls contribute 0. */
+export function fleetHullWeight(state: GameState, empireId: number, starId: number): number {
+  const empire = state.empires.find((e) => e.id === empireId);
+  if (!empire) return 0;
+  let total = 0;
+  for (const ship of state.ships) {
+    if (ship.owner !== empireId || ship.location.kind !== 'star' || ship.location.starId !== starId) continue;
+    if (ship.shipKind !== 'design' || ship.designId === null) continue;
+    const design = empire.designs.find((d) => d.id === ship.designId);
+    if (design) total += HULL_WEIGHT[design.hull] ?? 0;
+  }
+  return total;
+}
+
+/** Apply one monster/Antaran combat outcome to world state (shared by the
+ * simulated battle path and the deterministic auto-clear). */
+function applyMonsterOutcome(state: GameState, battle: PendingBattle, o: ShipOutcome, events: TurnEvent[]): void {
+  const monster = state.monsters.find((m) => MONSTER_COMBAT_ID + m.id === o.shipId);
+  if (!monster) return;
+  if (o.destroyed) {
+    state.monsters = state.monsters.filter((m) => m !== monster);
+    // the slayer gets the news; broadcasting named an unmet empire's
+    // battle site to everyone (fast-phase information leak)
+    const victor = battle.attacker >= 0 ? battle.attacker : battle.defender;
+    events.push({ visibleTo: victor, kind: 'monster_slain', payload: { kind: monster.kind, starId: monster.starId } });
+    if (monster.kind === 'guardian') {
+      guardianReward(state, victor, events);
+    }
+  } else {
+    monster.dmgStructure = Math.max(0, o.structureMax - o.structureLeft);
+    // armor damage persists between passes exactly like ships' does
+    const specArmor = MONSTER_SPECS[monster.kind].armor;
+    monster.dmgArmor = Math.max(0, specArmor - o.armorLeft);
+  }
 }
 
 export interface ResolvedBattle {
@@ -471,6 +563,51 @@ export interface ResolvedBattle {
 /** Resolve one battle and mutate state (ship damage/removal, base destruction,
  * bombardment, non-combat ship capture-kills). */
 export function resolveBattle(state: GameState, battle: PendingBattle, events: TurnEvent[]): ResolvedBattle {
+  // Deterministic monster clears: a fleet massing MONSTER_CLEAR_WEIGHT hull
+  // points (12 frigate-equivalents — 6 destroyers, 3 cruisers, 2 battleships
+  // or any titan+) overwhelms an ordinary lair outright: instant victory,
+  // zero attacker losses, no sim. Applies to every empire alike. The Orion
+  // Guardian and the Antaran faction (id -3) still demand a real battle;
+  // below the bar the normal fight runs so light fleets test their mettle.
+  if (battle.attacker >= 0 && battle.defender === MONSTER_EMPIRE) {
+    const lair = monstersAt(state, battle.starId, MONSTER_EMPIRE);
+    if (
+      lair.length > 0 &&
+      !lair.some((m) => m.kind === 'guardian') &&
+      fleetHullWeight(state, battle.attacker, battle.starId) >= MONSTER_CLEAR_WEIGHT
+    ) {
+      const outcomes: ShipOutcome[] = lair.map((m) => ({
+        shipId: MONSTER_COMBAT_ID + m.id,
+        side: 1,
+        destroyed: true,
+        retreated: false,
+        crossed: false,
+        structureLeft: 0,
+        armorLeft: 0,
+        structureMax: MONSTER_SPECS[m.kind].structure,
+      }));
+      const kinds = lair.map((m) => m.kind);
+      for (const o of outcomes) applyMonsterOutcome(state, battle, o, events);
+      const result: BattleResult = { ticks: 0, outcomes, winner: 0, attackerDamagePct: 0, defenderDamagePct: 100 };
+      const summary: Record<string, unknown> = {
+        battleId: battle.id,
+        starId: battle.starId,
+        attacker: battle.attacker,
+        defender: battle.defender,
+        winner: battle.attacker,
+        ticks: 0,
+        attackerDamagePct: 0,
+        defenderDamagePct: 100,
+        destroyed: [],
+        autoCleared: true,
+        monsters: kinds,
+      };
+      // NPC battle: the summary goes to the attacker only (see below); a
+      // walkover gets no replay — watching nobody fight isn't a show
+      events.push({ visibleTo: battle.attacker, kind: 'battle_resolved', payload: summary });
+      return { battle, result, summary };
+    }
+  }
   const built = buildBattleInput(state, battle);
   const rng = rngFor(state.seed, ...built.input.seedLabel);
   const result = runBattle(built.input, rng);
@@ -479,24 +616,8 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
   const destroyedIds = new Set<number>();
   for (const o of result.outcomes) {
     if (o.shipId >= MONSTER_COMBAT_ID) {
-      // monster / Antaran unit
-      const monster = state.monsters.find((m) => MONSTER_COMBAT_ID + m.id === o.shipId);
-      if (!monster) continue;
-      if (o.destroyed) {
-        state.monsters = state.monsters.filter((m) => m !== monster);
-        // the slayer gets the news; broadcasting named an unmet empire's
-        // battle site to everyone (fast-phase information leak)
-        const victor = battle.attacker >= 0 ? battle.attacker : battle.defender;
-        events.push({ visibleTo: victor, kind: 'monster_slain', payload: { kind: monster.kind, starId: monster.starId } });
-        if (monster.kind === 'guardian') {
-          guardianReward(state, victor, events);
-        }
-      } else {
-        monster.dmgStructure = Math.max(0, o.structureMax - o.structureLeft);
-        // armor damage persists between passes exactly like ships' does
-        const specArmor = MONSTER_SPECS[monster.kind].armor;
-        monster.dmgArmor = Math.max(0, specArmor - o.armorLeft);
-      }
+      // monster / Antaran unit — shared with the auto-clear path
+      applyMonsterOutcome(state, battle, o, events);
       continue;
     }
     if (o.shipId >= BASE_COMBAT_ID) {
@@ -601,16 +722,18 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
     state.antarans.assaultBy = null;
   }
 
-  // bombardment (attacker victory + orders.bombard)
+  // bombardment (attacker victory + orders.bombard). A deep-space engagement
+  // (engagedColonyId === null) never bombards — the fleet chose to fight away
+  // from the planet; legacy orders (undefined) keep the classic target pick.
   const ordersA = built.input.ordersA;
   let bombReport: Record<string, unknown> | null = null;
-  if (result.winner === 0 && ordersA.bombard && built.baseColonyId !== null) {
-    bombReport = bombard(state, battle, events);
-  } else if (result.winner === 0 && ordersA.bombard) {
-    const colony = state.colonies.find(
+  if (result.winner === 0 && ordersA.bombard && built.engagedColonyId !== null) {
+    const holdings = state.colonies.filter(
       (c) => c.owner === battle.defender && state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
     );
-    if (colony) bombReport = bombard(state, battle, events);
+    const target =
+      built.engagedColonyId !== undefined ? holdings.find((c) => c.id === built.engagedColonyId) : holdings[0];
+    if (target) bombReport = bombard(state, battle, events, built.engagedColonyId);
   }
 
   const summary: Record<string, unknown> = {
@@ -720,13 +843,24 @@ export function fleetBombardDamage(state: GameState, empireId: number, starId: n
 /** Simple bombardment: each 20 points of bombardment damage kills one pop
  * unit; every other threshold destroys a building instead (documented
  * combat-redesign rule). Damage follows the MOO2 strategic model — see
- * fleetBombardDamage. */
-function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): Record<string, unknown> {
+ * fleetBombardDamage — but the per-turn TOLL is capped by the bombarding
+ * fleet's hull weight (see MEDIUM/STRONG_FLEET_WEIGHT). When an engagement
+ * choice named a colony (engagedColonyId), THAT colony takes the barrage;
+ * legacy orders keep the classic populated-before-outpost pick. */
+export function bombard(
+  state: GameState,
+  battle: PendingBattle,
+  events: TurnEvent[],
+  engagedColonyId?: number | null,
+): Record<string, unknown> {
   const holdings = state.colonies.filter(
     (c) => c.owner === battle.defender && state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
   );
   // a populated colony absorbs the barrage before any outpost dome does
-  const colony = holdings.find((c) => !c.outpost) ?? holdings[0];
+  const colony =
+    (typeof engagedColonyId === 'number' ? holdings.find((c) => c.id === engagedColonyId) : undefined) ??
+    holdings.find((c) => !c.outpost) ??
+    holdings[0];
   if (!colony) return { skipped: true };
   const shieldBlock = planetShieldBlock(colony);
   const bombDamage = fleetBombardDamage(state, battle.attacker, battle.starId, shieldBlock);
@@ -736,14 +870,28 @@ function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): 
   // bombardment; with several, the one squatting on a colonizable planet
   // goes first (outposts are otherwise identical and that one hurts most).
   if (colony.outpost) {
+    // an ENGAGED outpost is the one that falls; classic orders prefer the
+    // dome squatting on a colonizable planet
     const doomed =
-      holdings.find((c) => state.planets.some((p) => p.id === c.planetId && p.body === 'planet')) ?? colony;
+      typeof engagedColonyId === 'number' && colony.id === engagedColonyId
+        ? colony
+        : (holdings.find((c) => state.planets.some((p) => p.id === c.planetId && p.body === 'planet')) ?? colony);
     state.colonies = state.colonies.filter((c) => c.id !== doomed.id);
     const report = { colonyId: doomed.id, bombDamage, outpostDestroyed: true };
     events.push({ visibleTo: -1, kind: 'bombardment', payload: report });
     return report;
   }
   const rng = rngFor(state.seed, state.turn, 'bombard', battle.id);
+  // Per-turn caps by fleet mass (user rule: even a strong fleet removes only
+  // 2-3 pop and a building per turn). Strong (weight >= 12) fleets take at
+  // most 3 pop + 1 building, medium (6-11) 2 pop + 1 building, small (< 6)
+  // 1 pop and only OCCASIONALLY a building (a 25% seeded roll gates whether
+  // any may fall; the 60/40 hit rolls below still have to pick one). Caps
+  // only ever LOWER the formula's result — a barrage under the cap lands
+  // exactly as before.
+  const fleetWeight = fleetHullWeight(state, battle.attacker, battle.starId);
+  const maxPop = fleetWeight >= STRONG_FLEET_WEIGHT ? 3 : fleetWeight >= MEDIUM_FLEET_WEIGHT ? 2 : 1;
+  const maxBuildings = fleetWeight >= MEDIUM_FLEET_WEIGHT ? 1 : rng.chancePct(25) ? 1 : 0;
   let popKilled = 0;
   let buildingsDestroyed: string[] = [];
   let remaining = bombDamage;
@@ -752,12 +900,14 @@ function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): 
     // every 20 points is a hit that lands SOMEWHERE: 60/40 pop/building, but
     // a roll with nothing on its side falls through to the other (a barrage
     // over a building-less colony still kills, and vice versa) — the old
-    // early-outs made most of a bombardment fizzle silently
-    const destructible = colony.buildings.filter((b) => b !== 'marine_barracks');
+    // early-outs made most of a bombardment fizzle silently. A capped-out
+    // target no longer counts as "on its side".
+    const destructible =
+      buildingsDestroyed.length < maxBuildings ? colony.buildings.filter((b) => b !== 'marine_barracks') : [];
     // never bomb the last unit out of existence from orbit; groups holding
     // only fractions of a unit cannot lose a whole one either
     const biggest = [...colony.groups].sort((a, b) => b.popK - a.popK)[0];
-    const canKillPop = colonyPopUnits(colony) > 1 && biggest !== undefined && biggest.popK >= 1000;
+    const canKillPop = popKilled < maxPop && colonyPopUnits(colony) > 1 && biggest !== undefined && biggest.popK >= 1000;
     const wantsPop = rng.chancePct(60);
     if (canKillPop && (wantsPop || destructible.length === 0)) {
       // kill population: spread across ALL race groups (largest first)
@@ -768,7 +918,7 @@ function bombard(state: GameState, battle: PendingBattle, events: TurnEvent[]): 
       colony.buildings = colony.buildings.filter((x) => x !== b);
       buildingsDestroyed.push(b);
     } else {
-      break; // nothing the barrage can still touch
+      break; // caps reached, or nothing the barrage can still touch
     }
   }
   for (const g of colony.groups) {

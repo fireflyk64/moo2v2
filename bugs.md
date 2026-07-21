@@ -1,5 +1,26 @@
 # Status 2026-07-21: all items below are FIXED — notes inline under each.
 
+Round 5 (same day): battle backdrops with the contested planet + galaxy-style pixel art; bombardment feels too strong (check guides, cap pop/building losses by fleet size); deterministic monster clears (12 frigates / 6 destroyers / 3 cruisers / 2 battleships / 1 titan = auto-win, bots plan with it); a visual tech tree on the research page; attackers/defenders choose the engagement planet so the right star base and batteries fight.
+  ✅ ALL FIXED (ENGINE_VERSION 0.22.0):
+  - Battles play over stippled pixel nebulae + 1px stars with the engaged
+    world looming behind the defender's edge (battle/backdrop.ts).
+  - Audit: mechanics/*.md has no numeric bombard rule; the real issue was
+    uncapped mounts×ammo scaling. Per-turn caps by hull weight (fr1/de2/cr4/
+    bb6/ti12/ds24): strong ≥12 ≤3 pop+1 bldg; medium 6-11 ≤2+1; small <6
+    ≤1 pop, 25%-gated bldg (battles.ts, bombard-math tests).
+  - Monster lairs auto-clear at ≥12 total hull weight, zero losses, normal
+    loot/event path; Guardian/Antarans excluded; both bot brains muster
+    minimal 12-weight detachments (tests/unit/npc.test.ts).
+  - Research screen: full visual tech tree — 8 subject ladders, past picks
+    ✓'d, current glowing with target, available/queued/locked color-coded,
+    queue buttons on every future node (toggleable, remembered).
+  - Battle orders: attacker assaults a chosen colony (only ITS base/batteries
+    fight, it takes the barrage) or fights in deep space (no colony guns, no
+    bombard — blockade only); defender auto-defends an assaulted colony, or
+    chooses meet-the-fleet vs hold-at-colony when unassaulted (hold drags the
+    fight under its guns). Absent choice = byte-exact legacy for old replays.
+    Bots assault the weakest-defended colony (tests/unit/engagement.test.ts).
+
 Round 2 (same day): the interface should look more of a bright gray device having texturing with dark green backgrounds like a transparent oled screen that has a green tint and is displaying data. Right now it's too muted. Also we definitely want the colorful-style galaxy pixel art like in the example image of the map view.
   ✅ FIXED: theme.css now has a two-layer system — DEVICE tokens (bright
   textured gray: --device-hi/mid/lo/edge + an inline SVG noise texture) used

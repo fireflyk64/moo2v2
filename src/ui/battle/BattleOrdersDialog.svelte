@@ -23,6 +23,27 @@
   let bombard = $state(false);
   let invade = $state(false);
   let spareNoncombatants = $state(false);
+  // engagement (0.22.0): the defender's colonies at the battle star — the
+  // attacker picks which to assault (or deep space); the defender picks
+  // meet-the-fleet vs hold-at-colony for the case the attacker stays out
+  function holdingsNow() {
+    const gs = session().getState();
+    if (!gs || battle.defender < 0) return [];
+    return gs.colonies.filter(
+      (c) => c.owner === battle.defender && gs.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
+    );
+  }
+  const holdings = $derived.by(() => {
+    void app.version;
+    return holdingsNow();
+  });
+  // attacker default = the colony whose defenses join under legacy orders
+  // (first by id); defender default = meet the fleet
+  function initialEngage(): number | null {
+    const b = battle;
+    return b.attacker === session().playerId ? (holdingsNow()[0]?.planetId ?? null) : null;
+  }
+  let engagePlanetId = $state<number | null>(initialEngage());
 
   const STANCES = ['charge', 'hold_range', 'standoff', 'formation', 'passthrough', 'evade_retreat'];
   const PRIORITIES = ['nearest', 'biggest', 'smallest', 'warships', 'bases', 'deadliest'];
@@ -65,10 +86,10 @@
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
       retreatThresholdPct = Math.max(0, Math.min(90, retreatThresholdPct + (e.key === 'ArrowRight' ? 5 : -5)));
-    } else if (key === 'b' && isAttacker) {
+    } else if (key === 'b' && isAttacker && engagePlanetId !== null) {
       e.preventDefault();
       bombard = !bombard;
-    } else if (key === 'i' && isAttacker && invadePreview !== null) {
+    } else if (key === 'i' && isAttacker && invadePreview !== null && engagePlanetId !== null) {
       e.preventDefault();
       invade = !invade;
     } else if (key === 'n') {
@@ -79,6 +100,28 @@
       submit();
     }
   }
+
+  const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
+  const planetLabel = (planetId: number) => {
+    const gs = session().getState();
+    const p = gs?.planets.find((x) => x.id === planetId);
+    return p ? `${gs!.stars.find((s) => s.id === p.starId)?.name ?? '?'} ${ROMAN[p.orbit - 1] ?? p.orbit}` : `#${planetId}`;
+  };
+  const DEFENSE_BUILDINGS = ['star_base', 'battle_station', 'star_fortress', 'missile_base', 'ground_batteries'];
+  const defenseNote = (c: { outpost: boolean; buildings: string[] }) => {
+    const n = c.buildings.filter((b) => DEFENSE_BUILDINGS.includes(b)).length;
+    return c.outpost ? 'outpost' : n === 0 ? 'undefended' : `${n} defensive structure${n === 1 ? '' : 's'}`;
+  };
+  // what the attacker chose, once visible: a planetId (assault), null (deep
+  // space), 'legacy' (bot/timeout orders without the field = classic assault
+  // of the first colony), or 'pending' while they are still deciding
+  const attackerChoice = $derived.by(() => {
+    void app.version;
+    const b = session().getState()?.pendingBattles.find((x) => x.id === battle.id);
+    if (!b || b.ordersA === null || b.ordersA === undefined) return 'pending' as const;
+    const e = (b.ordersA as { engagePlanetId?: number | null }).engagePlanetId;
+    return e === undefined ? ('legacy' as const) : e;
+  });
 
   const roster = $derived.by(() => {
     void app.version;
@@ -134,12 +177,17 @@
   const bombardPreview = $derived.by(() => {
     const gs = session().getState();
     if (!gs || battle.defender < 0) return null;
-    const colony = gs.colonies.find(
-      (c) =>
-        c.owner === battle.defender &&
-        !c.outpost &&
-        gs.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
-    );
+    // preview the ENGAGED colony when one is picked (shields differ per world)
+    const colony =
+      (typeof engagePlanetId === 'number'
+        ? gs.colonies.find((c) => c.owner === battle.defender && !c.outpost && c.planetId === engagePlanetId)
+        : undefined) ??
+      gs.colonies.find(
+        (c) =>
+          c.owner === battle.defender &&
+          !c.outpost &&
+          gs.planets.some((p) => p.id === c.planetId && p.starId === battle.starId),
+      );
     if (!colony) return null;
     return {
       damage: fleetBombardDamage(gs, battle.attacker, battle.starId, planetShieldBlock(colony)),
@@ -179,9 +227,11 @@
         stance,
         priority,
         retreatThresholdPct,
-        bombard: isAttacker ? bombard : false,
-        invade: isAttacker && invadePreview !== null ? invade : false,
+        // deep space = the fleet never closes with the planet: no barrage, no landing
+        bombard: isAttacker && engagePlanetId !== null ? bombard : false,
+        invade: isAttacker && engagePlanetId !== null && invadePreview !== null ? invade : false,
         spareNoncombatants,
+        engagePlanetId,
       },
     });
   }
@@ -230,7 +280,44 @@
         <label>Retreat below {retreatThresholdPct}% fleet HP
           <input type="range" min="0" max="90" step="5" bind:value={retreatThresholdPct} />
         </label>
-        {#if isAttacker}
+        {#if isAttacker && holdings.length > 0}
+          <fieldset class="engage" data-testid="battle-engage">
+            <legend>Engagement — where to force the fight</legend>
+            {#each holdings as c (c.id)}
+              <label class="row">
+                <input type="radio" name="engage" value={c.planetId} bind:group={engagePlanetId} />
+                Assault {planetLabel(c.planetId)} <span class="dim">({defenseNote(c)})</span>
+              </label>
+            {/each}
+            <label class="row">
+              <input type="radio" name="engage" value={null} bind:group={engagePlanetId} />
+              Deep space — engage only the enemy fleet
+            </label>
+          </fieldset>
+        {:else if !isAttacker && holdings.length > 0}
+          {#if typeof attackerChoice === 'number' || attackerChoice === 'legacy'}
+            <p class="hint" data-testid="battle-defending">
+              🛡 Defending {planetLabel(typeof attackerChoice === 'number' ? attackerChoice : holdings[0]!.planetId)} — the enemy is assaulting it; its defenses join the battle.
+            </p>
+          {:else}
+            <fieldset class="engage" data-testid="battle-engage">
+              <legend>Engagement{attackerChoice === 'pending' ? ' — if the enemy doesn’t assault a colony' : ''}</legend>
+              <label class="row">
+                <input type="radio" name="engage" value={null} bind:group={engagePlanetId} />
+                Meet the enemy fleet in deep space
+              </label>
+              {#each holdings as c (c.id)}
+                <label class="row">
+                  <input type="radio" name="engage" value={c.planetId} bind:group={engagePlanetId} />
+                  Hold at {planetLabel(c.planetId)} — fight under its defenses <span class="dim">({defenseNote(c)})</span>
+                </label>
+              {/each}
+            </fieldset>
+          {/if}
+        {/if}
+        {#if isAttacker && engagePlanetId === null && holdings.length > 0}
+          <p class="hint" data-testid="battle-deepspace-note">Deep-space engagement: no colony defenses will fire — and no bombardment or landings this pass.</p>
+        {:else if isAttacker}
           <label class="row" title={outpostTarget ? 'an outpost has no population to protect it — a winning fleet destroys it outright' : undefined}>
             <input type="checkbox" data-testid="battle-bombard" bind:checked={bombard} />
             {outpostTarget ? '💥 Destroy the outpost if the pass is won' : 'Bombard the colony if the pass is won'}
@@ -245,7 +332,7 @@
             {/if}
           {/if}
         {/if}
-        {#if isAttacker && invadePreview !== null}
+        {#if isAttacker && invadePreview !== null && engagePlanetId !== null}
           <label class="row" title="a monumental step: your marine transports land after the pass is won — the landing force is spent whether or not the colony falls">
             <input type="checkbox" data-testid="battle-invade" bind:checked={invade} />
             🪖 Invade the colony if the pass is won ({invadePreview.marines} marine{invadePreview.marines === 1 ? '' : 's'} vs ~{invadePreview.defenders} defender{invadePreview.defenders === 1 ? '' : 's'})
@@ -318,5 +405,22 @@
     font-size: 0.75rem;
     opacity: 0.7;
     margin: -0.35rem 0 0;
+  }
+  fieldset.engage {
+    border: 1px solid var(--line-bright);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  fieldset.engage legend {
+    font-size: 0.78rem;
+    opacity: 0.8;
+    padding: 0 0.3rem;
+  }
+  .dim {
+    opacity: 0.6;
+    font-size: 0.78rem;
   }
 </style>

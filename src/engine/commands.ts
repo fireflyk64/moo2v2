@@ -758,6 +758,18 @@ const validateBattleOrders: Validator = (state, cmd) => {
   if (typeof o.bombard !== 'boolean') return 'bad bombard flag';
   if (o.invade !== undefined && typeof o.invade !== 'boolean') return 'bad invade flag';
   if (o.spareNoncombatants !== undefined && typeof o.spareNoncombatants !== 'boolean') return 'bad spare flag';
+  // engagement (0.22.0): absent = legacy; null = deep space; a planet id must
+  // be a colony AT the battle star owned by the defender (attacker's assault
+  // target) or by the submitter itself (defender's hold-at choice)
+  if (o.engagePlanetId !== undefined && o.engagePlanetId !== null) {
+    if (!Number.isSafeInteger(o.engagePlanetId)) return 'bad engage planet';
+    const owner = cmd.playerId === battle.attacker ? battle.defender : cmd.playerId;
+    const planet = state.planets.find((pl) => pl.id === o.engagePlanetId);
+    if (!planet || planet.starId !== battle.starId) return 'engage planet is not at the battle star';
+    if (!state.colonies.some((c) => c.planetId === o.engagePlanetId && c.owner === owner)) {
+      return cmd.playerId === battle.attacker ? 'engage planet is not an enemy colony' : 'engage planet is not your colony';
+    }
+  }
   return null;
 };
 
@@ -775,6 +787,8 @@ const applyBattleOrders: Applier = (state, cmd) => {
     bombard: cmd.playerId === battle.attacker ? p.orders.bombard : false,
     invade: cmd.playerId === battle.attacker && p.orders.invade === true,
     spareNoncombatants: p.orders.spareNoncombatants === true,
+    // absent stays absent (legacy semantics) — never default it here
+    ...(p.orders.engagePlanetId !== undefined ? { engagePlanetId: p.orders.engagePlanetId } : {}),
   };
   if (cmd.playerId === battle.attacker) battle.ordersA = orders;
   else battle.ordersD = orders;

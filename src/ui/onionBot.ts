@@ -14,7 +14,7 @@
 // All tunables live in the tables at the top — the tournament improvement
 // loop edits weights, not control flow.
 
-import { marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
+import { HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import { leaderById } from '@engine/leaders';
 import type { Empire, GameState, Planet } from '@engine/types';
@@ -165,19 +165,22 @@ const COLONIZE_BAR: Record<BotPersonality, number> = {
   militarist: 24,
 };
 
-/** hull-count a monster class demands before the fleet may try it (crude
- * combat-threshold stand-in until per-volley sims are wired up) */
+/** hull WEIGHT a monster class demands before the fleet may try it. Ordinary
+ * lairs use the engine's deterministic-clear bar (12 frigate-equivalents =
+ * guaranteed no-loss win, battles.ts MONSTER_CLEAR_WEIGHT); the Guardian is
+ * exempt from auto-clears and takes a real fleet; the Antarans are never
+ * worth chasing. */
 const MONSTER_PRICE: Record<string, number> = {
-  eel: 5,
-  crystal: 6,
-  amoeba: 6,
-  hydra: 8,
-  dragon: 10,
-  guardian: 12,
-  antaran_raider: 99,
-  antaran_marauder: 99,
-  antaran_intruder: 99,
-  antaran_fortress: 99,
+  eel: MONSTER_CLEAR_WEIGHT,
+  crystal: MONSTER_CLEAR_WEIGHT,
+  amoeba: MONSTER_CLEAR_WEIGHT,
+  hydra: MONSTER_CLEAR_WEIGHT,
+  dragon: MONSTER_CLEAR_WEIGHT,
+  guardian: MONSTER_CLEAR_WEIGHT * 2,
+  antaran_raider: 999,
+  antaran_marauder: 999,
+  antaran_intruder: 999,
+  antaran_fortress: 999,
 };
 
 /** leader-skill fit per constraint (spec §Leaders: constraint_fit dominates;
@@ -990,6 +993,13 @@ function runMilitary(ctx: OnionCtx, intel: Intel, scores: Record<Constraint, num
   const warships = planned.ships.filter(
     (s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star',
   );
+  // frigate-equivalent mass of one hull (monster prices are weights now)
+  const myEmpire = planned.empires.find((e) => e.id === me);
+  const weightOf = (s: (typeof warships)[number]): number => {
+    const d = myEmpire?.designs.find((x) => x.id === s.designId);
+    return d ? (HULL_WEIGHT[d.hull] ?? 0) : 0;
+  };
+  const myWeight = warships.reduce((n, s) => n + weightOf(s), 0);
 
   // guarded-prize ops (spec: attack a guardian when the win is affordable and
   // the protected system is worth it — never merely because it is beatable)
@@ -1059,17 +1069,34 @@ function runMilitary(ctx: OnionCtx, intel: Intel, scores: Record<Constraint, num
         memory.attackStar = target[0];
         memory.attackSince = planned.turn;
       }
-    } else if (!intel.atWar && guardTargets.length && intel.myWar >= Math.max(guardTargets[0]!.need, wantFleet(ctx, intel) + 1)) {
+    } else if (!intel.atWar && guardTargets.length && myWeight >= guardTargets[0]!.need && intel.myWar >= wantFleet(ctx, intel) + 1) {
       memory.attackStar = guardTargets[0]!.starId;
       memory.attackSince = planned.turn;
     }
   }
 
   // execute the committed strike: 80% of the fleet converges on the one star
+  // — except an ordinary lair, which gets a MINIMAL detachment meeting the
+  // 12-weight deterministic-clear bar (heaviest hulls first; the rest of the
+  // navy stays on station). Guardian/rival strikes keep the 80% doctrine.
   if (memory.attackStar !== null && warships.length) {
-    const strike = warships
-      .sort((a, b) => a.id - b.id)
-      .slice(0, Math.max(1, Math.floor(warships.length * 0.8)));
+    const lairKinds = planned.monsters.filter((m) => m.starId === memory.attackStar).map((m) => m.kind);
+    const ordinaryLair = lairKinds.length > 0 && lairKinds.every((k) => MONSTER_PRICE[k] === MONSTER_CLEAR_WEIGHT);
+    let strike: typeof warships;
+    if (ordinaryLair) {
+      strike = [];
+      let w = 0;
+      for (const s of [...warships].sort((a, b) => weightOf(b) - weightOf(a) || a.id - b.id)) {
+        if (w >= MONSTER_CLEAR_WEIGHT) break;
+        strike.push(s);
+        w += weightOf(s);
+      }
+      if (w < MONSTER_CLEAR_WEIGHT) strike = []; // cannot make the bar yet: hold and build
+    } else {
+      strike = warships
+        .sort((a, b) => a.id - b.id)
+        .slice(0, Math.max(1, Math.floor(warships.length * 0.8)));
+    }
     const byStar = new Map<number, number[]>();
     for (const s of strike) {
       const from = (s.location as { starId: number }).starId;
@@ -1175,6 +1202,25 @@ export function onionTurn(ctx: OnionCtx): void {
 }
 
 /** battle orders for one pending battle (called from SoloBot.orderBattles) */
+/** Attacker's engagement pick (0.22.0): assault the defender's weakest-
+ * defended colony at the star (fewest defensive structures; populated
+ * colonies before outposts), or null when the defender holds no colony there
+ * — a pure deep-space fleet hunt. */
+export function pickAssaultPlanet(state: GameState, defenderId: number, starId: number): number | null {
+  if (defenderId < 0) return null;
+  const DEFENSES = ['star_base', 'battle_station', 'star_fortress', 'missile_base', 'ground_batteries'];
+  const holdings = state.colonies.filter(
+    (c) => c.owner === defenderId && state.planets.some((p) => p.id === c.planetId && p.starId === starId),
+  );
+  if (!holdings.length) return null;
+  const pool = holdings.some((c) => !c.outpost) ? holdings.filter((c) => !c.outpost) : holdings;
+  return pool.sort(
+    (a, b) =>
+      a.buildings.filter((x) => DEFENSES.includes(x)).length - b.buildings.filter((x) => DEFENSES.includes(x)).length ||
+      a.id - b.id,
+  )[0]!.planetId;
+}
+
 export function onionBattleOrders(
   state: GameState,
   me: number,
@@ -1186,6 +1232,7 @@ export function onionBattleOrders(
   retreatThresholdPct: number;
   bombard: boolean;
   invade: boolean;
+  engagePlanetId: number | null;
 } {
   const foe = battle.attacker === me ? battle.defender : battle.attacker;
   const hullsAt = (owner: number) =>
@@ -1204,5 +1251,10 @@ export function onionBattleOrders(
     bombard: !doomed && battle.attacker === me,
     // marines in orbit always land on a win — the lift was sent to invade
     invade: !doomed && battle.attacker === me,
+    // engagement: an attacker meaning conquest assaults the weakest-defended
+    // colony; a doomed attacker stays in deep space (it is fleeing anyway);
+    // a defender always meets the fleet
+    engagePlanetId:
+      battle.attacker === me && !doomed ? pickAssaultPlanet(state, battle.defender, battle.starId) : null,
   };
 }

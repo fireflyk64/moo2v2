@@ -15,12 +15,12 @@
 // to parity, that bot built RANDOM items and never sailed the colony ships it
 // happened to build, so it sat on one system all game.)
 
-import { marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
+import { HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import type { Empire, GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 import { botRaceById, botRacePicks } from './botRaces';
-import { freshOnionMemory, onionBattleOrders, onionTurn, planetScore, type OnionMemory } from './onionBot';
+import { freshOnionMemory, onionBattleOrders, onionTurn, pickAssaultPlanet, planetScore, type OnionMemory } from './onionBot';
 
 export type BotMode = 'parity' | 'fair';
 /** fair-bot strategy generation: v1 = the original random-build brain (kept
@@ -149,6 +149,8 @@ export class SoloBot {
   private readonly mirrorCatchUp: boolean;
   /** turn of the last mirror catch-up colony-ship grant (rate limiter) */
   private lastSettlerGrantTurn = -99;
+  /** ships detached to a monster lair this turn — attack/rally leave them be */
+  private lairStrike = new Set<number>();
   /** diagnostics for the mirror proof test: totals of catch-up grants */
   mirrorEscortsGranted = 0;
   mirrorSettlersGranted = 0;
@@ -576,6 +578,12 @@ export class SoloBot {
     // system while the human matched its colony count. ----
     this.fairExpansion(me, alwaysWar);
 
+    // ---- monster ops: the engine clears an ordinary lair deterministically
+    // (zero losses) once the attacking fleet masses MONSTER_CLEAR_WEIGHT hull
+    // points, so a lair guarding settleable ground gets a minimal detachment
+    // meeting the bar — and never anything less. ----
+    this.clearLairs(planned, me);
+
     // ---- aggression: strike fleets + ground invasions. Bombard softens a
     // colony but never kills the last pop unit — the 1000-turn tournament
     // proved fleets of 100+ cannot END a war without boots: every one of 38
@@ -686,7 +694,9 @@ export class SoloBot {
    * there until the odds recover; doomed battles are fled, not fought (see
    * orderBattles). */
   private rally(state: GameState, me: number, humanId: number): void {
-    const warships = state.ships.filter((s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star');
+    const warships = state.ships.filter(
+      (s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star' && !this.lairStrike.has(s.id),
+    );
     if (!warships.length) return;
     const starOf = (planetId: number) => state.planets.find((p) => p.id === planetId)?.starId ?? null;
     const myStars = [...new Set(state.colonies.filter((c) => c.owner === me).map((c) => starOf(c.planetId)))].filter(
@@ -1013,6 +1023,81 @@ export class SoloBot {
     return best?.planetId ?? null;
   }
 
+  /** Monster ops: pick ONE worthwhile ordinary lair (never the Guardian or
+   * Antarans) whose system holds an uncolonized planet, and — only when the
+   * navy can mass MONSTER_CLEAR_WEIGHT (12 frigate-equivalents, the engine's
+   * deterministic no-loss clear bar) — send a minimal heaviest-first
+   * detachment. Below the bar no ship is ever committed; the detachment is
+   * fenced off from attack/rally via lairStrike for the rest of the turn. */
+  private clearLairs(planned: GameState, me: number): void {
+    this.lairStrike.clear();
+    const bot = planned.empires.find((e) => e.id === me);
+    if (!bot) return;
+    const warships = planned.ships.filter(
+      (s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star',
+    );
+    if (!warships.length) return;
+    const weightOf = (s: (typeof warships)[number]): number => {
+      const d = bot.designs.find((x) => x.id === s.designId);
+      return d ? (HULL_WEIGHT[d.hull] ?? 0) : 0;
+    };
+    if (warships.reduce((n, s) => n + weightOf(s), 0) < MONSTER_CLEAR_WEIGHT) return;
+    // anchors for distance ranking: my colony stars
+    const anchorStars = planned.stars.filter((st) =>
+      planned.colonies.some((c) => {
+        if (c.owner !== me) return false;
+        const p = planned.planets.find((x) => x.id === c.planetId);
+        return p?.starId === st.id;
+      }),
+    );
+    const from = (warships[0]!.location as { kind: 'star'; starId: number }).starId;
+    const reach = new Set(
+      selectors
+        .moveOptions(planned, me, from)
+        .filter((o) => o.reachable)
+        .map((o) => o.starId),
+    );
+    const atMyFleet = new Set(warships.map((s) => (s.location as { starId: number }).starId));
+    const lairs = planned.monsters
+      .filter(
+        (m) =>
+          m.kind !== 'guardian' &&
+          !m.kind.startsWith('antaran_') &&
+          (reach.has(m.starId) || atMyFleet.has(m.starId)) &&
+          planned.planets.some(
+            (p) => p.starId === m.starId && p.body === 'planet' && !planned.colonies.some((c) => c.planetId === p.id),
+          ),
+      )
+      .sort((a, b) => {
+        const star = (id: number) => planned.stars.find((st) => st.id === id)!;
+        const near = (id: number) =>
+          anchorStars.length ? Math.min(...anchorStars.map((s) => starDistance(s, star(id)))) : 0;
+        return near(a.starId) - near(b.starId) || a.starId - b.starId;
+      });
+    const target = lairs[0];
+    if (!target) return;
+    // minimal detachment: heaviest hulls first until the bar is met
+    const detachment: typeof warships = [];
+    let w = 0;
+    for (const s of [...warships].sort((a, b) => weightOf(b) - weightOf(a) || a.id - b.id)) {
+      if (w >= MONSTER_CLEAR_WEIGHT) break;
+      detachment.push(s);
+      w += weightOf(s);
+    }
+    if (w < MONSTER_CLEAR_WEIGHT) return; // cannot make the bar with what is in port
+    for (const s of detachment) this.lairStrike.add(s.id);
+    const movers = detachment.filter((s) => (s.location as { starId: number }).starId !== target.starId);
+    const byStar = new Map<number, number[]>();
+    for (const s of movers) {
+      const at = (s.location as { starId: number }).starId;
+      (byStar.get(at) ?? byStar.set(at, []).get(at)!).push(s.id);
+    }
+    for (const [origin, ids] of byStar) {
+      const ok = selectors.moveOptions(planned, me, origin).some((o) => o.reachable && o.starId === target.starId);
+      if (ok) this.submit('move_ships', { shipIds: ids, destStarId: target.starId });
+    }
+  }
+
   private attack(state: GameState, me: number, humanId: number): void {
     // declare war first (no-op if already at war)
     const rel = state.relations.find(
@@ -1020,7 +1105,9 @@ export class SoloBot {
     );
     if (!rel || rel.status !== 'war') this.submit('declare_war', { target: humanId });
 
-    const warships = state.ships.filter((s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star');
+    const warships = state.ships.filter(
+      (s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star' && !this.lairStrike.has(s.id),
+    );
     if (!warships.length) return;
     const humanStars = new Set<number>();
     for (const c of state.colonies) {
@@ -1100,6 +1187,10 @@ export class SoloBot {
       // 2×+1, not lower: a 1.5× probe fled every defense, let the enemy eat
       // the undefended colonies one by one, and got ELIMINATED by t590
       const doomed = foe >= 0 && hullsAt(foe) > hullsAt(me) * 2 + 1;
+      // engagement: an attacker that intends to bombard/invade assaults the
+      // weakest-defended colony; a doomed (fleeing) attacker keeps to deep
+      // space; a defender always meets the fleet
+      const conquest = !doomed && b.attacker === me;
       this.submit('battle_orders', {
         battleId: b.id,
         orders: {
@@ -1109,6 +1200,7 @@ export class SoloBot {
           bombard: !doomed && (this.aggressive || this.profile.warlike) && b.attacker === me,
           // marines in orbit always land on a win — the lift was sent to invade
           invade: !doomed && b.attacker === me,
+          engagePlanetId: conquest ? pickAssaultPlanet(state, b.defender, b.starId) : null,
         },
       });
     }

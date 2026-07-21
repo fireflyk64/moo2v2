@@ -112,6 +112,99 @@ describe('monsters and Orion', () => {
   });
 });
 
+describe('deterministic monster clears', () => {
+  /** An ordinary (non-guardian) lair, fabricated at a colony-free star when
+   * the seed rolled none, plus `count` starter frigates parked on it. */
+  function lairWithFrigates(state: GameState, count: number) {
+    let lair = state.monsters.find((m) => m.kind !== 'guardian');
+    if (!lair) {
+      const star = state.stars.find(
+        (s) =>
+          !state.monsters.some((m) => m.starId === s.id) &&
+          !state.colonies.some((c) => state.planets.some((p) => p.id === c.planetId && p.starId === s.id)),
+      )!;
+      lair = { id: state.nextId++, kind: 'dragon', starId: star.id, dmgStructure: 0 };
+      state.monsters.push(lair);
+    }
+    const empire = state.empires[0]!;
+    const design = empire.designs.find((d) => d.hull === 'frigate')!;
+    for (let i = 0; i < count; i++) {
+      state.ships.push({
+        id: state.nextId++,
+        owner: 0,
+        shipKind: 'design',
+        designId: design.id,
+        location: { kind: 'star', starId: lair.starId },
+        cargoPopUnits: 0,
+        cargoRace: 0,
+        dmgStructure: 0,
+        dmgArmor: 0,
+      });
+    }
+    const battles = detectBattles(state);
+    const fight = battles.find((b) => b.starId === lair!.starId)!;
+    fight.ordersA = { stance: 'charge', priority: 'nearest', retreatThresholdPct: 0, bombard: false };
+    return { lair, fight };
+  }
+
+  it('12 hull-weight points clear an ordinary lair instantly with zero losses', () => {
+    const state = newGame();
+    const { lair, fight } = lairWithFrigates(state, 12); // 12 frigates = weight 12
+    const shipsBefore = state.ships.filter((s) => s.owner === 0).map((s) => s.id);
+    const events: TurnEvent[] = [];
+    const { summary, result } = resolveBattle(state, fight, events);
+    expect(summary.autoCleared).toBe(true);
+    expect(result.winner).toBe(0);
+    expect(result.ticks).toBe(0);
+    // monster gone, every attacker hull intact and unscratched
+    expect(state.monsters.some((m) => m.id === lair.id)).toBe(false);
+    const mine = state.ships.filter((s) => s.owner === 0);
+    expect(mine.map((s) => s.id)).toEqual(shipsBefore);
+    expect(mine.every((s) => s.dmgStructure === 0 && s.dmgArmor === 0)).toBe(true);
+    // the clear is reported, but a walkover gets no replay
+    expect(events.some((e) => e.kind === 'monster_slain')).toBe(true);
+    expect(events.some((e) => e.kind === 'battle_resolved')).toBe(true);
+    expect(events.some((e) => e.kind === 'battle_replay')).toBe(false);
+  });
+
+  it('11 hull-weight points still fight the normal battle', () => {
+    const state = newGame();
+    const { fight } = lairWithFrigates(state, 11);
+    const events: TurnEvent[] = [];
+    const { summary } = resolveBattle(state, fight, events);
+    expect(summary.autoCleared).toBeUndefined();
+    // a real sim ran: the participants get a replay
+    expect(events.some((e) => e.kind === 'battle_replay')).toBe(true);
+  });
+
+  it('the Guardian is never auto-cleared', () => {
+    const state = newGame();
+    const guardian = state.monsters.find((m) => m.kind === 'guardian')!;
+    const empire = state.empires[0]!;
+    const design = empire.designs.find((d) => d.hull === 'frigate')!;
+    for (let i = 0; i < 12; i++) {
+      state.ships.push({
+        id: state.nextId++,
+        owner: 0,
+        shipKind: 'design',
+        designId: design.id,
+        location: { kind: 'star', starId: guardian.starId },
+        cargoPopUnits: 0,
+        cargoRace: 0,
+        dmgStructure: 0,
+        dmgArmor: 0,
+      });
+    }
+    const battles = detectBattles(state);
+    const fight = battles.find((b) => b.starId === guardian.starId)!;
+    fight.ordersA = { stance: 'charge', priority: 'nearest', retreatThresholdPct: 0, bombard: false };
+    const events: TurnEvent[] = [];
+    const { summary } = resolveBattle(state, fight, events);
+    expect(summary.autoCleared).toBeUndefined();
+    expect(state.monsters.some((m) => m.kind === 'guardian')).toBe(true);
+  });
+});
+
 describe('Antarans', () => {
   it('raids spawn at the largest empire and withdraw after their attack', () => {
     const state = newGame();
