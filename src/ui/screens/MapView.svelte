@@ -38,7 +38,14 @@
    * pixel-cluster look, then composited onto a FULL-res canvas where every
    * background star is a true single pixel (round-4 feedback: 5px star squares
    * competed with the real star glyphs). */
-  function makeGalaxyBackground(seedText: string, w: number, h: number): string {
+  function makeGalaxyBackground(
+    seedText: string,
+    w: number,
+    h: number,
+    /** real star positions in TEXTURE coordinates — the weather forms around
+     * them, so bright bands and nebulae sit where the stars actually are */
+    starPts: Array<{ x: number; y: number }> = [],
+  ): string {
     const PX = 5; // art-pixel size of the nebula layer — bigger = chunkier
     const seed = hashText(seedText);
     const rnd = mulberry32(seed);
@@ -95,8 +102,26 @@
       }
     }
 
+    // star-cluster haze: every REAL star seeds its own pocket of luminous gas,
+    // so the galaxy's bright structure traces the actual constellation the
+    // player will fly (bugs.md round 5: "match the chosen visiting stars")
+    const lp = starPts.map((p) => ({ x: p.x / PX, y: p.y / PX }));
+    for (const p of lp) {
+      for (let k = 0; k < 3; k++) {
+        const rr = 3 + rnd() * 6;
+        blob(
+          p.x + (rnd() - 0.5) * 9,
+          p.y + (rnd() - 0.5) * 9,
+          rr,
+          `rgba(${118 + Math.floor(rnd() * 40)},${128 + Math.floor(rnd() * 40)},${196 + Math.floor(rnd() * 50)},${0.1 + rnd() * 0.08})`,
+        );
+      }
+      blob(p.x, p.y, 2.5 + rnd() * 2, `rgba(235,230,214,${0.12 + rnd() * 0.08})`);
+    }
+
     // nebulae: the reference's loud color patches — green, violet, magenta,
-    // ember and teal clusters of overlapping chunky blobs
+    // ember and teal clusters of overlapping chunky blobs, anchored on real
+    // stars when we know them so the weather has somewhere to be visited
     const nebColors = [
       [72, 200, 118],
       [134, 82, 224],
@@ -105,10 +130,12 @@
       [62, 182, 192],
     ] as const;
     const order = [...nebColors].sort(() => rnd() - 0.5);
+    const anchors = [...lp].sort(() => rnd() - 0.5);
     const nebulaCount = 4 + Math.floor(rnd() * 2);
     for (let n = 0; n < nebulaCount; n++) {
-      const px = lw * (0.1 + rnd() * 0.8);
-      const py = lh * (0.1 + rnd() * 0.8);
+      const anchor = anchors[n];
+      const px = anchor ? anchor.x + (rnd() - 0.5) * lw * 0.06 : lw * (0.1 + rnd() * 0.8);
+      const py = anchor ? anchor.y + (rnd() - 0.5) * lh * 0.06 : lh * (0.1 + rnd() * 0.8);
       const [cr, cg, cb] = order[n % order.length]!;
       for (let k = 0; k < 16; k++) {
         const ox = (rnd() - 0.5) * (lw * 0.18);
@@ -399,15 +426,21 @@
       mapBgUrl = '';
       return;
     }
-    const texW = Math.max(900, Math.min(2048, Math.round(mapDims.w * 0.55)));
-    const texH = Math.max(700, Math.min(1536, Math.round(mapDims.h * 0.55)));
+    // one shared scale factor keeps the texture's aspect IDENTICAL to the
+    // map's, so background-size:cover is an exact fit and star positions map
+    // linearly onto the weather painted around them
+    let f = Math.max(0.55, 900 / mapDims.w, 700 / mapDims.h);
+    f = Math.min(f, 2048 / mapDims.w, 1536 / mapDims.h);
+    const texW = Math.round(mapDims.w * f);
+    const texH = Math.round(mapDims.h * f);
     const key = `${JSON.stringify(gs.seed)}:${mapDims.w}x${mapDims.h}:${texW}x${texH}`;
     const cached = MAP_BG_CACHE.get(key);
     if (cached) {
       mapBgUrl = cached;
       return;
     }
-    const url = makeGalaxyBackground(key, texW, texH);
+    const pts = gs.stars.map((s) => ({ x: s.x * f, y: s.y * f }));
+    const url = makeGalaxyBackground(key, texW, texH, pts);
     if (url) {
       MAP_BG_CACHE.set(key, url);
       mapBgUrl = url;
