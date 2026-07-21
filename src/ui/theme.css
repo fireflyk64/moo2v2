@@ -99,3 +99,219 @@
   --bg-glow-b: #0a0f24;
   --scanline-alpha: 0;
 }
+
+/* ===========================================================================
+   DESIGN-MENU CANDIDATES (round 4). Each block is a complete look; activate
+   with document.documentElement.dataset.theme = '<name>'. The default
+   :root theme above is candidate 1 ("phosphor").
+   ========================================================================= */
+
+/* 2 — cloudcity: glossy ivory optimism, sky-blue data, Bespin daylight */
+[data-theme='cloudcity'] {
+  --bg: #e8e4da;
+  --panel: #f4f1e9;
+  --panel-2: #faf8f2;
+  --panel-3: #ffffff;
+  --line: #c9c2b2;
+  --line-bright: #a89f8a;
+  --device-hi: #ffffff;
+  --device-mid: #e9e4d8;
+  --device-lo: #c8c1b0;
+  --device-edge: #9a9280;
+  --device-text: #4a4436;
+  --device-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cg stroke='rgba(0,0,0,0.10)' stroke-width='1'%3E%3Cpath d='M0 30.5H120M0 82.5H120M46.5 0V30M92.5 0V30M22.5 30V82M74.5 30V82M58.5 82V120M104.5 82V120'/%3E%3C/g%3E%3Cg stroke='rgba(255,255,255,0.5)' stroke-width='1'%3E%3Cpath d='M0 31.5H120M0 83.5H120M47.5 0V30M23.5 30V82M75.5 30V82M59.5 83V120'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0) 40%, rgba(0, 0, 0, 0.05) 60%, rgba(255, 255, 255, 0.45));
+  --text: #40382c;
+  --text-dim: #8a8272;
+  --accent: #2f6fd6;
+  --accent-soft: #2359b8;
+  --gold: #b8860b;
+  --good: #2e9e4f;
+  --bad: #d9534f;
+  --glow-color: #66a3ff;
+  --glow: 0 0 12px color-mix(in srgb, var(--glow-color) 45%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--glow-color) 40%, transparent);
+  --halo: 0 0 46px color-mix(in srgb, var(--glow-color) 20%, transparent);
+  --halo-gold: 0 0 18px color-mix(in srgb, var(--gold) 40%, transparent);
+  --input-bg: #ffffff;
+  --radius: 8px;
+  --bg-glow-a: #f8f4ea;
+  --bg-glow-b: #eee9dd;
+  --scanline-alpha: 0;
+  --vignette-alpha: 0;
+}
+
+/* 3 — starliner: bright white-silver bezels over deep navy screens */
+[data-theme='starliner'] {
+  --title-color: var(--device-text);
+  --title-glow: none;
+  --bg: #0a1428;
+  --panel: #101c36;
+  --panel-2: #16264a;
+  --panel-3: #1d305c;
+  --line: #3a4a74;
+  --line-bright: #5c70a4;
+  --device-hi: #fbfdff;
+  --device-mid: #dde4ec;
+  --device-lo: #b0bbc8;
+  --device-edge: #8794a3;
+  --device-text: #22303f;
+  --device-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cg stroke='rgba(0,0,0,0.12)' stroke-width='1'%3E%3Cpath d='M0 30.5H120M0 82.5H120M46.5 0V30M92.5 0V30M22.5 30V82M74.5 30V82M58.5 82V120M104.5 82V120'/%3E%3C/g%3E%3Cg stroke='rgba(255,255,255,0.55)' stroke-width='1'%3E%3Cpath d='M0 31.5H120M0 83.5H120M47.5 0V30M23.5 30V82M75.5 30V82M59.5 83V120'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.05) 40%, rgba(0, 0, 0, 0.08) 58%, rgba(255, 255, 255, 0.5));
+  --text: #dbe6f7;
+  --text-dim: #91a1bd;
+  --accent: #58a6ff;
+  --accent-soft: #9cc7ff;
+  --gold: #ffd479;
+  --good: #5ee08a;
+  --bad: #ff8a7a;
+  --glow-color: #58a6ff;
+  --glow: 0 0 12px color-mix(in srgb, var(--glow-color) 55%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--glow-color) 45%, transparent);
+  --halo: 0 0 46px color-mix(in srgb, var(--glow-color) 16%, transparent);
+  --halo-gold: 0 0 18px color-mix(in srgb, var(--gold) 45%, transparent);
+  --input-bg: #0a1226;
+  --radius: 6px;
+  --bg-glow-a: #142449;
+  --bg-glow-b: #0d1832;
+  --scanline-alpha: 0.05;
+  --vignette-alpha: 0.2;
+}
+
+/* 4 — chrome: polished steel with a hard specular band, electric cyan data */
+[data-theme='chrome'] {
+  --title-color: var(--device-text);
+  --title-glow: none;
+  --bg: #0b0f16;
+  --panel: #12161f;
+  --panel-2: #171d29;
+  --panel-3: #1f2734;
+  --line: #3d4757;
+  --line-bright: #67758a;
+  --device-hi: #f2f6fa;
+  --device-mid: #bcc5d0;
+  --device-lo: #7e8997;
+  --device-edge: #d7dee6;
+  --device-text: #1d242c;
+  --device-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cg stroke='rgba(0,0,0,0.14)' stroke-width='1'%3E%3Cpath d='M0 30.5H120M0 82.5H120M46.5 0V30M92.5 0V30M22.5 30V82M74.5 30V82M58.5 82V120M104.5 82V120'/%3E%3C/g%3E%3Cg stroke='rgba(255,255,255,0.6)' stroke-width='1'%3E%3Cpath d='M0 31.5H120M0 83.5H120M47.5 0V30M23.5 30V82M75.5 30V82M59.5 83V120'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.1) 35%, rgba(0, 0, 0, 0.18) 52%, rgba(255, 255, 255, 0.45));
+  --text: #d5dde8;
+  --text-dim: #8d99a8;
+  --accent: #35d6e8;
+  --accent-soft: #8ceaf5;
+  --gold: #f0c964;
+  --good: #58dd8a;
+  --bad: #ff7a6b;
+  --glow-color: #49d9ea;
+  --glow: 0 0 12px color-mix(in srgb, var(--glow-color) 55%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--glow-color) 45%, transparent);
+  --halo: 0 0 46px color-mix(in srgb, var(--glow-color) 16%, transparent);
+  --halo-gold: 0 0 18px color-mix(in srgb, var(--gold) 45%, transparent);
+  --input-bg: #0a0e14;
+  --radius: 4px;
+  --bg-glow-a: #131a26;
+  --bg-glow-b: #0d1119;
+  --scanline-alpha: 0.05;
+  --vignette-alpha: 0.22;
+}
+
+/* 6 — aurora: dark iridescence, violet + teal on near-black indigo */
+[data-theme='aurora'] {
+  --bg: #0a0a14;
+  --panel: #12121f;
+  --panel-2: #191a2c;
+  --panel-3: #21223a;
+  --line: #3c3d5e;
+  --line-bright: #5c5e8c;
+  --device-hi: #494b66;
+  --device-mid: #33344a;
+  --device-lo: #1f2032;
+  --device-edge: #7c7fb0;
+  --device-text: #e8e9fa;
+  --text: #dcdcf2;
+  --text-dim: #9495b8;
+  --accent: #b78bff;
+  --accent-soft: #d3b6ff;
+  --gold: #ffd479;
+  --good: #4fe0c0;
+  --bad: #ff7a9d;
+  --glow-color: #8f7bff;
+  --glow: 0 0 12px color-mix(in srgb, var(--glow-color) 55%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--glow-color) 45%, transparent);
+  --halo: 0 0 46px color-mix(in srgb, var(--glow-color) 18%, transparent);
+  --halo-gold: 0 0 18px color-mix(in srgb, var(--gold) 45%, transparent);
+  --input-bg: #0b0b16;
+  --radius: 6px;
+  --bg-glow-a: #191330;
+  --bg-glow-b: #101024;
+  --scanline-alpha: 0.06;
+  --vignette-alpha: 0.26;
+}
+
+/* 7 — brasswing: ivory + brass art-deco spaceliner, navy data */
+[data-theme='brasswing'] {
+  --bg: #efe6d4;
+  --panel: #f7f0e0;
+  --panel-2: #fdf8ec;
+  --panel-3: #fffdf6;
+  --line: #d0c3a4;
+  --line-bright: #b3a37c;
+  --device-hi: #f6ead0;
+  --device-mid: #e0cc9e;
+  --device-lo: #bda269;
+  --device-edge: #8f7b45;
+  --device-text: #46350f;
+  --device-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cg stroke='rgba(90,60,10,0.14)' stroke-width='1'%3E%3Cpath d='M0 30.5H120M0 82.5H120M46.5 0V30M92.5 0V30M22.5 30V82M74.5 30V82M58.5 82V120M104.5 82V120'/%3E%3C/g%3E%3Cg stroke='rgba(255,250,230,0.55)' stroke-width='1'%3E%3Cpath d='M0 31.5H120M0 83.5H120M47.5 0V30M23.5 30V82M75.5 30V82M59.5 83V120'/%3E%3C/g%3E%3C/svg%3E"),
+    linear-gradient(180deg, rgba(255, 250, 235, 0.7), rgba(255, 250, 235, 0) 40%, rgba(90, 60, 10, 0.08) 60%, rgba(255, 250, 235, 0.5));
+  --text: #453a22;
+  --text-dim: #8d7f5e;
+  --accent: #1f5f8b;
+  --accent-soft: #14486b;
+  --gold: #a67816;
+  --good: #35843f;
+  --bad: #b5473f;
+  --glow-color: #4b8fca;
+  --glow: 0 0 12px color-mix(in srgb, var(--glow-color) 45%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--glow-color) 40%, transparent);
+  --halo: 0 0 46px color-mix(in srgb, var(--glow-color) 18%, transparent);
+  --halo-gold: 0 0 18px color-mix(in srgb, var(--gold) 45%, transparent);
+  --input-bg: #fffef8;
+  --radius: 10px;
+  --bg-glow-a: #f6efdd;
+  --bg-glow-b: #efe6d0;
+  --scanline-alpha: 0;
+  --vignette-alpha: 0;
+}
+
+/* 8 — midnight-gold: gunmetal + midnight blue, everything glows gold */
+[data-theme='midnight-gold'] {
+  --bg: #070a12;
+  --panel: #0d1220;
+  --panel-2: #131a2c;
+  --panel-3: #1a2338;
+  --line: #333e58;
+  --line-bright: #536183;
+  --device-hi: #3b4152;
+  --device-mid: #292e3d;
+  --device-lo: #191d28;
+  --device-edge: #6b7284;
+  --device-text: #f2ead2;
+  --text: #ded9c8;
+  --text-dim: #968f78;
+  --accent: #ffd061;
+  --accent-soft: #ffe4a0;
+  --gold: #ffd061;
+  --good: #6fe08a;
+  --bad: #ff7a6b;
+  --glow-color: #ffcd54;
+  --glow: 0 0 12px color-mix(in srgb, var(--glow-color) 50%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--glow-color) 40%, transparent);
+  --halo: 0 0 46px color-mix(in srgb, var(--glow-color) 14%, transparent);
+  --halo-gold: 0 0 22px color-mix(in srgb, var(--gold) 50%, transparent);
+  --input-bg: #060910;
+  --radius: 4px;
+  --bg-glow-a: #131320;
+  --bg-glow-b: #0c0e18;
+  --scanline-alpha: 0.07;
+  --vignette-alpha: 0.26;
+}

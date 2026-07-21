@@ -8,6 +8,9 @@
   import { describeSaveError, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
   import { app, bindActive } from '../state.svelte';
   import { BRAND } from '../brand';
+  import { THEMES, applyTheme, currentTheme } from '../themes';
+
+  let themeId = $state(currentTheme());
 
   const q = new URLSearchParams(location.search);
   let server = $state(q.get('server') ?? DEFAULT_SERVER);
@@ -291,6 +294,19 @@
   {#if app.error}<p class="error" data-testid="error">{app.error}</p>{/if}
 </div>
 <p class="labline"><a href="#battle-lab">⚗ Battle Lab</a> — build fleets for both sides and watch them fight (balance sandbox)</p>
+<label class="themerow" title="cosmetic only — switch any time here or on the Empires screen; game colors (players, stars, planets) never change">
+  🎨 UI theme
+  <select data-testid="ui-theme" bind:value={themeId} onchange={() => applyTheme(themeId)}>
+    {#each THEMES as t (t.id)}
+      <option value={t.id}>{t.label}</option>
+    {/each}
+  </select>
+  <span class="themedots">
+    {#each THEMES.find((t) => t.id === themeId)?.dots ?? [] as c (c)}
+      <i style="background:{c}"></i>
+    {/each}
+  </span>
+</label>
 </div>
 
 <style>
@@ -406,6 +422,24 @@
     margin: 1rem 0 0;
     font-size: 0.85rem;
     color: var(--text-dim);
+  }
+  .themerow {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.9rem;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .themedots {
+    display: flex;
+    gap: 0.25rem;
+  }
+  .themedots i {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.3);
   }
   .labline a {
     color: var(--accent-soft);

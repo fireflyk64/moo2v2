@@ -988,6 +988,8 @@
     padding: 0.45rem 1rem;
     background: var(--device-texture), linear-gradient(180deg, var(--device-mid), var(--device-lo));
     border-bottom: 1px solid var(--device-edge);
+    /* bezel text follows the DEVICE layer — light bezels need dark text */
+    color: var(--device-text);
     position: sticky;
     top: 0;
     flex-wrap: wrap;
@@ -998,8 +1000,8 @@
     font-weight: 800;
     font-size: 0.95rem;
     text-transform: uppercase;
-    color: var(--accent-soft);
-    text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+    color: var(--title-color, var(--accent-soft));
+    text-shadow: var(--title-glow, 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent));
     letter-spacing: 0.09em;
     white-space: nowrap;
   }

@@ -125,7 +125,7 @@
         transparent 1px,
         transparent 3px
       ),
-      radial-gradient(ellipse 120% 120% at 50% 45%, transparent 65%, rgba(0, 0, 0, 0.28) 100%);
+      radial-gradient(ellipse 120% 120% at 50% 45%, transparent 65%, rgba(0, 0, 0, var(--vignette-alpha, 0.28)) 100%);
   }
   .starfield {
     position: fixed;

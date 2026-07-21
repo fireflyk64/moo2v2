@@ -127,12 +127,19 @@
       }
     }
 
-    // pixel grain: random dark speckle gives the dithered retro texture
-    const grainCount = Math.floor((lw * lh) / 9);
-    for (let i = 0; i < grainCount; i++) {
-      ctx.fillStyle = `rgba(0,0,0,${0.05 + rnd() * 0.1})`;
-      ctx.fillRect(Math.floor(rnd() * lw), Math.floor(rnd() * lh), 1, 1);
+    // gas stipple: per-pixel brightness jitter turns the smooth blob gradients
+    // into dithered pixel clouds — the "universe weather" of the reference art.
+    // Every art-pixel of nebula/arm haze gets its own random luminance, so the
+    // clouds read as grainy colored gas instead of airbrush.
+    const img = ctx.getImageData(0, 0, lw, lh);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const j = rnd() < 0.12 ? 0.45 + rnd() * 0.3 : 0.74 + rnd() * 0.52;
+      d[i] = Math.min(255, d[i]! * j);
+      d[i + 1] = Math.min(255, d[i + 1]! * j);
+      d[i + 2] = Math.min(255, d[i + 2]! * j);
     }
+    ctx.putImageData(img, 0, 0);
 
     // ---- full-res composite: chunky nebula layer under single-pixel stars ----
     const full = document.createElement('canvas');
@@ -909,7 +916,23 @@
         <filter id="starsoft" x="-80%" y="-80%" width="260%" height="260%">
           <feGaussianBlur stdDeviation="2.8" />
         </filter>
+        <radialGradient id="underdark">
+          <stop offset="0%" stop-color="#020409" stop-opacity="0.78" />
+          <stop offset="55%" stop-color="#020409" stop-opacity="0.6" />
+          <stop offset="100%" stop-color="#020409" stop-opacity="0" />
+        </radialGradient>
       </defs>
+
+      <!-- dark pools under UNEXPLORED stars so their glyphs + names survive the
+           colorful galaxy weather. Explored stars sit inside the territory
+           tint, so this layer draws first and the fuel range washes OVER it -->
+      <g class="underdark" aria-hidden="true">
+        {#each view as v (v.star.id)}
+          {#if !v.explored}
+            <circle cx={v.star.x} cy={v.star.y} r="52" fill="url(#underdark)" />
+          {/if}
+        {/each}
+      </g>
 
       <!-- fuel range as ONE muted territory in the player color: solid circles
            inside a group whose opacity applies AFTER compositing, so overlaps
@@ -1587,12 +1610,21 @@
     fill: var(--text-dim);
     font-size: 22px;
   }
+  /* names get a dark letter outline so they read on nebula clouds */
+  .label,
+  .eta,
+  .count {
+    paint-order: stroke;
+    stroke: rgba(2, 4, 9, 0.85);
+    stroke-width: 2.6px;
+    stroke-linejoin: round;
+  }
   .label {
     fill: var(--text);
     text-shadow: 0 0 6px var(--bg);
   }
   .dimlabel {
-    fill: var(--line-bright);
+    fill: #b9c4d6;
   }
   .unknown {
     fill: var(--line-bright);

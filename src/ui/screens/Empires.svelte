@@ -10,6 +10,7 @@
   import GroundBattleDialog from '../battle/GroundBattleDialog.svelte';
   import type { GroundBattleEntry } from '../state.svelte';
   import { app, getActive, saveAutoReplay } from '../state.svelte';
+  import { THEMES, applyTheme, currentTheme } from '../themes';
   import { addBotForSeat, removeBotForSeat } from '../net';
 
   const session = () => getActive()!.session;
@@ -27,6 +28,7 @@
   const PREVIEW_CLASSES: ArtClass[] = ['scout', 'frigate', 'destroyer', 'cruiser', 'battleship', 'titan', 'doomstar', 'star_base'];
   const currentStyle = $derived(me ? shipStyleOf(me) : SHIP_STYLES[0]!.id);
   let styleSel = $state<string | null>(null);
+  let themeId = $state(currentTheme());
   const shownStyle = $derived(styleSel ?? currentStyle);
   const shownStyleInfo = $derived(SHIP_STYLES.find((s) => s.id === shownStyle) ?? SHIP_STYLES[0]!);
 
@@ -253,6 +255,23 @@
       {/each}
     </div>
     <p class="dim finePrint">Cosmetic only. This changes how your fleets look in battles and replays.</p>
+  </div>
+
+  <div class="appearance" data-testid="ui-theme-panel">
+    <div class="stylebar">
+      <h3>UI theme</h3>
+      <select data-testid="ui-theme" bind:value={themeId} onchange={() => applyTheme(themeId)}>
+        {#each THEMES as t (t.id)}
+          <option value={t.id}>{t.label}</option>
+        {/each}
+      </select>
+      <span class="themedots">
+        {#each THEMES.find((t) => t.id === themeId)?.dots ?? [] as c (c)}
+          <i style="background:{c}"></i>
+        {/each}
+      </span>
+      <span class="dim">Cosmetic only — game colors (players, stars, planets) never change.</span>
+    </div>
   </div>
 
   <h3>Relations</h3>
@@ -636,6 +655,16 @@
   }
   .stylebar h3 {
     margin: 0;
+  }
+  .themedots {
+    display: flex;
+    gap: 0.25rem;
+  }
+  .themedots i {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.3);
   }
   .stylename {
     min-width: 6rem;
