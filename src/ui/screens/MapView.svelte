@@ -7,6 +7,7 @@
   import type { StarColor } from '@engine/types';
   import { MAP_SIZE } from '@engine/galaxy';
   import { playerColor, STAR_COLORS } from '../colors';
+  import PixelPlanet from '../PixelPlanet.svelte';
   import { app, getActive, savePerGame } from '../state.svelte';
   import { BUILD_HOTKEYS, bestColonyFor, cancelPin, pinBuild, pinnedStatus, resolveHotkeyItem } from '../quickBuild';
   import AutopilotBar from '../components/AutopilotBar.svelte';
@@ -1235,6 +1236,7 @@
         {#each selected.planets as p (p.id)}
           <li data-testid="planet-{p.id}">
             <span class="orbit">{p.orbit}</span>
+            <PixelPlanet seed={p.id} climate={p.climate} body={p.body} size={16} />
             {p.body === 'planet' ? `${p.climate} · size ${p.sizeClass} · ${prettify(p.minerals)} · ${p.gravity}-g` : prettify(p.body)}
             {#each selected.colonies.filter((c) => gs?.colonies.find((x) => x.id === c.id)?.planetId === p.id) as c (c.id)}
               <b style="color:{playerColor(c.owner)}"> — {c.name}</b>
@@ -1343,11 +1345,11 @@
 <style>
   .bodyx {
     font-size: 8px;
-    fill: #6a7288;
+    fill: var(--text-dim);
   }
   /* ---- quick-build: armed hint, dropdown, pinned status bars ---- */
   .buildarm {
-    background: linear-gradient(180deg, #2a3560, #1d2547);
+    background: linear-gradient(180deg, var(--panel-3), var(--panel-3));
     border: 1px solid var(--accent-soft, #6c86d8);
     border-radius: 8px;
     padding: 0.4rem 0.6rem;
@@ -1361,8 +1363,8 @@
     line-height: 1.5;
   }
   .buildarm kbd {
-    background: #101630;
-    border: 1px solid var(--line-bright, #3a4a80);
+    background: var(--panel);
+    border: 1px solid var(--line-bright, var(--line-bright));
     border-radius: 4px;
     padding: 0 0.28rem;
     font-size: 0.72rem;
@@ -1409,7 +1411,7 @@
     flex: 1;
     max-width: 14rem;
     height: 0.5rem;
-    background: #0d1228;
+    background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 4px;
     overflow: hidden;
@@ -1417,13 +1419,13 @@
   .pin .pfill {
     display: block;
     height: 100%;
-    background: linear-gradient(90deg, #2c7a4e, var(--good, #5ee08a));
+    background: linear-gradient(90deg, #2c7a4e, var(--good, var(--good)));
     transition: width 0.4s ease;
   }
   .pin .peta {
     min-width: 2.6rem;
     text-align: right;
-    color: var(--text-dim, #9aa3c0);
+    color: var(--text-dim, var(--text-dim));
     font-variant-numeric: tabular-nums;
   }
   .pin .pcancel {
@@ -1454,8 +1456,8 @@
     color: var(--bad, #ff7b7b);
   }
   .foechip {
-    background: rgba(255, 110, 110, 0.12);
-    border: 1px solid rgba(255, 110, 110, 0.35);
+    background: color-mix(in srgb, var(--bad) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent);
     border-radius: 6px;
     padding: 0 0.3rem;
     margin-right: 0.25rem;
@@ -1477,8 +1479,8 @@
   }
   .mapnote {
     background: #33201a;
-    border: 1px solid var(--bad, #ff8a7a);
-    color: var(--bad, #ff8a7a);
+    border: 1px solid var(--bad, var(--bad));
+    color: var(--bad, var(--bad));
     border-radius: 6px;
     padding: 0.3rem 0.6rem;
     margin-bottom: 0.4rem;
@@ -1486,8 +1488,8 @@
   }
   svg {
     background:
-      radial-gradient(70% 60% at 60% 30%, rgba(38, 48, 95, 0.35) 0%, transparent 70%),
-      #05070f;
+      radial-gradient(70% 60% at 60% 30%, color-mix(in srgb, var(--panel-3) 35%, transparent) 0%, transparent 70%),
+      var(--bg);
     border: 1px solid var(--line);
     border-radius: 10px;
     min-height: 0;
@@ -1532,30 +1534,30 @@
     outline: none;
   }
   text {
-    fill: #aab3d0;
+    fill: var(--text-dim);
     font-size: 22px;
   }
   .label {
-    fill: #c7d0ee;
-    text-shadow: 0 0 6px #05070f;
+    fill: var(--text);
+    text-shadow: 0 0 6px var(--bg);
   }
   .dimlabel {
-    fill: #5d6788;
+    fill: var(--line-bright);
   }
   .unknown {
-    fill: #5d6788;
+    fill: var(--line-bright);
     font-size: 20px;
     pointer-events: none;
   }
   .fog {
     fill: none;
-    stroke: #39415f;
+    stroke: var(--line);
     stroke-width: 1.5;
     stroke-dasharray: 3 5;
   }
   .selring {
     fill: none;
-    stroke: #8fb8ff;
+    stroke: var(--accent-soft);
     stroke-width: 3;
     animation: selpulse 1.6s ease-in-out infinite;
   }
@@ -1564,8 +1566,8 @@
     50% { stroke-opacity: 0.5; r: 40; }
   }
   .target {
-    fill: rgba(94, 224, 138, 0.08);
-    stroke: #5ee08a;
+    fill: color-mix(in srgb, var(--good) 8%, transparent);
+    stroke: var(--good);
     stroke-width: 1.5;
     stroke-dasharray: 6 6;
   }
@@ -1581,7 +1583,7 @@
     pointer-events: none;
   }
   .route {
-    stroke: #6ea8ff;
+    stroke: var(--accent);
     stroke-width: 2;
     stroke-dasharray: 10 10;
     opacity: 0.5;
@@ -1592,17 +1594,17 @@
     to { stroke-dashoffset: -20; }
   }
   .fleetmark {
-    fill: #8fb8ff;
-    stroke: #05070f;
+    fill: var(--accent-soft);
+    stroke: var(--bg);
     stroke-width: 1.5;
-    filter: drop-shadow(0 0 6px rgba(110, 168, 255, 0.8));
+    filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 80%, transparent));
   }
   .fleetmark.reroutable {
-    fill: #ffd75e;
+    fill: var(--gold);
   }
   .eta {
     font-size: 17px;
-    fill: #8fb8ff;
+    fill: var(--accent-soft);
     pointer-events: none;
   }
   aside {
@@ -1664,19 +1666,19 @@
     color: var(--accent-soft);
   }
   .monster {
-    fill: #ff8a7a;
-    color: #ff8a7a;
+    fill: var(--bad);
+    color: var(--bad);
     font-size: 24px;
   }
   .raid {
-    fill: #ffd75e;
-    color: #ffd75e;
+    fill: var(--gold);
+    color: var(--gold);
     font-size: 26px;
     font-weight: 700;
   }
   .blockade {
-    fill: #ffd479;
-    color: #ffd479;
+    fill: var(--gold);
+    color: var(--gold);
     font-size: 24px;
   }
   aside .monster,
@@ -1731,7 +1733,7 @@
   }
   .system {
     width: 100%;
-    background: #05070f;
+    background: var(--bg);
     border: 1px solid var(--line);
     border-radius: 8px;
     margin: 0.3rem 0 0.1rem;

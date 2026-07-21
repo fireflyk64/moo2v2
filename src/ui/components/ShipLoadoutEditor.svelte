@@ -447,9 +447,9 @@
 
 <style>
   .panel {
-    border: 1px solid #4f596c;
-    background: #081226;
-    box-shadow: inset 0 0 0 1px #18243f;
+    border: 1px solid var(--line-bright);
+    background: var(--panel);
+    box-shadow: inset 0 0 0 1px var(--panel-2);
     padding: 0.45rem;
   }
   .topPanels {
@@ -467,8 +467,8 @@
     display: grid;
     grid-template-columns: 98px 1fr;
     gap: 0.55rem;
-    border: 1px solid #344769;
-    background: #06162d;
+    border: 1px solid var(--line);
+    background: var(--input-bg);
     padding: 0.2rem;
   }
   .visualCol {
@@ -478,8 +478,8 @@
     align-content: start;
   }
   .thumb {
-    border: 1px solid #394258;
-    background: #071025;
+    border: 1px solid var(--line);
+    background: var(--input-bg);
     min-height: 98px;
     display: grid;
     place-items: center;
@@ -507,8 +507,8 @@
     letter-spacing: 0.06em;
   }
   .classList {
-    border: 1px solid #3c465a;
-    background: #0b1427;
+    border: 1px solid var(--line);
+    background: var(--input-bg);
     display: grid;
     grid-template-columns: 1fr;
     font-size: 0.75rem;
@@ -518,21 +518,21 @@
     box-sizing: border-box;
     cursor: pointer;
     padding: 0.13rem 0.35rem;
-    color: #c2cadf;
+    color: var(--text);
     border: 1px solid transparent;
     border-radius: 3px;
   }
   .hullBtn:hover:not(:disabled) {
-    border-color: #415782;
-    background: #1a2946;
+    border-color: var(--line-bright);
+    background: var(--panel-2);
   }
   .hullBtn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
   }
   .classList .activeClass {
-    background: #2f4775;
-    color: #f3f6ff;
+    background: var(--line-bright);
+    color: var(--text);
     font-weight: 600;
   }
   .srOnly {
@@ -554,13 +554,13 @@
     color: #d58a35;
     font-size: 0.72rem;
     line-height: 1.1;
-    border: 1px solid #2f415f;
-    background: #08162c;
+    border: 1px solid var(--line);
+    background: var(--input-bg);
     padding: 0.2rem;
   }
   .sysPanel {
-    border: 1px solid #344769;
-    background: #06162d;
+    border: 1px solid var(--line);
+    background: var(--input-bg);
     padding: 0.2rem;
     display: grid;
     gap: 0.2rem;
@@ -570,7 +570,7 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    border-bottom: 1px solid #2a3c5a;
+    border-bottom: 1px solid var(--panel-3);
     padding-bottom: 0.1rem;
   }
   .sysPicker {
@@ -578,8 +578,8 @@
     gap: 0.08rem;
     font-size: 0.8rem;
     color: #d58a35;
-    border: 1px solid #2f415f;
-    background: #07162c;
+    border: 1px solid var(--line);
+    background: var(--input-bg);
     padding: 0.2rem 0.25rem;
   }
   .sysPicker.compact {
@@ -592,12 +592,12 @@
     gap: 0.35rem;
   }
   .affect {
-    color: #aeb9d8;
+    color: var(--text-dim);
     font-size: 0.72rem;
     padding-left: 0.1rem;
   }
   .sysValue {
-    color: #dde5fb;
+    color: var(--text);
     font-size: 0.82rem;
   }
   .cycleField {
@@ -609,7 +609,7 @@
     padding: 0.15rem 0.35rem;
   }
   .plainField {
-    color: #dce4f7;
+    color: var(--text);
     font-size: 0.82rem;
     font-weight: 600;
   }
@@ -620,7 +620,7 @@
     text-align: center;
   }
   .cycleField b {
-    color: #dce4f7;
+    color: var(--text);
     text-align: center;
     flex: 1;
     font-size: 0.82rem;
@@ -644,13 +644,13 @@
   .weaponHead {
     color: #d58a35;
     font-size: 0.78rem;
-    border-bottom: 1px solid #2f3a4f;
+    border-bottom: 1px solid var(--panel-3);
     padding-bottom: 0.2rem;
     margin-bottom: 0.2rem;
   }
   .weaponRow {
     padding: 0.15rem 0;
-    border-bottom: 1px solid rgba(86, 100, 128, 0.35);
+    border-bottom: 1px solid color-mix(in srgb, var(--line-bright) 35%, transparent);
     color: #d29b58;
   }
   .mini {
@@ -667,7 +667,7 @@
     width: 100%;
   }
   .mono {
-    color: #d8deef;
+    color: var(--text);
     font-size: 0.82rem;
   }
   .arc {
@@ -705,11 +705,11 @@
     width: 100%;
     border-collapse: collapse;
     font-size: 0.8rem;
-    color: #d8deef;
+    color: var(--text);
   }
   .specialTable th,
   .specialTable td {
-    border: 1px solid #324766;
+    border: 1px solid var(--line);
     padding: 0.28rem 0.38rem;
     vertical-align: top;
   }
@@ -717,7 +717,7 @@
     color: #d58a35;
     text-align: left;
     font-weight: 600;
-    background: #0b1a32;
+    background: var(--panel);
   }
   .specialActionCell {
     width: 1%;
@@ -726,7 +726,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(4, 8, 20, 0.75);
+    background: rgba(0, 0, 0, 0.75);
     display: grid;
     place-items: center;
     z-index: 80;
@@ -736,10 +736,10 @@
     width: min(64rem, 96vw);
     max-height: 80vh;
     overflow: auto;
-    border: 1px solid #35548f;
+    border: 1px solid var(--line-bright);
     border-radius: 10px;
     padding: 0.7rem 0.8rem;
-    background: linear-gradient(180deg, rgba(21, 29, 63, 0.97), rgba(15, 21, 48, 0.97));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 97%, transparent), color-mix(in srgb, var(--panel) 97%, transparent));
   }
   .modalHead {
     display: flex;
@@ -756,7 +756,7 @@
     margin-top: 0.2rem;
   }
   .error {
-    color: #ff8a7a;
+    color: var(--bad);
   }
   .dim {
     opacity: 0.65;

@@ -556,10 +556,10 @@
     gap: 1rem;
   }
   section {
-    border: 1px solid #35548f;
+    border: 1px solid var(--line-bright);
     border-radius: 10px;
     padding: 0.7rem 0.9rem;
-    background: linear-gradient(180deg, rgba(21, 29, 63, 0.7), rgba(15, 21, 48, 0.7));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 70%, transparent), color-mix(in srgb, var(--panel) 70%, transparent));
   }
   section.red {
     border-color: #8f4040;
@@ -602,7 +602,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(4, 8, 20, 0.75);
+    background: rgba(0, 0, 0, 0.75);
     display: grid;
     place-items: center;
     z-index: 60;
@@ -612,10 +612,10 @@
     width: min(74rem, 96vw);
     max-height: 88vh;
     overflow: auto;
-    border: 1px solid #35548f;
+    border: 1px solid var(--line-bright);
     border-radius: 10px;
     padding: 0.8rem 0.9rem;
-    background: linear-gradient(180deg, rgba(21, 29, 63, 0.96), rgba(15, 21, 48, 0.96));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 96%, transparent), color-mix(in srgb, var(--panel) 96%, transparent));
   }
   .modalHead {
     display: flex;

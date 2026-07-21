@@ -6,6 +6,7 @@
   import { governColonies } from '../governor';
   import { autoExploreScouts, reconcilePins } from '../quickBuild';
   import { syncEmpireColors } from '../colors';
+  import { BRAND, FULL_TITLE } from '../brand';
   import { latchEdge, type EdgeLatch, type EdgeLevel } from '../commitEdge';
   import { describeSaveError, downloadRawDatabase, downloadSave } from '../saveload';
   import Spreadsheet from './Spreadsheet.svelte';
@@ -42,6 +43,9 @@
     const s = session().getPlanned();
     return s ? selectors.empireSummary(s, session().playerId) : null;
   });
+  // bugs.md: glanceable enemy-ship count — 0 means scanners see no threats,
+  // so players don't have to sweep the map to know they are safe
+  const enemyDetected = $derived(gs ? selectors.detectedEnemyShips(gs, session().playerId) : 0);
   // map-view quick builds: when a new turn opens, drop pins that completed
   // (or were manually removed) so their yards return to autopilot
   let reconciledTurn = -1;
@@ -619,7 +623,7 @@
         : 'auto-play turns until something needs you: battles, idle labs, arrivals, offers… (Shift+E). Best with autopilot + a research queue.'}
       onclick={toggleFF}
     >{ffActive ? '⏸' : '⏩'}</button>
-    <span class="title">MOO2<span class="v2">v2</span></span>
+    <span class="title" title={FULL_TITLE}>{BRAND.title}</span>
     <span class="stat" data-testid="my-seat" title="the empire you play (seat #{session().playerId}) — a resumed save matches players to their empire by name">👤 {mySeatName}</span>
     <!-- fixed-width turn stat: tabular digits + the synced turn lives in the
          tooltip, so the header never jiggles as numbers change (bugs.md) -->
@@ -645,6 +649,14 @@
       class:neg={summary.cpUsage > summary.cpSources}
       title="command points: fleet upkeep {summary.cpUsage} vs support {summary.cpSources} (colonies, star bases, tech, officers). Every point over costs 10 BC per turn."
     >⚓ {summary.cpUsage}/{summary.cpSources}</span>
+    <span
+      class="stat"
+      data-testid="enemy-detected"
+      class:neg={enemyDetected > 0}
+      title={enemyDetected > 0
+        ? `${enemyDetected} enemy ship${enemyDetected > 1 ? 's' : ''} on your scanners — check the map`
+        : 'enemy ships on your scanners: none detected — no known threats in scanner range'}
+    >📡 {enemyDetected}</span>
     <label class="tax" title="empire tax: converts this % of every colony's queue production into BC (2 prod → 1 BC)">
       🏛 tax
       <select
@@ -973,7 +985,7 @@
     gap: 1rem;
     align-items: center;
     padding: 0.45rem 1rem;
-    background: linear-gradient(180deg, rgba(23, 31, 66, 0.97), rgba(15, 21, 48, 0.97));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--panel-3) 97%, transparent), color-mix(in srgb, var(--panel) 97%, transparent));
     border-bottom: 1px solid var(--line-bright);
     position: sticky;
     top: 0;
@@ -984,15 +996,12 @@
   }
   .title {
     font-weight: 800;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
+    text-transform: uppercase;
     color: var(--accent-soft);
-    text-shadow: 0 0 16px rgba(110, 168, 255, 0.6);
-    letter-spacing: 0.05em;
-  }
-  .title .v2 {
-    color: var(--gold);
-    font-size: 0.8rem;
-    vertical-align: super;
+    text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+    letter-spacing: 0.09em;
+    white-space: nowrap;
   }
   .stat {
     font-variant-numeric: tabular-nums;
@@ -1028,12 +1037,12 @@
   }
   .ff.active {
     background: linear-gradient(180deg, #2c7a4e, #1d5236);
-    border-color: var(--good, #5ee08a);
+    border-color: var(--good, var(--good));
     animation: idlepulse 1.6s ease-in-out infinite;
   }
   @keyframes idlepulse {
-    0%, 100% { box-shadow: 0 0 0 rgba(94, 224, 138, 0); }
-    50% { box-shadow: 0 0 10px rgba(94, 224, 138, 0.5); }
+    0%, 100% { box-shadow: 0 0 0 color-mix(in srgb, var(--good) 0%, transparent); }
+    50% { box-shadow: 0 0 10px color-mix(in srgb, var(--good) 50%, transparent); }
   }
   .commit {
     font-weight: 700;
@@ -1063,8 +1072,8 @@
     border-color: var(--good);
   }
   @keyframes pulse-warn {
-    0%, 100% { box-shadow: 0 0 0 rgba(255, 212, 121, 0); }
-    50% { box-shadow: 0 0 14px rgba(255, 212, 121, 0.55); }
+    0%, 100% { box-shadow: 0 0 0 color-mix(in srgb, var(--gold) 0%, transparent); }
+    50% { box-shadow: 0 0 14px color-mix(in srgb, var(--gold) 55%, transparent); }
   }
   nav {
     display: flex;
@@ -1088,7 +1097,7 @@
     color: var(--accent-soft);
     border: 1px solid var(--line-bright);
     border-bottom: 2px solid var(--accent);
-    box-shadow: 0 -2px 14px rgba(110, 168, 255, 0.12);
+    box-shadow: 0 -2px 14px color-mix(in srgb, var(--accent) 12%, transparent);
   }
   nav button.pulse:not(.active) {
     color: var(--gold);
@@ -1119,7 +1128,7 @@
   footer {
     position: sticky;
     bottom: 0;
-    background: linear-gradient(0deg, rgba(15, 21, 48, 0.97), rgba(20, 27, 58, 0.97));
+    background: linear-gradient(0deg, color-mix(in srgb, var(--panel) 97%, transparent), color-mix(in srgb, var(--panel-2) 97%, transparent));
     border-top: 1px solid var(--line);
     padding: 0.35rem 1rem;
     display: flex;
@@ -1201,14 +1210,14 @@
     border-radius: 2px;
   }
   .edge.green {
-    box-shadow: inset 0 0 0 3px rgba(94, 224, 138, 0.55), inset 0 0 26px rgba(94, 224, 138, 0.18);
+    box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--good) 55%, transparent), inset 0 0 26px color-mix(in srgb, var(--good) 18%, transparent);
   }
   .edge.red {
     animation: edgepulse 1.2s ease-in-out infinite;
   }
   @keyframes edgepulse {
-    0%, 100% { box-shadow: inset 0 0 0 3px rgba(255, 107, 94, 0.55), inset 0 0 26px rgba(255, 107, 94, 0.16); }
-    50% { box-shadow: inset 0 0 0 5px rgba(255, 107, 94, 0.95), inset 0 0 44px rgba(255, 107, 94, 0.3); }
+    0%, 100% { box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--bad) 55%, transparent), inset 0 0 26px color-mix(in srgb, var(--bad) 16%, transparent); }
+    50% { box-shadow: inset 0 0 0 5px color-mix(in srgb, var(--bad) 95%, transparent), inset 0 0 44px color-mix(in srgb, var(--bad) 30%, transparent); }
   }
   .dm {
     color: #d7a7ff;
@@ -1252,7 +1261,7 @@
     border-radius: 12px;
     padding: 0.7rem 1.1rem;
     z-index: 45;
-    box-shadow: 0 0 40px rgba(110, 168, 255, 0.45), 0 10px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 40px color-mix(in srgb, var(--accent) 45%, transparent), 0 10px 40px rgba(0, 0, 0, 0.5);
     animation: drop-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
   }
   @keyframes drop-in {
@@ -1309,12 +1318,12 @@
   /* fleets-in-flight: informational (blue), not a nag (gold) */
   .idlebadge.flying {
     background: linear-gradient(180deg, #24406a, #1c3254);
-    border-color: #6ea8ff;
+    border-color: var(--accent);
     color: #bfe6ff;
   }
   .celebration.arrival {
     border-color: var(--good);
-    box-shadow: 0 0 40px rgba(94, 224, 138, 0.35), 0 10px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 40px color-mix(in srgb, var(--good) 35%, transparent), 0 10px 40px rgba(0, 0, 0, 0.5);
   }
   .contact-overlay {
     position: fixed;
@@ -1323,13 +1332,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(6, 8, 20, 0.82);
+    background: rgba(0, 0, 0, 0.82);
     animation: contact-flash 0.9s ease;
   }
   @keyframes contact-flash {
     0% { background: rgba(255, 230, 160, 0.95); }
     30% { background: rgba(160, 40, 40, 0.75); }
-    100% { background: rgba(6, 8, 20, 0.82); }
+    100% { background: rgba(0, 0, 0, 0.82); }
   }
   .contact-box {
     max-width: 34rem;
@@ -1338,14 +1347,14 @@
     border-radius: 14px;
     padding: 1.2rem 1.6rem;
     text-align: center;
-    box-shadow: 0 0 80px rgba(255, 212, 121, 0.35);
+    box-shadow: 0 0 80px color-mix(in srgb, var(--gold) 35%, transparent);
   }
   .contact-title {
     font-size: 2.4rem;
     font-weight: 900;
     letter-spacing: 0.35em;
     color: var(--gold);
-    text-shadow: 0 0 24px rgba(255, 212, 121, 0.8);
+    text-shadow: 0 0 24px color-mix(in srgb, var(--gold) 80%, transparent);
     animation: pulse-warn 1.2s ease-in-out infinite;
   }
   .contact-sub {

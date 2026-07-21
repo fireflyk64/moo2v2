@@ -4,6 +4,7 @@
   import { selectors, itemLabel, explainOutput, COLONY_TAGS, ANDROID_RACE } from '@engine/index';
   import { app, getActive } from '../state.svelte';
   import AutopilotBar from '../components/AutopilotBar.svelte';
+  import PixelPlanet from '../PixelPlanet.svelte';
 
   const session = () => getActive()!.session;
   const allRowsWithOutposts = $derived.by(() => {
@@ -35,6 +36,7 @@
     return s ? itemLabel(s, session().playerId, item) : item;
   };
   const pretty = (id: string) => id.replaceAll('_', ' ');
+  const SIZE_NAMES: Record<number, string> = { 1: 'tiny', 2: 'small', 3: 'medium', 4: 'large', 5: 'huge' };
 
   /** what each planet feature means for production (hover on the planet cell) */
   const MINERAL_PROD_INFO: Record<string, string> = {
@@ -277,10 +279,28 @@
     if (moveNoteTimer) clearTimeout(moveNoteTimer);
     moveNoteTimer = setTimeout(() => (moveNote = ''), 5000);
   }
+  // A drag never needs a pick first: grabbing icon i always carries i plus
+  // everyone to its right. The pick (click) is only a keyboard/precision
+  // fallback, so a gesture that became a drag must not also toggle the pick —
+  // some browsers still deliver click after dragend.
+  let dragHappened = false;
   function onDragStart(row: selectors.ColonyRow, job: Job, race: number, i: number, ev: DragEvent) {
     drag = { colonyId: row.id, job, race, count: Math.max(1, grabCount(row, job, race, i)) };
+    dragHappened = true;
     ev.dataTransfer?.setData('text/plain', `${row.id}:${job}:${race}:${drag.count}`);
     if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move';
+  }
+  /** fires after every drag, dropped or cancelled — without this a drag
+   * released outside a valid cell left stale drag state behind */
+  function onDragEnd() {
+    drag = null;
+    dragOver = null;
+    dragOverColony = null;
+    setTimeout(() => (dragHappened = false), 0);
+  }
+  function onCitizenClick(row: selectors.ColonyRow, job: Job, race: number, i: number) {
+    if (dragHappened) return;
+    pickFrom(row, job, race, i);
   }
   function onDrop(row: selectors.ColonyRow, job: Job) {
     if (drag && drag.colonyId === row.id) moveJob(row, drag.race, drag.job, job, drag.count);
@@ -582,9 +602,31 @@
           {/if}
         </td>
         <td
-          class="dim planet"
+          class="planet"
           title={planetTitle(row)}
-        >{#if row.planet.special && SPECIAL_INFO[row.planet.special]}{SPECIAL_INFO[row.planet.special]!.icon} {/if}{row.planet.climate} {pretty(row.planet.minerals)} {row.planet.gravity}-g s{row.planet.sizeClass}</td>
+        >
+          <span class="pcell">
+            <PixelPlanet
+              seed={row.planet.id}
+              climate={row.planet.climate}
+              body={row.planet.body}
+              size={26}
+              ring={row.planet.minerals === 'ultra_rich' || row.planet.minerals === 'rich'
+                ? 'var(--gold)'
+                : row.planet.minerals === 'poor' || row.planet.minerals === 'ultra_poor'
+                  ? 'var(--text-dim)'
+                  : null}
+              ringDashed={row.planet.minerals === 'poor' || row.planet.minerals === 'ultra_poor'}
+            />
+            <span class="pdesc">
+              <span class="pclimate">{row.planet.climate} {SIZE_NAMES[row.planet.sizeClass] ?? `s${row.planet.sizeClass}`}</span>
+              <span
+                class="pminerals"
+                class:rich={row.planet.minerals === 'rich' || row.planet.minerals === 'ultra_rich'}
+              >{#if row.planet.special && SPECIAL_INFO[row.planet.special]}{SPECIAL_INFO[row.planet.special]!.icon} {/if}{pretty(row.planet.minerals)}{row.planet.gravity !== 'normal' ? ` · ${row.planet.gravity}-g` : ''}</span>
+            </span>
+          </span>
+        </td>
         <td data-testid="pop-{row.id}" title="projected growth next turn: {growthLabel(row.growthK)}">
           {row.popUnits}/{row.maxPop}
           {#if !row.outpost}
@@ -650,9 +692,10 @@
                         : grp.unrest
                           ? 'in unrest (−25% output until assimilated)'
                           : ''}
-                      onclick={() => pickFrom(row, job, grp.race, i)}
+                      onclick={() => onCitizenClick(row, job, grp.race, i)}
                       onkeydown={(e) => e.key === 'Enter' && pickFrom(row, job, grp.race, i)}
                       ondragstart={(e) => onDragStart(row, job, grp.race, i, e)}
+                      ondragend={onDragEnd}
                     >{JOB_ICONS[job]}</span>
                   {/if}
                 {/each}
@@ -824,7 +867,7 @@
     white-space: nowrap;
   }
   .jobs.dropping {
-    background: rgba(94, 224, 138, 0.18);
+    background: color-mix(in srgb, var(--good) 18%, transparent);
     outline: 1px dashed var(--good);
   }
   .citizens {
@@ -833,6 +876,13 @@
     gap: 0;
     min-width: 1.3rem;
     justify-content: center;
+  }
+  /* selectable text here would let a drag sweep-highlight the emoji glyphs */
+  .citizens,
+  .citizen,
+  .zero {
+    -webkit-user-select: none;
+    user-select: none;
   }
   .citizen {
     cursor: grab;
@@ -869,7 +919,7 @@
     padding: 0 0.2rem;
   }
   .name.shipok {
-    background: rgba(110, 168, 255, 0.16);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
     outline: 1px dashed var(--accent);
   }
   .queuechip {
@@ -910,7 +960,7 @@
     text-decoration: underline wavy var(--bad);
   }
   .fed {
-    color: var(--good, #5ee08a);
+    color: var(--good, var(--good));
     font-size: 0.75em;
     margin-left: 0.15em;
   }
@@ -952,12 +1002,35 @@
     padding: 0 0.3rem;
     margin-left: 0.4rem;
   }
-  /* planet specs: tiny and cut off — hover for the full description */
+  /* planet cell: pixel sprite + compact two-line spec — hover for the rest */
   td.planet {
-    font-size: 0.58rem;
-    max-width: 5.5rem;
+    font-size: 0.6rem;
+    max-width: 8rem;
     overflow: hidden;
-    text-overflow: ellipsis;
+  }
+  .pcell {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .pdesc {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+    min-width: 0;
+  }
+  .pclimate {
+    text-transform: capitalize;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .pminerals {
+    text-transform: capitalize;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .pminerals.rich {
+    color: var(--gold);
   }
   .parked {
     display: block;
@@ -973,7 +1046,7 @@
     background: transparent;
   }
   .leader {
-    color: #8b93a7;
+    color: var(--text-dim);
     font-weight: 400;
     font-size: 0.72rem;
     margin-left: 0.3rem;

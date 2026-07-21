@@ -1,0 +1,3 @@
+[mirror] catchup-onion (bot seat 1) vs fair-onion t297: catchup=22c/42a/72p/28w/845pts control=7c/33a/30p/14w/333pts grants=0 escorts + 1 settlers
+[mirror] catchup-onion (bot seat 1) vs fair-v2 t297: catchup=23c/44a/100p/32w/973pts control=14c/42a/38p/15w/514pts grants=0 escorts + 2 settlers
+[mirror] catchup-onion (worst case: seat 0) vs fair-onion t297: catchup=12c/30a/44p/14w/472pts control=12c/37a/44p/16w/498pts grants=47 escorts + 10 settlers

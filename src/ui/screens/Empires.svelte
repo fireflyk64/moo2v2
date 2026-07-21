@@ -616,16 +616,16 @@
 
 <style>
   .newdot {
-    color: var(--gold, #ffd75e);
+    color: var(--gold, var(--gold));
     font-size: 0.7rem;
     vertical-align: middle;
   }
   .appearance {
-    border: 1px solid #26304f;
+    border: 1px solid var(--panel-3);
     border-radius: 10px;
     padding: 0.5rem 0.9rem 0.35rem;
     margin-bottom: 1rem;
-    background: linear-gradient(180deg, rgba(15, 21, 48, 0.65), rgba(10, 14, 34, 0.65));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 65%, transparent), rgba(0, 0, 0, 0.65));
     max-width: 64rem;
   }
   .stylebar {
@@ -643,7 +643,7 @@
     color: var(--accent-soft);
   }
   .current {
-    color: var(--good, #5ee08a);
+    color: var(--good, var(--good));
     font-size: 0.85rem;
   }
   .stylestrip {
@@ -677,8 +677,8 @@
     max-width: 60rem;
   }
   .pickchip {
-    border: 1px solid #3a4a80;
-    background: #1a2140;
+    border: 1px solid var(--line-bright);
+    background: var(--panel-2);
     border-radius: 999px;
     padding: 0.1rem 0.6rem;
     font-size: 0.82rem;
@@ -695,9 +695,9 @@
   }
   /* seat-issue banners (moved here from the main shell; bugs.md) */
   .banner {
-    border: 1px solid #3a4a80;
+    border: 1px solid var(--line-bright);
     border-radius: 8px;
-    background: #141830;
+    background: var(--panel-2);
     padding: 0.4rem 0.8rem;
     margin-bottom: 0.5rem;
     max-width: 60rem;
@@ -719,9 +719,9 @@
   }
   .leadercard {
     width: 15.5rem;
-    border: 1px solid #3a4a80;
+    border: 1px solid var(--line-bright);
     border-radius: 10px;
-    background: linear-gradient(180deg, #182046, #10142c);
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
     padding: 0.6rem 0.7rem;
     display: flex;
     flex-direction: column;
@@ -730,7 +730,7 @@
   }
   .leadercard.ship {
     border-color: #806a3a;
-    background: linear-gradient(180deg, #2a2246, #140f2c);
+    background: linear-gradient(180deg, var(--panel-3), var(--panel));
   }
   .leadercard.offer {
     border-style: dashed;
@@ -744,12 +744,12 @@
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #31407c, #10142c 75%);
-    border: 1px solid #4a5a90;
+    background: radial-gradient(circle at 35% 30%, var(--line-bright), var(--panel) 75%);
+    border: 1px solid var(--line-bright);
     align-self: center;
   }
   .leadercard.ship .portrait {
-    background: radial-gradient(circle at 35% 30%, #6a5424, #140f2c 75%);
+    background: radial-gradient(circle at 35% 30%, #6a5424, var(--panel) 75%);
     border-color: #806a3a;
   }
   .leadercard .who {
@@ -777,14 +777,14 @@
     flex: 1;
     height: 0.35rem;
     border-radius: 999px;
-    background: #0a0e22;
-    border: 1px solid #26304f;
+    background: var(--panel);
+    border: 1px solid var(--panel-3);
     overflow: hidden;
   }
   .leadercard .xpfill {
     display: block;
     height: 100%;
-    background: linear-gradient(90deg, #4da3ff, #5ee6e0);
+    background: linear-gradient(90deg, var(--accent), #5ee6e0);
   }
   .leadercard .skills {
     display: flex;
@@ -793,8 +793,8 @@
     justify-content: center;
   }
   .leadercard .skill {
-    border: 1px solid #26304f;
-    background: #0e1330;
+    border: 1px solid var(--panel-3);
+    background: var(--panel);
     border-radius: 999px;
     padding: 0.05rem 0.5rem;
     font-size: 0.75rem;
@@ -823,7 +823,7 @@
   }
   td,
   th {
-    border: 1px solid #26304f;
+    border: 1px solid var(--panel-3);
     padding: 0.3rem 0.7rem;
     text-align: left;
   }

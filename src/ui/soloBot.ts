@@ -17,10 +17,10 @@
 
 import { marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
-import type { GameState } from '@engine/types';
+import type { Empire, GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 import { botRaceById, botRacePicks } from './botRaces';
-import { freshOnionMemory, onionBattleOrders, onionTurn, type OnionMemory } from './onionBot';
+import { freshOnionMemory, onionBattleOrders, onionTurn, planetScore, type OnionMemory } from './onionBot';
 
 export type BotMode = 'parity' | 'fair';
 /** fair-bot strategy generation: v1 = the original random-build brain (kept
@@ -51,14 +51,32 @@ const PROFILES: Record<BotPersonality, Profile> = {
   // rusher/militarist expand raised 1→2 / 2→3 after the onion round-1
   // tournament: both war personalities lost every mirror to the OnionAI by
   // colony starvation (7-10c vs 12-15c) while their aggression achieved no
-  // conquest — a war economy still needs settlers
-  rusher: { scienceBias: 0, fleetRatio: 1.5, expand: 2, warlike: true, buyEager: true },
+  // conquest — a war economy still needs settlers. Rusher 2→3 (07-21, same
+  // lever): the r7 log left it as v2's designated loser mirror (−89, still
+  // starved at 8c vs the onion's 18c on the 0.20 re-baseline), so it now
+  // matches the militarist's kept depth — see bugs/tournament/LOG.md
+  rusher: { scienceBias: 0, fleetRatio: 1.5, expand: 3, warlike: true, buyEager: true },
   industrialist: { scienceBias: 0, fleetRatio: 1, expand: 2, warlike: false, buyEager: true },
   expander: { scienceBias: 1, fleetRatio: 0.7, expand: 6, warlike: false, buyEager: true },
   militarist: { scienceBias: 0, fleetRatio: 2, expand: 3, warlike: true, buyEager: true },
 };
 
 const PERSONALITIES: BotPersonality[] = ['techer', 'rusher', 'industrialist', 'expander', 'militarist'];
+
+/** Mirror catch-up pacing. Escorts per turn stays well under the engine's
+ * 20-per-command cap — a big deficit closes over a few turns instead of
+ * materializing as a wall. The DEADBAND/SURPLUS pair is load-bearing:
+ * the first mirror proof run used a naive deficit>0 trigger and LOST its
+ * control match 374-417 with identical hull counts — petty ±1 grants bled
+ * upkeep while exact parity never crossed the brains' own attack thresholds
+ * (the onion strikes at 1.15×). Now only a >DEADBAND deficit triggers, and
+ * the refill overshoots to +SURPLUS so the escorts can escort and hunt.
+ * SURPLUS <= DEADBAND keeps two catch-up bots from ratcheting each other:
+ * at +2 surplus neither is 3 behind, so both go quiet. */
+const MIRROR_ESCORTS_PER_TURN = 5;
+const MIRROR_WAR_DEADBAND = 2;
+const MIRROR_WAR_SURPLUS = 2;
+const MIRROR_SETTLER_EVERY = 5;
 
 /** building priority for the v2 brain, taken from the opening a winning human
  * game actually played (bugs/moo2v2-SOLO-turn297.moo2save, turns 1–120);
@@ -97,6 +115,10 @@ export interface SoloBotOptions {
   /** fleet silhouette (shipstyles.ts id) — submitted as set_ship_style on
    * the bot's first turn, exactly like a human using the Empires screen */
   shipStyle?: string;
+  /** mirror-mode catch-up grants (default true). The grants only ever fire
+   * when the game's settings have BOTH mirror and debugCommands on; this
+   * flag exists so tests can field a control bot with the catch-up off. */
+  mirrorCatchUp?: boolean;
 }
 
 /** deterministic-enough tiny PRNG for bot whims (commands are logged anyway) */
@@ -124,6 +146,12 @@ export class SoloBot {
   private readonly color: string | null;
   private readonly shipStyle: string | null;
   private styleSubmitted = false;
+  private readonly mirrorCatchUp: boolean;
+  /** turn of the last mirror catch-up colony-ship grant (rate limiter) */
+  private lastSettlerGrantTurn = -99;
+  /** diagnostics for the mirror proof test: totals of catch-up grants */
+  mirrorEscortsGranted = 0;
+  mirrorSettlersGranted = 0;
   /** cross-turn plan/commitment state for the onion brain */
   private onionMemory: OnionMemory = freshOnionMemory();
 
@@ -139,6 +167,7 @@ export class SoloBot {
     this.race = opts.race ?? null;
     this.color = opts.color ?? null;
     this.shipStyle = opts.shipStyle ?? null;
+    this.mirrorCatchUp = opts.mirrorCatchUp ?? true;
     this.session.setRaceConfig(this.desiredRaceJson(), true);
     this.unsub = this.session.subscribe((ev) => {
       if (ev.type === 'lobby') {
@@ -227,8 +256,8 @@ export class SoloBot {
     }
   }
 
-  private submit(kind: string, payload: unknown): void {
-    this.session.submit(kind, payload); // rejections are fine — the bot shrugs
+  private submit(kind: string, payload: unknown): { error?: string } {
+    return this.session.submit(kind, payload); // rejections are fine — the bot shrugs
   }
 
   private playTurn(state: GameState): void {
@@ -297,6 +326,21 @@ export class SoloBot {
       for (const app of human.knownApps) {
         if (!bot.knownApps.includes(app)) this.submit('debug_grant_app', { appId: app });
       }
+    }
+
+    // ---- mirror catch-up (bugs.md: "mirror AI mode should be quite
+    // difficult since it can play catch-up if it falls behind"): in a mirror
+    // game with debugCommands on, a bot that is outgunned tops its warfleet
+    // up toward the strongest enemy's with logged debug_spawn_ships escorts
+    // (its best current design, at its strongest colony, a few per turn)
+    // and gets a colony ship every few turns while behind on colonies/pop.
+    // The granted hulls are ordinary ships: whichever brain runs below
+    // rallies, strikes and settles with them ("fly around and cause
+    // havoc"). Gated purely on the game settings, so it works for fair and
+    // onion bots alike; net.ts switches debugCommands on for solo mirror
+    // games. ----
+    if (this.mirrorCatchUp && state.settings.mirror && state.settings.debugCommands) {
+      this.mirrorTopUp(state, me, bot);
     }
 
     // ---- onion brain: the constraint-driven doctrine owns the whole turn
@@ -544,6 +588,95 @@ export class SoloBot {
     }
   }
 
+  /** Mirror-mode catch-up grants (see the call site in playTurn for the
+   * doctrine). Uses the authoritative state — each turn grants at most
+   * MIRROR_ESCORTS_PER_TURN escorts (chunked to the engine's 20-per-command
+   * cap) plus at most one rate-limited colony ship, so a big deficit closes
+   * over several turns rather than instantly. */
+  private mirrorTopUp(state: GameState, me: number, bot: Empire): void {
+    const warOf = (id: number) => state.ships.filter((s) => s.owner === id && s.shipKind === 'design').length;
+    const colOf = (id: number) => state.colonies.filter((c) => c.owner === id && !c.outpost).length;
+    const popOf = (id: number) =>
+      state.colonies
+        .filter((c) => c.owner === id)
+        .reduce((n, c) => n + c.groups.reduce((m, g) => m + Math.floor(g.popK / 1000), 0), 0);
+    const strongest = state.empires
+      .filter((e) => e.id !== me && !e.eliminated)
+      .map((e) => ({ id: e.id, war: warOf(e.id), col: colOf(e.id), pop: popOf(e.id) }))
+      .sort((a, b) => b.war - a.war || b.col - a.col || a.id - b.id)[0];
+    if (!strongest) return;
+    // spawn point: the strongest colony's star (same yard the brains favor)
+    const home = state.colonies
+      .filter((c) => c.owner === me && !c.outpost)
+      .map((c) => selectors.colonyRow(state, c))
+      .sort((a, b) => b.output.prodToQueue - a.output.prodToQueue || a.id - b.id)[0];
+    const starId = home ? (state.planets.find((p) => p.id === home.planet.id)?.starId ?? null) : null;
+    if (starId === null) return;
+
+    // escorts: only a meaningful deficit triggers (dead-band), then top up
+    // past parity to a small surplus — see the MIRROR_* constants for why.
+    // Two hard brakes keep the grants from poisoning their owner (run 2 of
+    // the mirror proof: an at-war onion sizes its fleet at 1.15× OURS, so
+    // ungated surplus grants fed a mutual ratchet — 240 granted hulls died
+    // piecemeal while their upkeep dug a −28k BC hole, final score −119):
+    //   1. solvency — a broke empire gets no hulls it cannot pay for; the
+    //      brain's own debt levers (tax, scrap, trade goods) recover first;
+    //   2. the same colonies×3 affordability ceiling the onion applies to
+    //      its own fleet appetite (wantFleet).
+    const myWar = warOf(me);
+    const ceiling = Math.max(4, colOf(me) * 3);
+    const target = Math.min(strongest.war + MIRROR_WAR_SURPLUS, ceiling);
+    if (bot.bc >= 0 && strongest.war > myWar + MIRROR_WAR_DEADBAND && target > myWar) {
+      const designs = bot.designs.filter((d) => !d.obsolete);
+      const best = [...designs].sort(
+        (a, b) =>
+          (itemCost(state, me, `design:${b.id}`) ?? 0) - (itemCost(state, me, `design:${a.id}`) ?? 0) ||
+          b.id - a.id,
+      )[0];
+      let grant = Math.min(target - myWar, MIRROR_ESCORTS_PER_TURN);
+      while (best && grant > 0) {
+        const n = Math.min(grant, 20); // engine hard-caps one command at 20
+        this.submit('debug_spawn_ships', { starId, designId: best.id, count: n });
+        this.mirrorEscortsGranted += n;
+        grant -= n;
+      }
+    }
+
+    // settlers: behind on colonies — or >10% behind on population, the slow
+    // economic drift escorts cannot fix — earns one colony ship every few
+    // turns, but ONLY while a world the brain will actually take is in reach
+    // (an idle granted hull is pure upkeep, the same drag the dead-band
+    // exists to avoid; 16 = the onion's lowest settle gate, bar−8)
+    const behindEconomy = strongest.col > colOf(me) || strongest.pop * 10 > popOf(me) * 11;
+    if (behindEconomy && state.turn - this.lastSettlerGrantTurn >= MIRROR_SETTLER_EVERY) {
+      const myStars = new Set<number>();
+      for (const c of state.colonies) {
+        if (c.owner !== me) continue;
+        const p = state.planets.find((x) => x.id === c.planetId);
+        if (p) myStars.add(p.starId);
+      }
+      const reach = new Set(
+        selectors
+          .moveOptions(state, me, starId)
+          .filter((o) => o.reachable)
+          .map((o) => o.starId),
+      );
+      const worthSettling = state.planets.some(
+        (p) =>
+          p.body === 'planet' &&
+          !state.colonies.some((c) => c.planetId === p.id) &&
+          !state.monsters.some((m) => m.starId === p.starId) &&
+          (reach.has(p.starId) || myStars.has(p.starId)) &&
+          planetScore(p, myStars.has(p.starId), false) >= 16,
+      );
+      if (worthSettling) {
+        this.lastSettlerGrantTurn = state.turn;
+        this.mirrorSettlersGranted += 1;
+        this.submit('debug_spawn_ships', { starId, designId: null, count: 1, shipKind: 'colony_ship' });
+      }
+    }
+  }
+
   /** Survival mode while outgunned: piecemeal strikes (and newborn hulls
    * trickling out of camped shipyards one at a time) just feed the enemy —
    * the round-10 probe watched a creative build 38 warships across 300 turns
@@ -654,14 +787,40 @@ export class SoloBot {
       (n, c) => n + (c.owner === me ? c.queue.filter((q) => q.item === 'colony_ship').length : 0),
       0,
     );
-    // (onion round 6 tried scaling this depth by global free-planet count —
-    // it measured −41 on balanced/expander: v2 counts ALL free planets, so
-    // deep pipelines built 500-cost settlers for worlds a faster rival had
-    // already claimed. A port of the onion's reachable-and-worthwhile
-    // counting is the right future version; the flat cap stands until then.)
-    const wantPipeline = this.brain === 'v2' ? Math.min(this.profile.expand, freePlanets.length) : 1;
+    // Depth is capped by REACHABLE free planets, not the global count (onion
+    // round 6 proved the global count builds 500-cost settlers for worlds a
+    // faster rival already claimed; the onion's reachable counting won the
+    // tournament). This is the conservative half of that port — it can only
+    // shrink the pipeline, never inflate it; when everything worthwhile is
+    // out of range the settler yards stop and extendRange's outpost chain
+    // takes over. Profile depth itself stays the round-2 flat value.
+    const myAnchorStars = new Set<number>();
+    for (const c of planned.colonies) {
+      if (c.owner !== me) continue;
+      const p = planned.planets.find((x) => x.id === c.planetId);
+      if (p) myAnchorStars.add(p.starId);
+    }
+    const anchorCol = planned.colonies.find((c) => c.owner === me && !c.outpost);
+    const anchorStar = anchorCol ? planned.planets.find((p) => p.id === anchorCol.planetId)?.starId : undefined;
+    const reachableStars = new Set<number>(
+      anchorStar !== undefined
+        ? selectors
+            .moveOptions(planned, me, anchorStar)
+            .filter((o) => o.reachable)
+            .map((o) => o.starId)
+        : [],
+    );
+    const reachableFree = freePlanets.filter((p) => reachableStars.has(p.starId) || myAnchorStars.has(p.starId)).length;
+    // floor at 1 while ANY free world exists: early game the whole galaxy can
+    // sit outside base fuel range for a few turns, but range grows (tech,
+    // outposts) and a bot with zero settlers underway stops expanding at all
+    // (tests/protocol/solobot.test.ts locks this)
+    const minPipeline = Math.min(1, freePlanets.length);
+    // v1 keeps the old global count untouched — it is the frozen benchmark
+    const wantPipeline =
+      this.brain === 'v2' ? Math.min(this.profile.expand, Math.max(reachableFree, minPipeline)) : minPipeline;
     let pipeline = colonyShips.length + queued;
-    if (freePlanets.length && pipeline < wantPipeline) {
+    if (pipeline < wantPipeline) {
       const rows = planned.colonies
         .filter((c) => c.owner === me && !c.outpost)
         .map((c) => selectors.colonyRow(planned, c))
@@ -669,7 +828,19 @@ export class SoloBot {
         .sort((a, b) => (b.output.prodToQueue || b.output.prod) - (a.output.prodToQueue || a.output.prod));
       for (const best of rows) {
         if (pipeline >= wantPipeline) break;
-        this.submit('set_build_queue', { colonyId: best.id, items: ['colony_ship', ...best.queue] });
+        const res = this.submit('set_build_queue', { colonyId: best.id, items: ['colony_ship', ...best.queue] });
+        if (res.error) {
+          // a production buy earlier this turn pins the active item — slot the
+          // settler in right behind it instead of silently skipping the turn
+          // (a buyEager bot buys most turns, so "try again next turn" never
+          // came; tests/protocol/solobot.test.ts locks this)
+          if (!best.queue.length) continue;
+          const retry = this.submit('set_build_queue', {
+            colonyId: best.id,
+            items: [best.queue[0]!, 'colony_ship', ...best.queue.slice(1)],
+          });
+          if (retry.error) continue;
+        }
         pipeline++;
       }
     }

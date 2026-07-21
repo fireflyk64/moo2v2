@@ -676,7 +676,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(4, 6, 14, 0.87);
+    background: rgba(0, 0, 0, 0.87);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -688,7 +688,7 @@
     border: 1px solid var(--line-bright);
     border-radius: 12px;
     padding: 0.8rem;
-    box-shadow: 0 14px 60px rgba(0, 0, 0, 0.65), 0 0 60px rgba(110, 168, 255, 0.1);
+    box-shadow: 0 14px 60px rgba(0, 0, 0, 0.65), 0 0 60px color-mix(in srgb, var(--accent) 10%, transparent);
     max-height: 96vh;
     max-width: 96vw;
     overflow: auto;

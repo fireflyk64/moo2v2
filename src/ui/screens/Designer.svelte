@@ -459,9 +459,9 @@
 
 <style>
   .mooDesigner {
-    border: 2px solid #596276;
-    background: #070f1f;
-    box-shadow: inset 0 0 0 2px #1a253d;
+    border: 2px solid var(--line-bright);
+    background: var(--bg);
+    box-shadow: inset 0 0 0 2px var(--panel-2);
     padding: 0.5rem;
     margin-bottom: 1rem;
     font-family: Verdana, Tahoma, sans-serif;
@@ -470,9 +470,9 @@
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    border: 1px solid #5c6474;
-    background: linear-gradient(180deg, #252c38, #131a25);
-    color: #e4e9f3;
+    border: 1px solid var(--line-bright);
+    background: linear-gradient(180deg, var(--panel-3), var(--panel));
+    color: var(--text);
     padding: 0.35rem 0.6rem;
     margin-bottom: 0.5rem;
     text-transform: uppercase;
@@ -498,8 +498,8 @@
   }
   .commandBar {
     margin-top: 0.45rem;
-    border: 1px solid #586278;
-    background: linear-gradient(180deg, #222833, #151c27);
+    border: 1px solid var(--line-bright);
+    background: linear-gradient(180deg, var(--panel-3), var(--panel-2));
     padding: 0.35rem 0.45rem;
     display: grid;
     grid-template-columns: auto auto 1fr auto;
@@ -510,8 +510,8 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    border: 1px solid #4f596c;
-    background: #0e1521;
+    border: 1px solid var(--line-bright);
+    background: var(--panel);
     padding: 0.2rem 0.42rem;
     min-width: 130px;
   }
@@ -520,7 +520,7 @@
     font-size: 0.76rem;
   }
   .metric b {
-    color: #f1f5ff;
+    color: var(--text);
     font-size: 1rem;
   }
   .battleBrief {
@@ -540,23 +540,23 @@
   }
   .importbtn {
     display: inline-block;
-    border: 1px solid var(--line, #26304f);
+    border: 1px solid var(--line, var(--panel-3));
     border-radius: 6px;
-    background: #1a2140;
+    background: var(--panel-2);
     padding: 0.22rem 0.55rem;
     cursor: pointer;
     font-size: 0.88rem;
   }
   .importbtn:hover {
-    background: #232c55;
+    background: var(--panel-3);
   }
   .list {
-    border: 1px solid #374359;
-    background: #0a1223;
+    border: 1px solid var(--line-bright);
+    background: var(--panel);
     padding: 0.5rem;
   }
   .error {
-    color: #ff8a7a;
+    color: var(--bad);
   }
   .dim {
     opacity: 0.65;
@@ -579,7 +579,7 @@
     padding: 0.4rem 0.6rem;
     border: 1px solid var(--line);
     border-radius: 6px;
-    background: rgba(15, 21, 48, 0.6);
+    background: color-mix(in srgb, var(--panel) 60%, transparent);
     font-size: 0.85rem;
     display: flex;
     flex-direction: column;

@@ -1,0 +1,74 @@
+/* ============================================================================
+   THEME — the game's entire look lives in these variables (bugs.md: theming
+   must be modular). Screens consume tokens; none may hardcode chrome colors.
+
+   Default theme: "phosphor" — retro alien-terminal. Gray chrome on a black
+   background with green highlights, monospace type (see bugs/*.png).
+
+   To retheme: edit the :root block, or add a [data-theme='name'] block and set
+   document.documentElement.dataset.theme = 'name'. The previous blue look is
+   preserved below as [data-theme='nebula'] — both proof and escape hatch.
+
+   Identity colors (per-player banners, star classes, climate art) are data,
+   not chrome — they live in src/ui/colors.ts and the map/planet art tables
+   and deliberately do NOT change with the theme.
+   ========================================================================= */
+
+:root {
+  /* surfaces: black canvas, gray panels that lighten as they stack */
+  --bg: #080a07;
+  --panel: #0f120d;
+  --panel-2: #151912;
+  --panel-3: #1c2118;
+  --line: #333a2e;
+  --line-bright: #4d573f;
+
+  /* type: pale gray-green terminal text */
+  --text: #cdd6c0;
+  --text-dim: #8a947c;
+  --font-ui: 'Cascadia Mono', Consolas, 'IBM Plex Mono', ui-monospace,
+    'SF Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+
+  /* signals: phosphor green primary, amber secondary, ember for danger */
+  --accent: #8ae23c;
+  --accent-soft: #b8f08a;
+  --gold: #e8c05e;
+  --good: #7fe060;
+  --bad: #ff8a5e;
+
+  /* effects */
+  --glow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+  --input-bg: #0b0e09;
+  --radius: 3px;
+  /* page backdrop: a barely-there green wash behind the black */
+  --bg-glow-a: #0d120b;
+  --bg-glow-b: #090c08;
+  /* CRT scanlines overlay strength (0 disables) */
+  --scanline-alpha: 0.1;
+}
+
+/* -------- previous look: deep-space blue, soft sans, no scanlines -------- */
+[data-theme='nebula'] {
+  --bg: #070a16;
+  --panel: #0f1530;
+  --panel-2: #151d3f;
+  --panel-3: #1b2547;
+  --line: #2a3558;
+  --line-bright: #40518c;
+  --text: #dce3f7;
+  --text-dim: #8f9ac0;
+  --font-ui: system-ui, 'Segoe UI', sans-serif;
+  --accent: #6ea8ff;
+  --accent-soft: #8fb8ff;
+  --gold: #ffd479;
+  --good: #5ee08a;
+  --bad: #ff8a7a;
+  --glow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  --input-bg: #0b1126;
+  --radius: 6px;
+  --bg-glow-a: #101a3d;
+  --bg-glow-b: #0a0f24;
+  --scanline-alpha: 0;
+}

@@ -254,6 +254,7 @@
   </fieldset>
 {/snippet}
 
+<div class="lobbywrap">
 <h2>Lobby — room {getActive()?.params.code}</h2>
 <ul data-testid="roster">
   {#each roster as p (p.id)}
@@ -551,8 +552,29 @@
   <button data-testid="start" onclick={start} disabled={!allReady || (custom && !validation.ok) || !!auction}>Start game</button>
   <p class="hint">start enables when all other players are ready</p>
 {/if}
+</div>
 
 <style>
+  /* frame the lobby like the home hero — bare full-width text read as broken */
+  .lobbywrap {
+    max-width: 64rem;
+    margin: 1.5rem auto;
+    padding: 1.1rem 1.6rem 1.5rem;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel-2) 92%, transparent),
+      color-mix(in srgb, var(--panel) 92%, transparent)
+    );
+    border: 1px solid var(--line-bright);
+    border-radius: 8px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  }
+  .lobbywrap h2 {
+    margin-top: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-soft);
+  }
   .hint,
   .dim {
     opacity: 0.6;
@@ -563,7 +585,7 @@
     width: 0.8rem;
     height: 0.8rem;
     border-radius: 50%;
-    border: 1px solid #05070f;
+    border: 1px solid var(--bg);
     vertical-align: -1px;
     margin-right: 0.25rem;
   }
@@ -590,8 +612,8 @@
     cursor: not-allowed;
   }
   .swatch.auto {
-    background: conic-gradient(#4da3ff, #ff6b5e, #5ee08a, #ffd75e, #4da3ff);
-    color: #05070f;
+    background: conic-gradient(var(--accent), #ff6b5e, var(--good), var(--gold), var(--accent));
+    color: var(--bg);
     font-size: 0.7rem;
     font-weight: 700;
     line-height: 1;
@@ -600,7 +622,7 @@
     display: flex;
     gap: 0.9rem;
     flex-wrap: wrap;
-    border: 1px solid #26304f;
+    border: 1px solid var(--panel-3);
     margin-bottom: 0.8rem;
     max-width: 60rem;
   }
@@ -621,8 +643,8 @@
   }
   .status {
     min-width: 8rem;
-    background: var(--bg, #070a16);
-    border: 1px solid var(--line, #2a3558);
+    background: var(--bg, var(--bg));
+    border: 1px solid var(--line, var(--line));
     border-radius: 0.35rem;
     padding: 0.35rem 0.65rem;
     text-align: center;
@@ -630,14 +652,14 @@
   }
   .status strong {
     display: block;
-    color: var(--accent-soft, #8fb8ff);
+    color: var(--accent-soft, var(--accent-soft));
     font-size: 1.2rem;
     font-variant-numeric: tabular-nums;
   }
   .status.bad,
   .status.bad strong {
-    color: var(--bad, #ff8a7a);
-    border-color: var(--bad, #ff8a7a);
+    color: var(--bad, var(--bad));
+    border-color: var(--bad, var(--bad));
   }
   .details-toggle {
     display: inline-flex;
@@ -667,13 +689,13 @@
     min-width: 0;
     margin: 0;
     padding: 0.55rem;
-    border: 1px solid var(--line, #2a3558);
+    border: 1px solid var(--line, var(--line));
     border-radius: 0.65rem;
-    background: linear-gradient(180deg, var(--panel, #0f1530), var(--bg, #070a16));
+    background: linear-gradient(180deg, var(--panel, var(--panel)), var(--bg, var(--bg)));
   }
   fieldset.pick-group legend {
     padding: 0 0.45rem;
-    color: var(--accent, #6ea8ff);
+    color: var(--accent, var(--accent));
     font-size: 0.95rem;
     font-weight: 700;
   }
@@ -690,20 +712,20 @@
     font-size: 0.85rem;
   }
   .option:hover {
-    background: var(--panel-2, #151d3f);
+    background: var(--panel-2, var(--panel-2));
   }
   .option:has(input:checked) {
-    background: var(--panel-3, #1b2547);
-    color: var(--text, #dce3f7);
+    background: var(--panel-3, var(--panel-3));
+    color: var(--text, var(--text));
   }
   .option input {
     width: 0.9rem;
     height: 0.9rem;
     margin: 0;
-    accent-color: var(--accent, #6ea8ff);
+    accent-color: var(--accent, var(--accent));
   }
   .option input:focus-visible {
-    outline: 2px solid var(--accent-soft, #8fb8ff);
+    outline: 2px solid var(--accent-soft, var(--accent-soft));
     outline-offset: 2px;
   }
   .option-name {
@@ -712,15 +734,15 @@
   .pick-cost {
     min-width: 2rem;
     text-align: right;
-    color: var(--good, #5ee08a);
+    color: var(--good, var(--good));
     font-variant-numeric: tabular-nums;
     font-weight: 700;
   }
   .pick-cost.gain {
-    color: var(--gold, #ffd479);
+    color: var(--gold, var(--gold));
   }
   .normal-option {
-    color: var(--text-dim, #8f9ac0);
+    color: var(--text-dim, var(--text-dim));
   }
   .detail {
     position: absolute;
@@ -729,11 +751,11 @@
     right: 0.2rem;
     top: calc(100% + 0.15rem);
     padding: 0.6rem;
-    border: 1px solid var(--line-bright, #40518c);
+    border: 1px solid var(--line-bright, var(--line-bright));
     border-radius: 0.4rem;
-    background: var(--bg, #070a16);
-    color: var(--text, #dce3f7);
-    box-shadow: var(--glow, 0 0 12px rgba(110, 168, 255, 0.35));
+    background: var(--bg, var(--bg));
+    color: var(--text, var(--text));
+    box-shadow: var(--glow, 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent));
     opacity: 0;
     transform: translateY(-0.25rem);
     pointer-events: none;
@@ -752,10 +774,10 @@
     transform: none;
     padding: 0.15rem 0 0.3rem 0.55rem;
     border: 0;
-    border-left: 2px solid var(--line, #2a3558);
+    border-left: 2px solid var(--line, var(--line));
     border-radius: 0;
     background: transparent;
-    color: var(--text-dim, #8f9ac0);
+    color: var(--text-dim, var(--text-dim));
     box-shadow: none;
     pointer-events: auto;
   }

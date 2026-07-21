@@ -174,7 +174,7 @@
     max-width: 60rem;
   }
   td {
-    border-bottom: 1px solid #1d2440;
+    border-bottom: 1px solid var(--panel-2);
     padding: 0.25rem 0.6rem;
   }
   .turn {
@@ -199,7 +199,7 @@
   }
   .chip.active {
     opacity: 1;
-    outline: 1px solid #6f86ff;
+    outline: 1px solid var(--accent);
   }
   .bad td {
     color: #ff9d9d;

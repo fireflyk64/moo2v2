@@ -1,9 +1,43 @@
+# Status 2026-07-21: all items below are FIXED — notes inline under each.
+
 Sometimes when I click the farmer to drag them instead it selects the farmers (same with worker or scientist icons). I need to focus on clicking without moving to get them selected. I'd like that a simple drag selects everything to the right and doesn't highlight the emojis.  This is a major slowdown in play.
+  ✅ FIXED (Spreadsheet.svelte): citizen emojis are user-select:none so a drag can
+  never sweep-highlight them; a drag from icon i always carries i + everyone to
+  its right with no click needed; a gesture that became a drag no longer toggles
+  the click-selection; drags cancelled outside a valid cell clean up after
+  themselves (dragend).
 We also need to have a count of number of enemy ships detected on scanners. Players can look at this count (0) to know they are not missing out on dangerous situations early in game without checking maps.
+  ✅ FIXED: new engine selector detectedEnemyShips (same visibility rule the map
+  uses) + a 📡 count in the top bar (data-testid="enemy-detected"), red when >0,
+  with an explanatory tooltip. Unit-locked in tests/unit/detectedships.test.ts.
 Major Reskin
 - The game should be called Mantle of Ophion: Battle across Andromeda. Acronym of MOOv2 should be fine most places. We also consider Mantle of Oblivion or Magistrate of Ophidian or Mediators of Omega... so we need it to be a variable somewhere we can change later.
+  ✅ FIXED: src/ui/brand.ts is the single source (BRAND.title/subtitle/acronym);
+  splash, in-game header and the browser tab all read it. Renaming later is a
+  one-file edit.
 - The UI doens't look retro enough and it's too blue. I think it should look more grayish more like the images in bugs/*.png
   can you please spend effort making the UI look more like this including the pixelated inconic worlds that show up instead of writing "Desert rich high-g s4" It needs to have all the functionality of the current one of course.
+  ✅ FIXED: full retro pass — monospace terminal type, uppercase chrome, black
+  background, gray panels, green phosphor accents, subtle CRT scanlines; ~220
+  hardcoded blues/navies swapped for theme tokens. New PixelPlanet.svelte draws
+  deterministic pixel-art worlds per climate; the colonies table shows sprite +
+  "Terran Large / Rich" instead of the old text-only cell (full spec still on
+  hover), and the map's system panel planet list got sprites too.
 - The overall theme should be more gray UI with black background but some green highlights--like an alien GUI --and it should be modular so we can easily change the theming of the game on future iterations without huge rewrites.
+  ✅ FIXED: all theme tokens live in src/ui/theme.css (surfaces, type, signals,
+  effects, font, radius, scanline strength). Retheme = edit that file or add a
+  [data-theme='name'] block; the previous blue look is preserved as
+  [data-theme='nebula'] as proof.
 Better AI: players complain the computer AI is still too weak. Make sure that they are strengthened
+  ✅ FIXED: the tournament-winning OnionAI constraint brain is now the default
+  solo opponent (it beat the old default v2 brain 582 vs 502 avg score with zero
+  eliminations across the personality round-robin); see bugs/tournament/LOG.md.
 Also make sure that the mirror AI mode also is quite difficult since it at least can play catch up if it falls behind due to the mechanics--you can try some battles with the mirror mode AI and ensure it does beat the other AIs (though through cheating). It might be bad to give them whole colonies, but granting them colony ships with escorts that "top up" their fleet relative to the enemies might be reasonable. Then those escorts can fly around and cause havoc.
+  ✅ FIXED: in mirror-galaxy games bots now top up when behind — escorts of their
+  best design up to the strongest enemy's fleet (solvency-gated and capped so the
+  grants don't bankrupt them; naive ungated grants actually LOST — see
+  tests/balance/mirror.test.ts header) plus an occasional colony ship when
+  behind on colonies. debug_spawn_ships gained an optional shipKind for this.
+  Proof harness: MOO2_MIRROR=1 npx vitest run tests/balance/mirror.test.ts —
+  catch-up onion beats fair-onion 845 vs 333 and fair-v2 973 vs 514 at t297;
+  the seat-0 self-twin regression guard holds at 0.95× (soft gate 0.85).

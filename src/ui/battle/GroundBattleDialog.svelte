@@ -336,15 +336,15 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(3, 5, 12, 0.75);
+    background: rgba(0, 0, 0, 0.75);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 60;
   }
   .panel {
-    background: var(--panel, #10162e);
-    border: 1px solid var(--line-bright, #3a4468);
+    background: var(--panel, var(--panel));
+    border: 1px solid var(--line-bright, var(--line));
     border-radius: 10px;
     padding: 0.9rem 1.2rem 1rem;
     width: min(94vw, 58rem);
@@ -371,25 +371,25 @@
   .scene {
     display: block;
     width: 100%;
-    background: linear-gradient(#060913 60%, #0b1122 100%);
-    border: 1px solid var(--line, #232a44);
+    background: linear-gradient(var(--bg) 60%, var(--panel) 100%);
+    border: 1px solid var(--line, var(--panel-3));
     border-radius: 8px;
   }
   .star {
-    fill: #cdd6ff;
+    fill: var(--text);
     opacity: 0.5;
   }
   .horizon {
-    stroke: #26304f;
+    stroke: var(--panel-3);
     stroke-width: 1;
   }
   .moon {
     fill: none;
-    stroke: #56618c;
+    stroke: var(--line-bright);
     stroke-width: 1;
   }
   .moonbite {
-    fill: #060913;
+    fill: var(--bg);
     stroke: none;
   }
   .bg path,
@@ -406,7 +406,7 @@
     stroke: #3a5f74;
   }
   .ocean .gulls {
-    stroke: #8fa3c8;
+    stroke: var(--text-dim);
     stroke-width: 1;
   }
   .farm path,
@@ -419,7 +419,7 @@
   .bg .structure path,
   .bg .structure rect,
   .bg .structure line {
-    stroke: #808bb4;
+    stroke: var(--text-dim);
     opacity: 0.9;
   }
   .domes .structure rect {
@@ -431,7 +431,7 @@
     opacity: 0.9;
   }
   .ground {
-    stroke: #3a4468;
+    stroke: var(--line);
     stroke-width: 1.4;
   }
   .barricade path,
@@ -441,7 +441,7 @@
     stroke-width: 1.3;
   }
   .flag line {
-    stroke: #808bb4;
+    stroke: var(--text-dim);
     stroke-width: 1.4;
   }
   .troop {
@@ -451,7 +451,7 @@
     fill: none;
   }
   .troop circle {
-    fill: var(--panel, #10162e);
+    fill: var(--panel, var(--panel));
   }
   .troop .torso {
     stroke-width: 1.9;
@@ -475,13 +475,13 @@
     opacity: 0.7;
   }
   .burst {
-    fill: #ffd75e;
+    fill: var(--gold);
     stroke: #ff9d3c;
     stroke-width: 0.8;
     opacity: 0.95;
   }
   .bannerBox {
-    fill: rgba(4, 7, 16, 0.85);
+    fill: rgba(0, 0, 0, 0.85);
     stroke-width: 1.4;
   }
   .bannerTitle {
@@ -491,7 +491,7 @@
   }
   .bannerSub {
     font-size: 12.5px;
-    fill: #c6cdea;
+    fill: var(--text);
   }
   .counts {
     display: flex;
@@ -508,7 +508,7 @@
   }
   .controls button {
     background: transparent;
-    border: 1px solid var(--line, #232a44);
+    border: 1px solid var(--line, var(--panel-3));
     border-radius: 6px;
     color: inherit;
     cursor: pointer;

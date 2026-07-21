@@ -321,8 +321,8 @@
     animation: idlepulse 1.8s ease-in-out infinite;
   }
   @keyframes idlepulse {
-    0%, 100% { box-shadow: 0 0 0 rgba(255, 212, 121, 0); }
-    50% { box-shadow: 0 0 16px rgba(255, 212, 121, 0.4); }
+    0%, 100% { box-shadow: 0 0 0 color-mix(in srgb, var(--gold) 0%, transparent); }
+    50% { box-shadow: 0 0 16px color-mix(in srgb, var(--gold) 40%, transparent); }
   }
   .status {
     display: flex;
@@ -440,7 +440,7 @@
   }
   .field {
     border: 1px solid var(--line);
-    background: linear-gradient(180deg, rgba(21, 29, 63, 0.6), rgba(15, 21, 48, 0.6));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 60%, transparent), color-mix(in srgb, var(--panel) 60%, transparent));
     padding: 0.5rem 0.7rem;
     margin-bottom: 0.5rem;
     border-radius: 8px;
@@ -451,7 +451,7 @@
   }
   .field.current {
     border-color: var(--good);
-    box-shadow: 0 0 14px rgba(94, 224, 138, 0.18);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--good) 18%, transparent);
   }
   .fieldbar {
     height: 0.35rem;

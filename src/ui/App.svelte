@@ -49,6 +49,7 @@
 </script>
 
 <div class="starfield" aria-hidden="true"></div>
+<div class="crt" aria-hidden="true"></div>
 {#if updateAvailable}
   <div class="updatebar" data-testid="update-available">
     ⬆ A new version of the game was deployed.
@@ -82,9 +83,9 @@
     position: sticky;
     top: 0;
     z-index: 90;
-    background: #2b2410;
-    border-bottom: 1px solid var(--gold, #ffd75e);
-    color: var(--gold, #ffd75e);
+    background: color-mix(in srgb, var(--gold) 16%, var(--bg));
+    border-bottom: 1px solid var(--gold);
+    color: var(--gold);
     padding: 0.35rem 0.8rem;
     font-size: 0.9rem;
   }
@@ -102,28 +103,29 @@
     background: var(--bg);
   }
 
-  :global(:root) {
-    --bg: #070a16;
-    --panel: #0f1530;
-    --panel-2: #151d3f;
-    --panel-3: #1b2547;
-    --line: #2a3558;
-    --line-bright: #40518c;
-    --text: #dce3f7;
-    --text-dim: #8f9ac0;
-    --accent: #6ea8ff;
-    --accent-soft: #8fb8ff;
-    --gold: #ffd479;
-    --good: #5ee08a;
-    --bad: #ff8a7a;
-    --glow: 0 0 12px rgba(110, 168, 255, 0.35);
-  }
+  /* all theme tokens live in src/ui/theme.css (imported by main.ts) */
   :global(body) {
     margin: 0;
-    background: radial-gradient(120% 90% at 20% -10%, #101a3d 0%, #0a0f24 45%, var(--bg) 100%) fixed;
+    background: radial-gradient(120% 90% at 20% -10%, var(--bg-glow-a) 0%, var(--bg-glow-b) 45%, var(--bg) 100%) fixed;
     color: var(--text);
-    font-family: system-ui, 'Segoe UI', sans-serif;
+    font-family: var(--font-ui);
     line-height: 1.45;
+  }
+  /* retro terminal finish: faint scanlines + corner vignette. Strength comes
+     from the theme (--scanline-alpha: 0 turns it off entirely). */
+  .crt {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 80;
+    background-image: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, var(--scanline-alpha)) 0px,
+        rgba(0, 0, 0, var(--scanline-alpha)) 1px,
+        transparent 1px,
+        transparent 3px
+      ),
+      radial-gradient(ellipse 120% 120% at 50% 45%, transparent 65%, rgba(0, 0, 0, 0.28) 100%);
   }
   .starfield {
     position: fixed;
@@ -162,10 +164,12 @@
     background: linear-gradient(180deg, var(--panel-3), var(--panel-2));
     color: var(--text);
     border: 1px solid var(--line-bright);
-    border-radius: 6px;
+    border-radius: var(--radius);
     padding: 0.28rem 0.7rem;
     font: inherit;
-    font-size: 0.88rem;
+    font-size: 0.84rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     cursor: pointer;
     transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s, background 0.15s;
   }
@@ -182,10 +186,10 @@
   }
   :global(input),
   :global(select) {
-    background: #0b1126;
+    background: var(--input-bg);
     color: var(--text);
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: var(--radius);
     padding: 0.26rem 0.5rem;
     font: inherit;
     font-size: 0.88rem;
@@ -195,7 +199,7 @@
   :global(button:focus-visible) {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(110, 168, 255, 0.25);
+    box-shadow: var(--focus-ring);
   }
   :global(input[type='checkbox']),
   :global(input[type='radio']) {
@@ -222,7 +226,7 @@
     letter-spacing: 0.08em;
   }
   :global(tbody tr:hover td) {
-    background: rgba(110, 168, 255, 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
   :global(::-webkit-scrollbar) {
     width: 10px;

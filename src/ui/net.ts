@@ -71,8 +71,10 @@ export interface SoloSetup {
 }
 
 /** Host-side: let a bot take over an absent player's seat. The bot helloes
- * with the seat's name, so the host's name matching hands it that empire. */
-export function addBotForSeat(active: ActiveGame, seatName: string, mode: BotMode = 'fair'): SoloBot | null {
+ * with the seat's name, so the host's name matching hands it that empire.
+ * Default is the OnionAI (the tournament-winning brain, fair mode) — the
+ * stand-in should play the strongest game available, same as solo. */
+export function addBotForSeat(active: ActiveGame, seatName: string, mode: LobbyBotMode = 'onion'): SoloBot | null {
   if (!active.host) return null;
   const link = active.host.createLocalLink();
   const session = new GameSession<GameState>({
@@ -86,7 +88,12 @@ export function addBotForSeat(active: ActiveGame, seatName: string, mode: BotMod
     roomCode: active.params.code,
     lobbyServer: active.params.server,
   });
-  const bot = new SoloBot({ session, mode, personality: 'auto' });
+  const bot = new SoloBot({
+    session,
+    mode: mode === 'onion' ? 'fair' : mode,
+    ...(mode === 'onion' ? { brain: 'onion' as const } : {}),
+    personality: 'auto',
+  });
   active.bots.push(bot);
   return bot;
 }
@@ -264,7 +271,9 @@ export interface SoloBotSpec {
  * keep their stable names (Bot, Bot 2, ...) so resume re-seats them. */
 export async function enterSoloGame(
   name: string,
-  botMode: LobbyBotMode = 'parity',
+  // OnionAI by default: the constraint brain won the 07-2026 tournament
+  // (582 avg vs v2's 502, zero eliminations) — the strongest default opponent
+  botMode: LobbyBotMode = 'onion',
   personality: BotPersonality | 'auto' = 'militarist',
   botSpecs?: SoloBotSpec[],
   opts?: {
@@ -311,6 +320,18 @@ export async function enterSoloGame(
     identity,
     ...(resume && resume.log.length ? { resume: { gameId: resume.gameId, log: resume.log } } : {}),
   });
+  // Solo settings policy: a mirror galaxy also switches debugCommands on (and
+  // a later un-mirror switches it back off unless parity mode wants it). The
+  // logged debug grants are how the mirror bots "play catch-up when behind"
+  // (bugs.md) — soloBot.ts gates the top-up on settings.mirror &&
+  // settings.debugCommands, so it works for fair and onion bots alike. The
+  // Lobby's host controls call updateSettings, hence the wrap; multiplayer
+  // rooms (enterRoom) keep their explicit debug flag untouched.
+  {
+    const rawUpdateSettings = hosted.host.updateSettings.bind(hosted.host);
+    hosted.host.updateSettings = (s) =>
+      rawUpdateSettings({ ...s, debugCommands: botMode === 'parity' || !!s.mirror });
+  }
   const soloBots = specs.map((spec, i) => {
     const botSession = joinGame<GameState>({
       transport: hub.join(),

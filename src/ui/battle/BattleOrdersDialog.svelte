@@ -266,15 +266,15 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(4, 6, 14, 0.8);
+    background: rgba(0, 0, 0, 0.8);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 40;
   }
   .dialog {
-    background: #141830;
-    border: 1px solid #3a4a80;
+    background: var(--panel-2);
+    border: 1px solid var(--line-bright);
     border-radius: 10px;
     padding: 1.2rem 1.5rem;
     max-width: 30rem;
@@ -297,7 +297,7 @@
   }
   .countdown {
     font-size: 0.85rem;
-    color: var(--text-dim, #9aa3c0);
+    color: var(--text-dim, var(--text-dim));
     margin: 0.2rem 0 0;
   }
   .countdown.urgent {

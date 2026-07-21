@@ -641,6 +641,23 @@ export function galaxyView(state: GameState, empireId: number): StarView[] {
   });
 }
 
+/** Enemy ships currently visible to this empire — parked at any explored or
+ * scanned star, the same rule galaxyView uses to draw them. A glanceable count
+ * (0 = all clear) so players need not sweep the map to know they are safe. */
+export function detectedEnemyShips(state: GameState, empireId: number): number {
+  const empire = state.empires.find((e) => e.id === empireId);
+  if (!empire) return 0;
+  const explored = new Set(empire.exploredStars);
+  const scanned = scannedStars(state, empireId);
+  let n = 0;
+  for (const s of state.ships) {
+    if (s.owner === empireId || s.owner < 0) continue;
+    if (s.location.kind !== 'star') continue;
+    if (explored.has(s.location.starId) || scanned.has(s.location.starId)) n++;
+  }
+  return n;
+}
+
 export interface RefitOption {
   designId: number;
   name: string;

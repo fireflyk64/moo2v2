@@ -7,6 +7,7 @@
   import { enterPbmGame, pbmToken } from '../pbm';
   import { describeSaveError, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
   import { app, bindActive } from '../state.svelte';
+  import { BRAND } from '../brand';
 
   const q = new URLSearchParams(location.search);
   let server = $state(q.get('server') ?? DEFAULT_SERVER);
@@ -33,7 +34,8 @@
     }
   }
 
-  let botMode = $state<'parity' | 'fair' | 'onion'>('parity');
+  // OnionAI default: the tournament-winning brain (bugs.md: "AI too weak")
+  let botMode = $state<'parity' | 'fair' | 'onion'>('onion');
 
   // per-bot scenario config: play style, race (archetype or stock preset),
   // fleet silhouette and banner color — 'auto' keeps the seat defaults
@@ -159,7 +161,8 @@
 </script>
 
 <div class="hero">
-<h1>MOO2<span class="v2">v2</span></h1>
+<h1>{BRAND.title}</h1>
+<p class="subtitle">{BRAND.subtitle}</p>
 <p class="tag">Conquer the stars with friends — peer-to-peer, in your browser.</p>
 <div class="form">
   <label>Name <input data-testid="name" bind:value={name} /></label>
@@ -295,24 +298,28 @@
     max-width: 30rem;
     margin: 12vh auto 0;
     padding: 1.6rem 2rem 1.8rem;
-    background: linear-gradient(180deg, rgba(21, 29, 63, 0.92), rgba(15, 21, 48, 0.92));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 92%, transparent), color-mix(in srgb, var(--panel) 92%, transparent));
     border: 1px solid var(--line-bright);
     border-radius: 14px;
-    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 60px rgba(110, 168, 255, 0.08);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 60px color-mix(in srgb, var(--accent) 8%, transparent);
   }
   h1 {
     margin: 0;
-    font-size: 2.4rem;
+    font-size: 2.1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
     color: var(--accent-soft);
-    text-shadow: 0 0 24px rgba(110, 168, 255, 0.5);
+    text-shadow: 0 0 24px color-mix(in srgb, var(--accent) 50%, transparent);
   }
-  .v2 {
+  .subtitle {
+    margin: 0.1rem 0 0;
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    font-size: 0.78rem;
     color: var(--gold);
-    font-size: 1.4rem;
-    vertical-align: super;
   }
   .tag {
-    margin: 0.2rem 0 1.2rem;
+    margin: 0.5rem 0 1.2rem;
     color: var(--text-dim);
   }
   .form {

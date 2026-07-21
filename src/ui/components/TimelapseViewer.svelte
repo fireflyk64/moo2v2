@@ -106,15 +106,15 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(4, 6, 14, 0.88);
+    background: rgba(0, 0, 0, 0.88);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 55;
   }
   .viewer {
-    background: #10142a;
-    border: 1px solid #3a4a80;
+    background: var(--panel);
+    border: 1px solid var(--line-bright);
     border-radius: 10px;
     padding: 0.7rem 0.9rem;
     width: min(92vw, 70rem);
@@ -129,13 +129,13 @@
   }
   .turn {
     font-variant-numeric: tabular-nums;
-    color: var(--text-dim, #9aa3c0);
+    color: var(--text-dim, var(--text-dim));
     margin-right: auto;
   }
   svg {
     width: 100%;
     max-height: 62vh;
-    border: 1px solid var(--line, #26304f);
+    border: 1px solid var(--line, var(--panel-3));
     border-radius: 8px;
   }
   .scrub {

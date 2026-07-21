@@ -25,7 +25,7 @@ import { availableHulls, designStats, knownWeapons } from './shipdesign';
 import { isShipStyle } from './shipstyles';
 import type { BattleOrders, Stance, TargetPriority } from './combat';
 import { ANDROID_RACE, NATIVE_RACE } from './types';
-import type { Colony, GameState, Planet, PopGroup, Ship, Star, TurnEvent } from './types';
+import type { Colony, GameState, Planet, PopGroup, Ship, ShipKind, Star, TurnEvent } from './types';
 
 export interface EngineCommand {
   turn: number;
@@ -1429,6 +1429,15 @@ const applyVote: Applier = (state, cmd) => {
 
 // ---------- debug commands (settings-gated, still deterministic + logged) ----------
 
+/** non-design kinds debug_spawn_ships may spawn (shipKind override) */
+const SPAWNABLE_SHIP_KINDS: ReadonlySet<unknown> = new Set<ShipKind>([
+  'colony_ship',
+  'outpost_ship',
+  'transport',
+  'scout',
+  'construction_ship',
+]);
+
 /** Debug payloads are still hostile network JSON: a fractional amount/popK
  * would poison the canonical hash exactly like any other command. */
 const validateDebug: Validator = (state, cmd) => {
@@ -1443,10 +1452,22 @@ const validateDebug: Validator = (state, cmd) => {
       if (!Number.isSafeInteger(popK) || (popK as number) < 0 || (popK as number) > 100_000) return 'bad popK';
       return null;
     }
-    case 'debug_spawn_ships':
+    case 'debug_spawn_ships': {
       if (!Number.isSafeInteger(p?.['count']) || (p['count'] as number) < 1 || (p['count'] as number) > 20) return 'bad count';
-      if (!Number.isSafeInteger(p?.['starId']) || !Number.isSafeInteger(p?.['designId'])) return 'bad ids';
+      if (!Number.isSafeInteger(p?.['starId'])) return 'bad ids';
+      // optional shipKind (0.21.0): a NON-design kind (colony ship, outpost
+      // ship, ...) overrides the default warship spawn; designId is ignored
+      // then, but must still be sane JSON (null or an integer — anything else
+      // would poison the canonical hash). Absent = the old designId contract.
+      const kind = p?.['shipKind'];
+      if (kind !== undefined) {
+        if (!SPAWNABLE_SHIP_KINDS.has(kind as string)) return 'bad shipKind';
+        if (p?.['designId'] != null && !Number.isSafeInteger(p['designId'])) return 'bad ids';
+        return null;
+      }
+      if (!Number.isSafeInteger(p?.['designId'])) return 'bad ids';
       return null;
+    }
     case 'debug_grant_app':
       return typeof p?.['appId'] === 'string' && p['appId'].length <= 64 ? null : 'bad appId';
     default:
@@ -1519,13 +1540,17 @@ const applyDebugFoundColony: Applier = (state, cmd) => {
 };
 
 const applyDebugSpawnShips: Applier = (state, cmd) => {
-  const p = cmd.payload as { starId: number; designId: number; count: number };
+  const p = cmd.payload as { starId: number; designId: number | null; count: number; shipKind?: ShipKind };
+  // absent shipKind = the pre-0.21.0 behavior (warships of designId), so old
+  // logs replay identically; a non-design kind spawns the plain hull exactly
+  // as a shipyard would (no marines, no cargo — see pipeline ship completion)
+  const kind: ShipKind | 'design' = p.shipKind ?? 'design';
   for (let i = 0; i < Math.min(p.count, 20); i++) {
     state.ships.push({
       id: allocId(state, cmd.playerId),
       owner: cmd.playerId,
-      shipKind: 'design',
-      designId: p.designId,
+      shipKind: kind,
+      designId: kind === 'design' ? p.designId : null,
       location: { kind: 'star', starId: p.starId },
       cargoPopUnits: 0,
       cargoRace: cmd.playerId,
