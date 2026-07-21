@@ -178,7 +178,7 @@
     transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s, background 0.15s, filter 0.15s;
   }
   :global(button:hover:not(:disabled)) {
-    border-color: var(--accent);
+    border-color: var(--glow-color);
     box-shadow: var(--glow), inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.45);
     filter: brightness(1.12);
   }

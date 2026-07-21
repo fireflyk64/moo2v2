@@ -49,10 +49,13 @@
   --good: #85e962;
   --bad: #ff8a5e;
 
-  /* effects — glow is for INTERACTION feedback only (hover/focus); UI
-     surfaces themselves carry no green wash (bugs.md round 3: no bleed) */
-  --glow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
-  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+  /* effects — glows are BLUE (round 4: green bled, blue pops), plus a gold
+     halo for the money moments (commit button, offers) so the UI stays alive */
+  --glow-color: #7fb2ff;
+  --glow: 0 0 12px color-mix(in srgb, var(--glow-color) 55%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--glow-color) 45%, transparent);
+  --halo: 0 0 46px color-mix(in srgb, var(--glow-color) 16%, transparent);
+  --halo-gold: 0 0 18px color-mix(in srgb, var(--gold) 45%, transparent);
   --input-bg: #071008;
   --radius: 3px;
   /* page backdrop: dark green behind the glass, kept flat — no visible wash */
@@ -85,8 +88,11 @@
   --gold: #ffd479;
   --good: #5ee08a;
   --bad: #ff8a7a;
-  --glow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
-  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  --glow-color: #6ea8ff;
+  --glow: 0 0 12px color-mix(in srgb, var(--glow-color) 35%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--glow-color) 25%, transparent);
+  --halo: 0 0 46px color-mix(in srgb, var(--glow-color) 14%, transparent);
+  --halo-gold: 0 0 18px color-mix(in srgb, var(--gold) 40%, transparent);
   --input-bg: #0b1126;
   --radius: 6px;
   --bg-glow-a: #101a3d;

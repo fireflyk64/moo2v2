@@ -1048,6 +1048,8 @@
     font-weight: 700;
     background: linear-gradient(180deg, #24418a, #1b2f66);
     border-color: #4a6ab8;
+    /* the money button glows — blue at rest, gold when it needs you */
+    box-shadow: var(--glow);
     /* pinned first in the header: a stable footprint keeps it in the exact
        same place as its label changes (Commit ↔ Committed, +N suffix) */
     min-width: 11.5rem;
@@ -1065,6 +1067,7 @@
     background: linear-gradient(180deg, #8a6a1c, #6e5312);
     border-color: var(--gold);
     color: #fff2cf;
+    box-shadow: var(--halo-gold);
     animation: pulse-warn 1.6s ease-in-out infinite;
   }
   .commit.committed {
@@ -1265,7 +1268,7 @@
     border-radius: 12px;
     padding: 0.7rem 1.1rem;
     z-index: 45;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+    box-shadow: var(--halo), 0 10px 40px rgba(0, 0, 0, 0.6);
     animation: drop-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
   }
   @keyframes drop-in {

@@ -301,7 +301,7 @@
     background: linear-gradient(180deg, color-mix(in srgb, var(--panel-2) 92%, transparent), color-mix(in srgb, var(--panel) 92%, transparent));
     border: 1px solid var(--line-bright);
     border-radius: 14px;
-    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), var(--halo);
   }
   h1 {
     margin: 0;

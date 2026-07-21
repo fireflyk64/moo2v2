@@ -34,10 +34,12 @@
   }
 
   /** Colorful pixel-art galaxy backdrop (bugs.md: like bugs/galaxy_compact.png).
-   * Drawn ONCE at 1/PX resolution and upscaled with image-rendering:pixelated,
-   * so the nebulae read as chunky pixel clusters, not smooth airbrush. */
+   * Two layers: nebulae/arms are drawn at 1/PX resolution for the chunky
+   * pixel-cluster look, then composited onto a FULL-res canvas where every
+   * background star is a true single pixel (round-4 feedback: 5px star squares
+   * competed with the real star glyphs). */
   function makeGalaxyBackground(seedText: string, w: number, h: number): string {
-    const PX = 5; // art-pixel size at texture scale — bigger = chunkier
+    const PX = 5; // art-pixel size of the nebula layer — bigger = chunkier
     const seed = hashText(seedText);
     const rnd = mulberry32(seed);
     const lw = Math.ceil(w / PX);
@@ -47,6 +49,8 @@
     canvas.height = lh;
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
+    /** star positions collected during the lo-res pass, drawn 1px at full res */
+    const flecks: Array<{ x: number; y: number; warm: boolean; a: number }> = [];
 
     // deep-space base + bright warm core (the reference galaxy glows white-blue)
     ctx.fillStyle = '#05060f';
@@ -79,11 +83,14 @@
         const y = cy + Math.sin(th) * r * squish;
         const rr = 3 + rnd() * 9;
         blob(x, y, rr, `rgba(${110 + Math.floor(rnd() * 50)},${120 + Math.floor(rnd() * 50)},${190 + Math.floor(rnd() * 60)},${0.12 + rnd() * 0.12})`);
-        // arm flecks stay FAINT — at 5px art-pixels a bright white square
-        // reads as a star and fights the real star glyphs (bugs.md round 3)
-        if (rnd() < 0.35) {
-          ctx.fillStyle = rnd() < 0.25 ? `rgba(255,244,214,${0.15 + rnd() * 0.18})` : `rgba(214,228,255,${0.12 + rnd() * 0.2})`;
-          ctx.fillRect(Math.floor(x + (rnd() - 0.5) * 6), Math.floor(y + (rnd() - 0.5) * 6), 1, 1);
+        // arm star flecks render 1px at FULL res — collect positions here
+        if (rnd() < 0.5) {
+          flecks.push({
+            x: (x + (rnd() - 0.5) * 6) * PX,
+            y: (y + (rnd() - 0.5) * 6) * PX,
+            warm: rnd() < 0.25,
+            a: 0.35 + rnd() * 0.45,
+          });
         }
       }
     }
@@ -109,25 +116,15 @@
         const rr = 5 + rnd() * (Math.min(lw, lh) * 0.09);
         blob(px + ox, py + oy, rr, `rgba(${cr},${cg},${cb},${0.10 + rnd() * 0.14})`);
       }
-      // a few lit knots inside each nebula (dim — background, not stars)
+      // a few lit knots inside each nebula — also 1px at full res
       for (let k = 0; k < 6; k++) {
-        ctx.fillStyle = `rgba(${Math.min(255, cr + 70)},${Math.min(255, cg + 70)},${Math.min(255, cb + 70)},${0.18 + rnd() * 0.16})`;
-        ctx.fillRect(Math.floor(px + (rnd() - 0.5) * lw * 0.12), Math.floor(py + (rnd() - 0.5) * lh * 0.1), 1, 1);
+        flecks.push({
+          x: (px + (rnd() - 0.5) * lw * 0.12) * PX,
+          y: (py + (rnd() - 0.5) * lh * 0.1) * PX,
+          warm: false,
+          a: 0.3 + rnd() * 0.3,
+        });
       }
-    }
-
-    // star sprinkle — kept dim so the REAL star glyphs stay the bright layer
-    const starCount = Math.floor((lw * lh) / 46);
-    for (let i = 0; i < starCount; i++) {
-      const x = Math.floor(rnd() * lw);
-      const y = Math.floor(rnd() * lh);
-      const b = rnd();
-      const alpha = 0.06 + b * 0.2;
-      const tint = rnd();
-      if (tint < 0.12) ctx.fillStyle = `rgba(255,225,190,${alpha})`;
-      else if (tint > 0.9) ctx.fillStyle = `rgba(190,215,255,${alpha})`;
-      else ctx.fillStyle = `rgba(240,246,255,${alpha})`;
-      ctx.fillRect(x, y, 1, 1);
     }
 
     // pixel grain: random dark speckle gives the dithered retro texture
@@ -137,14 +134,41 @@
       ctx.fillRect(Math.floor(rnd() * lw), Math.floor(rnd() * lh), 1, 1);
     }
 
-    // vignette to keep focus toward map center
-    const vg = ctx.createRadialGradient(lw * 0.5, lh * 0.5, Math.min(lw, lh) * 0.3, lw * 0.5, lh * 0.5, Math.max(lw, lh) * 0.82);
+    // ---- full-res composite: chunky nebula layer under single-pixel stars ----
+    const full = document.createElement('canvas');
+    full.width = w;
+    full.height = h;
+    const fx = full.getContext('2d');
+    if (!fx) return canvas.toDataURL('image/png');
+    fx.imageSmoothingEnabled = false; // keep the nebula pixels hard-edged
+    fx.drawImage(canvas, 0, 0, w, h);
+
+    for (const f of flecks) {
+      fx.fillStyle = f.warm ? `rgba(255,244,214,${f.a})` : `rgba(214,228,255,${f.a})`;
+      fx.fillRect(Math.floor(f.x), Math.floor(f.y), 1, 1);
+    }
+    // field sprinkle — true 1px stars over the whole sky
+    const starCount = Math.floor((w * h) / 1100);
+    for (let i = 0; i < starCount; i++) {
+      const x = Math.floor(rnd() * w);
+      const y = Math.floor(rnd() * h);
+      const b = rnd();
+      const alpha = 0.2 + b * 0.55;
+      const tint = rnd();
+      if (tint < 0.12) fx.fillStyle = `rgba(255,225,190,${alpha})`;
+      else if (tint > 0.9) fx.fillStyle = `rgba(190,215,255,${alpha})`;
+      else fx.fillStyle = `rgba(240,246,255,${alpha})`;
+      fx.fillRect(x, y, 1, 1);
+    }
+
+    // vignette last so the star field dims toward the edges too
+    const vg = fx.createRadialGradient(w * 0.5, h * 0.5, Math.min(w, h) * 0.3, w * 0.5, h * 0.5, Math.max(w, h) * 0.82);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
     vg.addColorStop(1, 'rgba(2,3,8,0.55)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, lw, lh);
+    fx.fillStyle = vg;
+    fx.fillRect(0, 0, w, h);
 
-    return canvas.toDataURL('image/png');
+    return full.toDataURL('image/png');
   }
 
   const session = () => getActive()!.session;
