@@ -9,7 +9,7 @@
   import { battleToLabSeed, enemySeedsFromReplays, setLabSeed, type LabSeedGroup } from '../labSeed';
   import GroundBattleDialog from '../battle/GroundBattleDialog.svelte';
   import type { GroundBattleEntry } from '../state.svelte';
-  import { app, getActive, saveAutoReplay } from '../state.svelte';
+  import { app, getActive, saveAutoReplay, savePerGame } from '../state.svelte';
   import { THEMES, applyTheme, currentTheme } from '../themes';
   import { addBotForSeat, removeBotForSeat } from '../net';
 
@@ -426,6 +426,8 @@
       {#each myOffers as o (o.leaderId)}
         {@const row = leaderById.get(o.leaderId)}
         {@const turnsLeft = o.expiresTurn - gs.turn}
+        {@const offerKey = `${o.leaderId}:${o.expiresTurn}`}
+        {@const ignored = app.ignoredOffers.includes(offerKey)}
         <div class="leadercard offer" class:ship={row?.kind === 'ship'}>
           <div class="portrait">{portraitOf(o.leaderId, row?.kind)}</div>
           <div class="who">
@@ -442,6 +444,17 @@
             <span class="price">{o.priceBc} BC</span>
             <span class="dim" title="the offer expires turn {o.expiresTurn}">⏳ {turnsLeft} turn{turnsLeft === 1 ? '' : 's'}</span>
             <button data-testid="hire-{o.leaderId}" onclick={() => submit('hire_leader', { leaderId: o.leaderId })}>Hire</button>
+            <button
+              class="mini"
+              data-testid="ignore-{o.leaderId}"
+              title={ignored
+                ? 'un-ignore: auto-play stops for this offer again'
+                : 'ignore: auto-play (⏩) no longer stops for this offer — you can still hire any time before it expires'}
+              onclick={() => {
+                app.ignoredOffers = ignored ? app.ignoredOffers.filter((k) => k !== offerKey) : [...app.ignoredOffers, offerKey];
+                savePerGame();
+              }}
+            >{ignored ? '🔕 ignored' : '🔕 ignore'}</button>
           </div>
         </div>
       {/each}

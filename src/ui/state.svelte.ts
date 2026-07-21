@@ -80,6 +80,9 @@ export const app = $state({
   /** research queue: started automatically (client-issued set_research) when
    * the current field completes; entries validated again at dequeue time */
   researchQueue: [] as Array<{ fieldNum: number; fieldId: string; targetApp: string | null }>,
+  /** leader offers muted from fast-forward stops, keyed leaderId:expiresTurn
+   * (a fresh offer window surfaces again); hiring stays possible any time */
+  ignoredOffers: [] as string[],
   /** pop the battle viewer up over the map as soon as one of MY battles
    * resolves (plays at 2×; the Empires-tab replay list keeps the archive) */
   autoReplay: true,
@@ -145,7 +148,7 @@ export function savePerGame(): void {
   try {
     localStorage.setItem(
       perGameKey,
-      JSON.stringify({ pins: app.pins, researchQueue: app.researchQueue, autoExplore: app.autoExplore }),
+      JSON.stringify({ pins: app.pins, researchQueue: app.researchQueue, autoExplore: app.autoExplore, ignoredOffers: app.ignoredOffers }),
     );
   } catch {
     // private mode: lasts for this tab only
@@ -156,6 +159,7 @@ function loadPerGame(roomCode: string): void {
   app.pins = {};
   app.researchQueue = [];
   app.autoExplore = false;
+  app.ignoredOffers = [];
   try {
     const raw = localStorage.getItem(perGameKey);
     if (!raw) return;
@@ -179,6 +183,9 @@ function loadPerGame(roomCode: string): void {
       );
     }
     app.autoExplore = parsed.autoExplore === true;
+    if (Array.isArray(parsed.ignoredOffers)) {
+      app.ignoredOffers = parsed.ignoredOffers.filter((x): x is string => typeof x === 'string');
+    }
   } catch {
     // corrupt/absent storage: defaults stand
   }
@@ -331,6 +338,7 @@ export function resetGameUiState(): void {
   app.pins = {};
   app.researchQueue = [];
   app.autoExplore = false;
+  app.ignoredOffers = [];
   app.timelapseRequest = 0;
   app.version++;
 }

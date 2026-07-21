@@ -273,6 +273,15 @@
     const me = session().playerId;
     return gs.leaderOffers.filter((o) => o.empireId === me && o.expiresTurn > gs.turn).length;
   });
+  /** offers not muted with 🔕 — only these stop fast-forward (bugs.md); an
+   * ignored offer stays on the Empires tab and can still be hired any time */
+  const urgentOfferCount = $derived.by(() => {
+    if (!gs) return 0;
+    const me = session().playerId;
+    return gs.leaderOffers.filter(
+      (o) => o.empireId === me && o.expiresTurn > gs.turn && !app.ignoredOffers.includes(`${o.leaderId}:${o.expiresTurn}`),
+    ).length;
+  });
   function endTurn() {
     flushTelemetry();
     session().endTurnFast();
@@ -325,7 +334,7 @@
     if (app.viewingGround) return 'an invasion playback is up';
     if (timelapse || timelapseBusy) return 'the campaign timelapse is up';
     if (researchIdle && app.researchQueue.length === 0) return 'labs idle — pick research';
-    if (leaderOfferCount > 0) return 'a leader awaits your answer';
+    if (urgentOfferCount > 0) return 'a leader awaits your answer';
     if ((summary?.bc ?? 0) < 0 && !app.autopilot.enabled) return 'treasury is in the red';
     if (emptyQueueCount > 0 && !app.autopilot.enabled) return 'a colony has an empty build queue';
     const fresh = app.reports.filter((r) => r.turn === resolvedTurn);
@@ -829,8 +838,16 @@
       }}
     >Reports{app.reports.length > seenReports ? ` (${app.reports.length - seenReports})` : ''}</button>
     {#if leaderOfferCount > 0 && tab !== 'empires'}
-      <button class="offers" data-testid="leader-offer-badge" title="a leader is waiting for your answer on the Empires tab" onclick={() => (tab = 'empires')}>
-        🎖 {leaderOfferCount} leader offer{leaderOfferCount > 1 ? 's' : ''}
+      <button
+        class="offers"
+        class:quiet={urgentOfferCount === 0}
+        data-testid="leader-offer-badge"
+        title={urgentOfferCount > 0
+          ? 'a leader is waiting for your answer on the Empires tab'
+          : 'ignored leader offer(s) — still hireable on the Empires tab; auto-play will not stop for them'}
+        onclick={() => (tab = 'empires')}
+      >
+        {urgentOfferCount > 0 ? '🎖' : '🔕'} {leaderOfferCount} leader offer{leaderOfferCount > 1 ? 's' : ''}
       </button>
     {/if}
     {#if app.replays.some((r) => !r.watched)}
@@ -1124,6 +1141,14 @@
     border: 1px solid var(--gold);
     color: #ffe9b0;
     animation: pulse-warn 1.6s ease-in-out infinite;
+  }
+  /* every offer muted: stop shouting, stay findable */
+  nav .offers.quiet {
+    animation: none;
+    opacity: 0.75;
+    background: var(--device-texture), linear-gradient(180deg, var(--device-mid), var(--device-lo));
+    border-color: var(--device-edge);
+    color: var(--device-text);
   }
   nav .offers + .replays {
     margin-left: 0.35rem;
