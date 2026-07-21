@@ -917,8 +917,8 @@
           <feGaussianBlur stdDeviation="2.8" />
         </filter>
         <radialGradient id="underdark">
-          <stop offset="0%" stop-color="#020409" stop-opacity="0.78" />
-          <stop offset="55%" stop-color="#020409" stop-opacity="0.6" />
+          <stop offset="0%" stop-color="#020409" stop-opacity="0.55" />
+          <stop offset="55%" stop-color="#020409" stop-opacity="0.38" />
           <stop offset="100%" stop-color="#020409" stop-opacity="0" />
         </radialGradient>
       </defs>
@@ -929,7 +929,7 @@
       <g class="underdark" aria-hidden="true">
         {#each view as v (v.star.id)}
           {#if !v.explored}
-            <circle cx={v.star.x} cy={v.star.y} r="52" fill="url(#underdark)" />
+            <circle cx={v.star.x} cy={v.star.y} r="46" fill="url(#underdark)" />
           {/if}
         {/each}
       </g>
