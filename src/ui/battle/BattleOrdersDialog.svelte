@@ -326,14 +326,14 @@
             </fieldset>
           {/if}
         {/if}
-        <label title="How your charging/holding ships maneuver as a fleet — evade & retreat is never overridden">
-          Formation
+        <label title="Your battle doctrine — the two fleets' doctrines choose the choreography they fly against each other. A doctrine also sets when your guns speak: line pummels from long range, everything else holds fire until medium (missiles always fly). Slow, forward-gunned capitals sit the dance out and creep in; evade & retreat is never overridden.">
+          Doctrine
           <select data-testid="battle-formation" bind:value={formation}>
-            <option value="" title="the whole fleet moves as one body — classic behavior">Massed (classic)</option>
-            <option value="line" title="the heaviest half walls up near your edge; light ships skirmish forward">Line — heavies wall up, light ships skirmish</option>
-            <option value="flank" title="the fastest third swings wide around one side and attacks from the flank">Flank — fast wing swings around one side</option>
-            <option value="pincer" title="the fastest third splits to BOTH sides of the field">Pincer — fast wing splits to both sides</option>
-            <option value="envelop" title="two wings run wide while a slow center advances — surround them">Envelop — two wings + slow center, surround</option>
+            <option value="" title="no set doctrine: a charging stance fights as CHARGE, a holding/standoff stance as LINE">By stance — charge when closing, line when holding</option>
+            <option value="line" title="a gun wall that pummels from long range — strongest with long-range, accurate guns; chargers get herded into pockets at your preferred range">Line — gun wall, pummel from distance</option>
+            <option value="flank" title="the main wall fixes them at medium range while the fastest third sweeps the wide corner and pounces at knife range">Flank — wall + a wing around one side</option>
+            <option value="pincer" title="like flank, but the fast wing splits and pounces from BOTH sides">Pincer — wings pounce from both sides</option>
+            <option value="envelop" title="the whole fleet closes as one rotating net — every bow bears; the classic answer to a wild charge">Envelop — a closing net, every bow bears</option>
           </select>
         </label>
         {#if isAttacker && engagePlanetId === null && holdings.length > 0}

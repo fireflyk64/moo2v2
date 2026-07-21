@@ -493,6 +493,10 @@ export function buildBattleInput(state: GameState, battle: PendingBattle): Built
       // slewing game option rides the input so replays re-sim identically;
       // the key is only present when ON (legacy inputs stay byte-exact)
       ...(state.settings.slewing === true ? { slewing: true } : {}),
+      // set-piece pattern battles (0.24.0): every NEW battle is choreographed;
+      // the flag rides the input so replays re-sim identically, and old
+      // replay inputs without it keep the byte-exact free-movement sim
+      patterns: true,
     },
     baseColonyId,
     engagedColonyId: engaged === undefined ? undefined : engaged === null ? null : engaged.id,

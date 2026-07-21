@@ -20,6 +20,15 @@
     type GameState,
   } from '@engine/index';
   import { rngFor } from '@engine/rng';
+  import {
+    ATTACK_TACTICS,
+    DEFENSE_TACTICS,
+    fightGroundRounds,
+    generateTerrain,
+    groundModifiers,
+    type AttackTactic,
+    type DefenseTactic,
+  } from '@engine/groundTactics';
   import { SHIP_STYLES } from '@engine/index';
   import { appForWeapon, APPLICATION_ROWS, FIELD_ROWS, WEAPON_ROWS, hullById } from '@engine/data/index';
   import BattleViewer from '../battle/BattleViewer.svelte';
@@ -226,13 +235,10 @@
       ordersD: { ...snap[1].orders },
       // sandbox slewing toggle: the sim honors it purely from the input
       ...(labSlewing ? { slewing: true } : {}),
+      // lab battles fight the 0.24 set-piece patterns, same as live games
+      patterns: true,
     };
-    // master seeds must be 32 hex chars: encode the free-text seed as hex
-    const padded = [...seed]
-      .map((c) => c.charCodeAt(0).toString(16).padStart(2, '0'))
-      .join('')
-      .padEnd(32, '0')
-      .slice(0, 32);
+    const padded = hexSeed(seed);
     const result = runBattle(structuredClone(input), rngFor(padded, ...input.seedLabel));
     viewing = {
       battleId: input.battleId,
@@ -293,54 +299,66 @@
   const specialDescription = (id: string) => specialSystemInfo(id).description;
   const specialSpacePct = (id: string) => specialSystemInfo(id).spacePct;
 
-  // ---- 🪖 ground assault preview: stage an invasion playback (win or loss)
-  // without needing a real game. Pure UI — the dialog renders whatever rounds
-  // it is handed, so a quick biased coin-flip sim stands in for the engine. ----
+  // ---- 🪖 ground assault lab: run the REAL invasion math (terrain +
+  // RPS tactics + the engine's round loop) on a hypothetical world, so you
+  // can flip tactics and watch how the same battle swings. Deterministic:
+  // same seed + same setup = same battle. ----
+  const GROUND_CLIMATES = ['gaia', 'terran', 'ocean', 'swamp', 'arid', 'desert', 'tundra', 'barren', 'hostile', 'energized'] as const;
+  const GROUND_NAMES: Record<string, string> = {
+    gaia: 'Elysium Vale', terran: 'Harvest Home', ocean: 'Meridian Deep', swamp: 'Mirkfen',
+    arid: 'Dustwall', desert: 'Kiln Reach', tundra: 'Whitefall', barren: 'Dome City Alpha',
+    hostile: 'Cinderholm', energized: 'Stormglass',
+  };
   let labGround = $state<GroundBattleEntry | null>(null);
-  let gScene = $state<'ocean' | 'farm' | 'domes'>('domes');
+  let gClimate = $state<(typeof GROUND_CLIMATES)[number]>('barren');
+  let gWorld = $state(42); // terrain seed: every world always fights on ITS map
+  let gAtkTactic = $state<AttackTactic>('charge');
+  let gDefTactic = $state<DefenseTactic>('long_line');
   let gTroops = $state(20);
   let gGarrison = $state(6);
   let gMilitia = $state(8);
-  function watchGround(captured: boolean) {
+  let gMods = $state<{ atkMult: number; defMult: number } | null>(null);
+  /** master seeds must be 32 hex chars: encode the free-text seed as hex */
+  const hexSeed = (text: string): string =>
+    [...text]
+      .map((c) => c.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join('')
+      .padEnd(32, '0')
+      .slice(0, 32);
+  function resolveGround() {
     const t0 = Math.max(1, Math.min(400, Math.round(gTroops)));
     const gar = Math.max(0, Math.min(100, Math.round(gGarrison)));
     const mil = Math.max(1, Math.min(400, Math.round(gMilitia)));
-    const m0 = gar + mil;
-    let rounds: Array<{ t: number; m: number }> = [];
-    for (let tries = 0; tries < 60; tries++) {
-      let t = t0;
-      let m = m0;
-      rounds = [{ t, m }];
-      while (t > 0 && m > 0) {
-        if (Math.random() < (captured ? 0.64 : 0.38)) m--;
-        else t--;
-        rounds.push({ t, m });
-      }
-      if ((rounds[rounds.length - 1]!.t > 0) === captured) break;
-    }
-    if (rounds.length > 60) {
-      const keep = Math.ceil(rounds.length / 60);
-      rounds = rounds.filter((_, i) => i % keep === 0 || i === rounds.length - 1);
-    }
-    const last = rounds[rounds.length - 1]!;
-    const civilianLosses = Math.max(0, m0 - last.m - gar);
+    const world = Math.max(0, Math.round(gWorld));
+    const terrain = generateTerrain(world, gClimate);
+    const mods = groundModifiers(gAtkTactic, gDefTactic, terrain);
+    gMods = mods;
+    // base unit strength 20 both sides (no race picks / barracks in the lab)
+    const atkStr = Math.max(1, Math.round(20 * mods.atkMult));
+    const defStr = Math.max(1, Math.round(20 * mods.defMult));
+    const pop = Math.ceil(mil * 2); // militia = ceil(pop/2) in the engine
+    const rng = rngFor(hexSeed(seed), 0, 'ground-lab', world);
+    const res = fightGroundRounds(t0, gar, mil, atkStr, defStr, pop, rng);
     labGround = {
       turn: 0,
       watched: true,
       payload: {
-        colonyId: -1,
-        colonyName: gScene === 'ocean' ? 'Meridian Deep' : gScene === 'farm' ? 'Harvest Home' : 'Dome City Alpha',
+        colonyId: world,
+        colonyName: GROUND_NAMES[gClimate] ?? 'Firebase Ophion',
         starId: -1,
         attacker: 0,
         defender: 1,
-        captured: last.t > 0,
-        civilianLosses,
+        captured: res.troops > 0,
+        civilianLosses: res.civilianLosses,
         startTroops: t0,
-        startMilitia: m0,
+        startMilitia: gar + mil,
         startGarrison: gar,
-        climate: gScene === 'ocean' ? 'ocean' : gScene === 'farm' ? 'terran' : 'barren',
-        farming: gScene === 'farm',
-        rounds,
+        climate: gClimate,
+        farming: ['gaia', 'terran', 'ocean', 'swamp'].includes(gClimate),
+        rounds: res.rounds,
+        terrain,
+        atkTactic: gAtkTactic,
+        defTactic: gDefTactic,
       },
     };
   }
@@ -363,19 +381,36 @@
       <a href="#top" onclick={(e) => { e.preventDefault(); location.hash = ''; }}>← back</a>
     </div>
     <div class="runbar groundbar" data-testid="lab-ground">
-      <span title="stage the animated invasion playback without needing a real invasion">🪖 ground assault preview</span>
-      <label>backdrop
-        <select bind:value={gScene} data-testid="lab-ground-scene">
-          <option value="ocean">ocean world</option>
-          <option value="farm">farm world</option>
-          <option value="domes">domed city</option>
+      <span title="the REAL invasion math: the planet's fixed terrain + the tactics matchup scale each side's strength, then the engine's round loop fights it out. Same seed + same setup = same battle — flip one tactic and compare.">🪖 ground assault lab</span>
+      <label>world
+        <select bind:value={gClimate} data-testid="lab-ground-climate">
+          {#each GROUND_CLIMATES as c (c)}
+            <option value={c}>{c}</option>
+          {/each}
+        </select>
+      </label>
+      <label title="terrain seed: every world always fights on its one fixed map">map # <input type="number" min="0" max="9999" bind:value={gWorld} data-testid="lab-ground-world" /></label>
+      <label>⚔ tactic
+        <select bind:value={gAtkTactic} data-testid="lab-ground-atk">
+          {#each ATTACK_TACTICS as t (t)}
+            <option value={t}>{pretty(t)}</option>
+          {/each}
+        </select>
+      </label>
+      <label>🛡 doctrine
+        <select bind:value={gDefTactic} data-testid="lab-ground-def">
+          {#each DEFENSE_TACTICS as t (t)}
+            <option value={t}>{pretty(t)}</option>
+          {/each}
         </select>
       </label>
       <label>marines <input type="number" min="1" max="400" bind:value={gTroops} /></label>
       <label>garrison <input type="number" min="0" max="100" bind:value={gGarrison} /></label>
       <label>militia <input type="number" min="1" max="400" bind:value={gMilitia} /></label>
-      <button data-testid="lab-ground-win" onclick={() => watchGround(true)}>🏳 watch a capture</button>
-      <button data-testid="lab-ground-loss" onclick={() => watchGround(false)}>🛡 watch a repulse</button>
+      <button data-testid="lab-ground-run" onclick={resolveGround}>⚔ resolve invasion</button>
+      {#if gMods}
+        <span class="dim" data-testid="lab-ground-mods" title="strength multipliers from the tactics matchup + terrain fit">tactics: ⚔ ×{gMods.atkMult.toFixed(2)} vs 🛡 ×{gMods.defMult.toFixed(2)}</span>
+      {/if}
     </div>
   </header>
 

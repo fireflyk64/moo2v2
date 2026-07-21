@@ -4,12 +4,14 @@ import { validateCommand, applyCommand } from '@engine/commands';
 import {
   ATTACK_TACTICS,
   DEFENSE_TACTICS,
+  fightGroundRounds,
   generateTerrain,
   groundModifiers,
   terrainFractions,
   TERRAIN_H,
   TERRAIN_W,
 } from '@engine/groundTactics';
+import { rngFor } from '@engine/rng';
 import type { GameState } from '@engine/types';
 
 const SEED = 'aaaabbbbccccddddeeeeffff00001111';
@@ -100,6 +102,28 @@ describe('ground tactic modifiers', () => {
         expect(m.defMult).toBeLessThanOrEqual(2.5);
       }
     }
+  });
+});
+
+describe('fightGroundRounds (shared with the battle lab)', () => {
+  it('is deterministic and conserves the books', () => {
+    const a = fightGroundRounds(20, 6, 8, 24, 22, 16, rngFor(SEED, 0, 'ground-lab', 42));
+    const b = fightGroundRounds(20, 6, 8, 24, 22, 16, rngFor(SEED, 0, 'ground-lab', 42));
+    expect(a).toEqual(b);
+    // one side is annihilated, the other keeps its survivors
+    expect(a.troops === 0 || a.defMarines + a.militia === 0).toBe(true);
+    const last = a.rounds[a.rounds.length - 1]!;
+    expect(last.t).toBe(a.troops);
+    expect(last.m).toBe(a.defMarines + a.militia);
+    // marines die before militia, civilians only fall with militia (1:1, floor 1 pop)
+    expect(a.civilianLosses).toBeLessThanOrEqual(8 - a.militia);
+    expect(a.rounds[0]).toEqual({ t: 20, m: 14 });
+  });
+
+  it('thins long sieges to ~60 replay rounds', () => {
+    const big = fightGroundRounds(300, 100, 200, 20, 20, 400, rngFor(SEED, 0, 'ground-lab', 7));
+    expect(big.rounds.length).toBeLessThanOrEqual(61);
+    expect(big.rounds[big.rounds.length - 1]!.t).toBe(big.troops);
   });
 });
 

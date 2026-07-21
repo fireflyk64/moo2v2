@@ -1,5 +1,42 @@
 # Status 2026-07-21: all items below are FIXED — notes inline under each.
 
+Round 7 (same day): ground battle looks unimpressive — terrain needs textures that escape their squares (mountains ^^, craters o, dunes ~~~, urban skyscrapers, domed on barren); blaster fire between units vanished; attackers slide behind the defenders and idle while being pummeled — defenders should hold the line and fall back only under pressure; the battle lab should let us pick ground tactics and compare outcomes. Space: formations look beautiful but formed ships turn around mid-field and get shot in the back — replace the free sim with an RPS of formations where each pairing plays a beautiful set pattern (charge×charge = close-range circling, charge×formed = split into 2 circles, line×line = pummel from distance) that determines the fraction of long/medium/short-range shots and 360-vs-forward arcs; starbases/planets/lumbering ships creep and shoot from wherever while attackers stay out of their front arc; engine power buys forward hits without changing the shape.
+  ✅ ALL FIXED (ENGINE_VERSION 0.24.0):
+  - Ground visuals (GroundBattleDialog): hand-drawn terrain glyphs jittered
+    across a 1.4-cell window so they spill into neighbors — ridge ^^ carets,
+    hill arcs, crater rings, dune ~~~ waves, trees, reeds, ice cracks, lava
+    seams, and urban skylines (domed habitats on barren/hostile/energized/
+    tundra); tracer beams between engaged battalions each round with impact
+    flashes on the battalion about to break; ✕ markers where they fell.
+  - Ground movement: attackers press tactic-shaped CONTACT points in front
+    of / around the defense (wings on the flanks, anvil+pinning stand off) —
+    never behind it; the defense holds its doctrine line and falls back
+    toward the colony only while LOSING the exchange (a winning defense
+    never yields; defense-in-depth trades its front echelon, charge sallies
+    and is driven home).
+  - Ground lab (Battle Lab): the coin-flip preview is now the REAL engine
+    loop (fightGroundRounds, extracted byte-exact from landInvasion) —
+    climate + map seed + all 8 attack tactics + all 4 doctrines + force
+    sizes, resolved on the planet's one true terrain with the tactic
+    multipliers shown (⚔ ×a vs 🛡 ×d). Deterministic: flip one tactic,
+    same seed, compare.
+  - Space set-pieces: new battles carry `patterns` on the BattleInput
+    (absent = 0.23 sim byte-exact — old replays reproduce). Doctrine =
+    formation or collapsed stance; the PAIR picks the choreography:
+    charge×charge one shared closing wheel; charge×formed a massed rush
+    herded into TWO pocket circles (line crescents + surge lunges, envelop
+    a full bow-on ring — envelop punishes charge); line×line long-range
+    wall duel stepping to medium; wings pounce from wide corners; envelop
+    closes a rotating net; envelop×envelop a grand wheel. Damage flows
+    through the unchanged gun code — the pattern sets range bands and arc
+    eligibility (360 always, FX oblique, F only when pointed) with a
+    speed-scaled forward-fire window (engine power buys F shots, never a
+    new shape). Slewing option: off-axis F/FX mounts fire at a cooldown
+    penalty scaled by hull turn rate — slew shots actually happen now.
+    Bases + lumbering hulls (speed+turn ≤ 6) creep and shoot from wherever;
+    ships engaging them fan across the REAR arc so their F guns rarely
+    bear. 13 new pattern tests + legacy byte-exact fixture hashes.
+
 Round 6 (same day): leader-offer fast-forward blocker needs an ignore status; ground battles should be top-down tabletop maps with battalion symbols, per-planet fixed terrain (rocky worlds favor defense), RPS tactics for both sides chosen with battle orders, scoutable/owner-previewable terrain; space battles need LOGH-style formations (hold the line / flank / 3-group envelopment) and optional SLEWING (F-arc ships trade movement to rotate guns on target, big hulls pay more, 360 mounts at full speed) as a start-screen option.
   ✅ ALL FIXED (ENGINE_VERSION 0.23.0):
   - 🔕 ignore per leader offer (Empires tab): auto-play rolls on, badge goes

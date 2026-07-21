@@ -336,6 +336,9 @@ describe('slewing setting + battle-orders formation plumbing', () => {
     const on = intoBattlePhase(startTwoEmpireGame({ slewing: true }));
     const inputOn = buildBattleInput(on, on.pendingBattles[0]!).input;
     expect(inputOn.slewing).toBe(true);
+    // set-piece patterns (0.24.0): every NEWLY built battle input is stamped
+    expect(inputOff.patterns).toBe(true);
+    expect(inputOn.patterns).toBe(true);
   });
 
   it('validates the formation field and normalizes null to absent', () => {

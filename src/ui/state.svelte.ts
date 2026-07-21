@@ -33,6 +33,11 @@ export interface GroundBattleEntry {
     climate?: string;
     farming?: boolean;
     rounds: Array<{ t: number; m: number }>;
+    /** top-down tabletop replay data (0.23+): the planet's terrain map and
+     * both sides' chosen tactics; optional on older entries */
+    terrain?: string[];
+    atkTactic?: string;
+    defTactic?: string;
   };
 }
 

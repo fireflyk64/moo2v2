@@ -184,3 +184,53 @@ export const isAttackTactic = (x: unknown): x is AttackTactic =>
   typeof x === 'string' && (ATTACK_TACTICS as readonly string[]).includes(x);
 export const isDefenseTactic = (x: unknown): x is DefenseTactic =>
   typeof x === 'string' && (DEFENSE_TACTICS as readonly string[]).includes(x);
+
+export interface GroundResolution {
+  troops: number;
+  defMarines: number;
+  militia: number;
+  civilianLosses: number;
+  /** per-round unit counts, thinned to ~60 entries for long sieges */
+  rounds: Array<{ t: number; m: number }>;
+}
+
+/** The one true ground-battle loop, shared by landInvasion and the battle
+ * lab. P(attacker kills) = atkPower/(atkPower+defPower) each round; marines
+ * die before militia; militia losses cost civilians 1:1 down to a floor of
+ * one pop unit. Consumes the rng exactly as the pre-0.24 inline loop did. */
+export function fightGroundRounds(
+  troops0: number,
+  defMarines0: number,
+  militia0: number,
+  atkStr: number,
+  defStr: number,
+  pop: number,
+  rng: { int(maxExclusive: number): number },
+): GroundResolution {
+  let troops = troops0;
+  let defMarines = defMarines0;
+  let militia = militia0;
+  let civilianLosses = 0;
+  const roundsLog: Array<{ t: number; m: number }> = [{ t: troops, m: defMarines + militia }];
+  while (troops > 0 && defMarines + militia > 0) {
+    const atkPower = troops * atkStr;
+    const defPower = (defMarines + militia) * defStr;
+    if (rng.int(atkPower + defPower) < atkPower) {
+      if (defMarines > 0) {
+        defMarines--;
+      } else {
+        militia--;
+        if (pop - civilianLosses > 1) civilianLosses++;
+      }
+    } else {
+      troops--;
+    }
+    roundsLog.push({ t: troops, m: defMarines + militia });
+  }
+  // long sieges get thinned so the replay payload stays small
+  const rounds =
+    roundsLog.length <= 60
+      ? roundsLog
+      : roundsLog.filter((_, i) => i % Math.ceil(roundsLog.length / 60) === 0 || i === roundsLog.length - 1);
+  return { troops, defMarines, militia, civilianLosses, rounds };
+}

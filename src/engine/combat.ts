@@ -199,10 +199,22 @@ export interface BattleInput {
   ordersD: BattleOrders;
   /** SLEWING game option (0.23.0): when true, a ship whose forward-arc guns
    * do not bear on its target may rotate beyond its hull turn rate by
-   * SPENDING movement (see runBattle's slew block for the exact cost).
-   * Carried in the input so the replay viewer re-sims identically; ABSENT or
-   * false = exact legacy turning. */
+   * SPENDING movement (legacy sim; see runBattle's slew block for the exact
+   * cost). Under `patterns` the option instead lets forward mounts FIRE in
+   * off-axis pattern segments at a turn-rate-scaled cooldown penalty
+   * (SLEW_FIRE_CD_PCT). Carried in the input so the replay viewer re-sims
+   * identically; ABSENT or false = exact legacy behavior. */
   slewing?: boolean;
+  /** SET-PIECE PATTERNS (0.24.0): when true the battle is a choreographed
+   * rock-paper-scissors of doctrines instead of the free-movement sim — each
+   * side's doctrine (doctrineOf) picks a matchup SCRIPT (matchupScript) whose
+   * phases place every pattern-capable ship on parametric paths (wheels,
+   * walls, pockets, nets); the geometry sets the range bands and which arcs
+   * bear (patternInArc / fastForwardWindow). Lumbering ships (isLumbering)
+   * and bases creep/stand instead, and their attackers orbit their rear arc.
+   * Carried in the input so replays re-sim identically; ABSENT or false =
+   * byte-exact 0.23 behavior. */
+  patterns?: boolean;
 }
 
 export interface ShotEvent {
@@ -386,6 +398,172 @@ export function assignFormationRoles(
   return roles;
 }
 
+// ---- set-piece pattern battles (0.24.0) ----
+// Doctrine = the side's battle-order intent, collapsed to five flavors. The
+// pair of doctrines picks a SCRIPT: a choreographed set of parametric paths
+// every pattern-capable ship flies. Free movement is gone under `patterns`;
+// what a doctrine buys is WHERE its ships stand (range band) and WHICH arcs
+// bear during each segment of the dance.
+export type Doctrine = 'charge' | 'line' | 'flank' | 'pincer' | 'envelop';
+/** wheel: charge-vs-charge — both fleets close, then circle each other on one
+ *  shared close-range wheel. split: charge vs any formed doctrine — the
+ *  formed side herds the chargers into TWO pocket circles and stands around
+ *  them at its preferred band. grand_wheel: envelop vs envelop — two nets
+ *  with nothing inside collapse into one wide rotating wheel. maneuvers:
+ *  every other formed pair — each side flies its own doctrine's choreography
+ *  (walls pummel, wings sweep the corners, nets tighten). */
+export type PatternScript = 'wheel' | 'split' | 'grand_wheel' | 'maneuvers';
+
+/** A side's doctrine: an explicit formation order wins; otherwise stand-off
+ * stances read as 'line' and every committed stance as 'charge'. */
+export function doctrineOf(orders: BattleOrders): Doctrine {
+  if (orders.formation) return orders.formation;
+  return orders.stance === 'hold_range' || orders.stance === 'standoff' ? 'line' : 'charge';
+}
+
+export function matchupScript(a: Doctrine, d: Doctrine): PatternScript {
+  if (a === 'charge' && d === 'charge') return 'wheel';
+  if (a === 'charge' || d === 'charge') return 'split';
+  if (a === 'envelop' && d === 'envelop') return 'grand_wheel';
+  return 'maneuvers';
+}
+
+/** Lumbering ships sit the dance out: they creep at their own drives and
+ * fire from wherever they are, and enemies choreograph around/behind them.
+ * Mobility = combat speed + hull turn rate; big hulls with mostly-forward
+ * armament lumber a step earlier (the classic slow all-F titan). */
+export function isLumbering(s: {
+  speed: number;
+  hullIdx: number;
+  isBase: boolean;
+  weapons: Array<{ classId: number; mods: string[]; arc?: WeaponArc }>;
+}): boolean {
+  if (s.isBase || s.speed <= 0) return true;
+  const mobility = s.speed + turnRateOf(s.hullIdx, false);
+  if (mobility <= 6) return true;
+  if (mobility <= 7 && s.hullIdx >= 4) {
+    const armed = s.weapons.filter((w) => w.classId !== 3 && !w.mods.includes('pd'));
+    const fwd = armed.filter((w) => (w.arc ?? 'F') === 'F');
+    if (armed.length > 0 && fwd.length * 2 >= armed.length) return true;
+  }
+  return false;
+}
+
+/** Engine power buys forward shots: in pattern segments where a ship's F/FX
+ * mounts do not bear, the mount may still fire during a deterministic window
+ * whose duty cycle scales with combat speed (speed/16 of the off-axis ticks,
+ * capped at 14/16 — even the hottest drives miss some segments). The pattern
+ * SHAPE never changes; only which guns fire during which segment. */
+export function fastForwardWindow(tick: number, shipId: number, speed: number): boolean {
+  return (tick * 5 + shipId * 7) % 16 < clamp(speed, 0, 14);
+}
+
+/** Slewing under patterns: an off-axis F/FX mount outside its fast window may
+ * still fire by wrenching the hull around — at a cooldown penalty scaled by
+ * hull turn rate (frigates near-free, titans harsh). Keyed by turnRateOf. */
+export const SLEW_FIRE_CD_PCT: Record<number, number> = { 4: 120, 3: 160, 2: 220, 1: 300 };
+
+/** Doctrine fire discipline for DIRECT-FIRE mounts under patterns: the
+ * highest range band (bandOf: 0 short, 1 medium, 2 long, 3 heavy-long) the
+ * doctrine's pattern ships will fire guns in. 'line' pummels from anywhere —
+ * the long bands are its monopoly; every other doctrine holds fire until
+ * medium (their tactic IS closing). Guided munitions (missiles, torpedoes,
+ * strike craft) are exempt — the classic run-in weapons — and so are
+ * lumbering ships and bases, which fire from wherever they are. Rangemaster
+ * counts a band closer here too, so fire-control tech opens up early. */
+export const DOCTRINE_FIRE_BAND: Record<Doctrine, number> = { charge: 1, line: 3, flank: 1, pincer: 1, envelop: 1 };
+
+/** Pattern-mode arc bearing: F counts only when the pattern genuinely points
+ * the ship AT its target (±45°, half the free-sim F arc — abeam is not
+ * pointing); FX covers the oblique segments (±135°); R the rear half; 360
+ * everything. The free-mover semantics (inArc) are unchanged for legacy. */
+export function patternInArc(arc: WeaponArc, headingToTarget: number, heading: number): boolean {
+  if (arc === '360') return true;
+  const d = Math.abs(headingDelta(heading, headingToTarget));
+  if (arc === 'F') return d <= 4;
+  if (arc === 'FX') return d <= 12;
+  return d >= 8;
+}
+
+/** charge-vs-formed: the tick the formed side splits the chargers into the
+ * two pockets (phase 1 before it is the massed rush at the wall — kept short
+ * so the symmetric head-on closure never decides the battle by itself) */
+export const PATTERN_SPLIT_TICK = 36;
+/** pocket centers, in field units (y of the top and bottom pocket) */
+export const PATTERN_POCKET_YS: readonly [number, number] = [158, 418];
+/** line-vs-line: walls step from the long band down to medium at this tick */
+export const PATTERN_LINE_STEP_TICK = 160;
+/** maneuvers: wings are on station and pounce from this tick */
+export const PATTERN_WING_TICK = 80;
+/** charging melee: inside this range a charge-doctrine ship noses onto its
+ * target freely (F/FX count as bearing) — under the enemy's guns is exactly
+ * where a charger wants to be. Field units ×FP. */
+export const PATTERN_MELEE = 48 * FP;
+
+export interface PatternSlot {
+  /** 0 = main body/wall/wheel, 1 = wingA/top pocket, 2 = wingB/bottom pocket,
+   *  3 = envelopment ring */
+  g: 0 | 1 | 2 | 3;
+  /** index within the group / group size */
+  i: number;
+  n: number;
+  /** index within the side's whole pattern roster / roster size */
+  si: number;
+  sn: number;
+}
+
+/** Deterministic pattern-group assignment for one side's pattern-capable
+ * ships (caller filters out bases and lumbering hulls). Stable ordering:
+ * shipId for halves and walls, speed-first (lighter hulls break ties) for
+ * wings, mirroring assignFormationRoles. `wing` picks the flank doctrine's
+ * side of the field (1 = top, 2 = bottom). */
+export function assignPatternGroups(
+  ships: Array<{ shipId: number; hullIdx: number; speed: number }>,
+  doctrine: Doctrine,
+  script: PatternScript,
+  wing: 1 | 2,
+): Map<number, PatternSlot> {
+  const out = new Map<number, PatternSlot>();
+  const byId = [...ships].sort((a, b) => a.shipId - b.shipId);
+  const sn = byId.length;
+  if (sn === 0) return out;
+  const sideIdx = new Map(byId.map((s, k) => [s.shipId, k]));
+  const put = (shipId: number, g: 0 | 1 | 2 | 3, i: number, n: number) =>
+    out.set(shipId, { g, i, n, si: sideIdx.get(shipId)!, sn });
+  if (script === 'wheel' || script === 'grand_wheel') {
+    byId.forEach((s, k) => put(s.shipId, 0, k, sn));
+    return out;
+  }
+  if (script === 'split') {
+    // both the chargers and their captors split into a top and bottom half
+    const half = Math.ceil(sn / 2);
+    byId.forEach((s, k) => (k < half ? put(s.shipId, 1, k, half) : put(s.shipId, 2, k - half, sn - half)));
+    return out;
+  }
+  // maneuvers: the side flies its own doctrine's choreography
+  if (doctrine === 'line') {
+    byId.forEach((s, k) => put(s.shipId, 0, k, sn));
+    return out;
+  }
+  if (doctrine === 'envelop') {
+    byId.forEach((s, k) => put(s.shipId, 3, k, sn));
+    return out;
+  }
+  const bySpeed = [...byId].sort((a, b) => b.speed - a.speed || a.hullIdx - b.hullIdx || a.shipId - b.shipId);
+  const wingCount = Math.floor(sn / 3);
+  const groups: number[][] = [[], [], []]; // [main, wingA, wingB] shipIds
+  bySpeed.forEach((s, k) => {
+    if (k >= wingCount) groups[0]!.push(s.shipId);
+    else if (doctrine === 'flank') groups[wing]!.push(s.shipId);
+    else groups[k % 2 === 0 ? 1 : 2]!.push(s.shipId);
+  });
+  for (const [g, ids] of groups.entries()) {
+    ids.sort((a, b) => a - b);
+    ids.forEach((id, i) => put(id, g as 0 | 1 | 2, i, ids.length));
+  }
+  return out;
+}
+
 export function runBattle(
   input: BattleInput,
   rng: Rng,
@@ -455,27 +633,71 @@ export function runBattle(
     s.homeY = s.y;
   }
 
+  const patterns = input.patterns === true;
   // --- formations (0.23.0): assign per-ship roles; one seeded coin decides
   // which side of the field a 'flank' wing swings around. Sides draw in fixed
   // order (attacker first) so replays reproduce; an absent/null formation
-  // draws NOTHING from the rng — legacy inputs replay byte-exact. ---
+  // draws NOTHING from the rng — legacy inputs replay byte-exact. Pattern
+  // battles (0.24.0) skip the roles AND the coin: choreography replaces them.
   const formations: ReadonlyArray<Formation | null> = [input.ordersA.formation ?? null, input.ordersD.formation ?? null];
-  for (const side of [0, 1] as const) {
-    const f = formations[side];
-    if (!f) continue;
-    const flankWing = f === 'flank' ? (rng.int(2) === 0 ? 'wingA' : 'wingB') : 'wingA';
-    const roles = assignFormationRoles(
-      sims
-        .filter((s) => s.init.side === side)
-        .map((s) => ({ shipId: s.init.shipId, hullIdx: s.init.hullIdx, speed: s.init.speed, isBase: s.init.isBase })),
-      f,
-      flankWing,
-    );
-    for (const s of sims) {
-      if (s.init.side === side) s.role = roles.get(s.init.shipId) ?? null;
+  if (!patterns) {
+    for (const side of [0, 1] as const) {
+      const f = formations[side];
+      if (!f) continue;
+      const flankWing = f === 'flank' ? (rng.int(2) === 0 ? 'wingA' : 'wingB') : 'wingA';
+      const roles = assignFormationRoles(
+        sims
+          .filter((s) => s.init.side === side)
+          .map((s) => ({ shipId: s.init.shipId, hullIdx: s.init.hullIdx, speed: s.init.speed, isBase: s.init.isBase })),
+        f,
+        flankWing,
+      );
+      for (const s of sims) {
+        if (s.init.side === side) s.role = roles.get(s.init.shipId) ?? null;
+      }
     }
   }
   const slewing = input.slewing === true;
+
+  // --- set-piece patterns (0.24.0): doctrines, script, groups, geometry ---
+  const docs: readonly [Doctrine, Doctrine] = [doctrineOf(input.ordersA), doctrineOf(input.ordersD)];
+  const script: PatternScript = matchupScript(docs[0], docs[1]);
+  const lumber: boolean[] = sims.map((s) => isLumbering(s.init));
+  const slots = new Map<number, PatternSlot>(); // sim index -> slot
+  if (patterns) {
+    for (const side of [0, 1] as const) {
+      const roster = sims
+        .map((s, idx) => ({ s, idx }))
+        .filter(({ s, idx }) => s.init.side === side && !lumber[idx]);
+      const groups = assignPatternGroups(
+        roster.map(({ s }) => ({ shipId: s.init.shipId, hullIdx: s.init.hullIdx, speed: s.init.speed })),
+        docs[side],
+        script,
+        side === 0 ? 1 : 2, // flank wings: attacker sweeps the top, defender the bottom
+      );
+      for (const { s, idx } of roster) {
+        const slot = groups.get(s.init.shipId);
+        if (slot) slots.set(idx, slot);
+      }
+    }
+  }
+  const norm32 = (a: number) => ((a % DIRS) + DIRS) % DIRS;
+  const ringX = (cx: number, r: number, a: number) => cx + roundDiv(TRIG[norm32(a)]![0] * r, 16384);
+  const ringY = (cy: number, r: number, a: number) => cy + roundDiv(TRIG[norm32(a)]![1] * r, 16384);
+  /** map slot i of m onto [-span..+span] heading steps around an arc center */
+  const arcOffset = (i: number, m: number, span: number) => (m > 1 ? roundDiv(span * (2 * i - (m - 1)), m - 1) : 0);
+  const bowTo = (fromX: number, fromY: number, toX: number, toY: number, fallback: number) =>
+    toX === fromX && toY === fromY ? fallback : headingToward(toX - fromX, toY - fromY);
+  const clampAnchor = (x: number, y: number, h: number) => ({
+    x: clamp(x, 12 * FP, FIELD_W - 12 * FP),
+    y: clamp(y, 12 * FP, FIELD_H - 12 * FP),
+    h: norm32(h),
+  });
+  // live centroids (per side), refreshed at the top of every tick
+  const cent: Array<{ x: number; y: number }> = [
+    { x: FIELD_W / 2, y: FIELD_H / 2 },
+    { x: FIELD_W / 2, y: FIELD_H / 2 },
+  ];
 
   const projectiles: Projectile[] = [];
   const initialHp = [0, 0];
@@ -483,10 +705,255 @@ export function runBattle(
 
   const active = (s: Sim) => s.alive && !s.retreated && !s.crossed;
 
+  // --- pattern choreography (0.24.0): parametric anchors per ship per tick.
+  // All integer math on the 32-spoke TRIG table; no rng is ever drawn. ---
+  const chargerSide: 0 | 1 = docs[0] === 'charge' ? 0 : 1; // meaningful under 'split' only
+  const formedSide: 0 | 1 = chargerSide === 0 ? 1 : 0;
+  const MIDX = FIELD_W / 2;
+  const anchorOf = (s: Sim, si: number, tick: number): { x: number; y: number; h: number } => {
+    const side = s.init.side;
+    const foe = (1 - side) as 0 | 1;
+    const fwd = side === 0 ? 1 : -1;
+    const bow = side === 0 ? 0 : DIRS / 2;
+    const target = s.targetIdx >= 0 ? sims[s.targetIdx] : undefined;
+    // lumbering prey (incl. bases): choreograph around/behind it — the whole
+    // group targeting it fans across its rear arc, out of its F guns. The fan
+    // is anchored on the target's PREDICTED heading (it will keep grinding
+    // its bow toward whoever it targets), so the orbiters lead the spin.
+    if (target && active(target) && s.targetIdx >= 0 && lumber[s.targetIdx]) {
+      let m = 0;
+      let k = 0;
+      for (let j = 0; j < sims.length; j++) {
+        const o = sims[j]!;
+        if (o.init.side !== side || !active(o) || o.stance === 'evade_retreat' || !slots.has(j) || o.targetIdx !== s.targetIdx) continue;
+        if (j === si) k = m;
+        m++;
+      }
+      const tRate = turnRateOf(target.init.hullIdx, target.init.isBase);
+      const prey = target.targetIdx >= 0 ? sims[target.targetIdx] : undefined;
+      let pred = target.heading;
+      if (prey && active(prey)) {
+        const wantT = headingToward(prey.x - target.x, prey.y - target.y);
+        pred = norm32(target.heading + clamp(headingDelta(target.heading, wantT), -3 * tRate, 3 * tRate));
+      }
+      const rear = norm32(pred + DIRS / 2);
+      const a = rear + arcOffset(k, m, 5); // ±56° around dead astern
+      const R = (docs[side] === 'line' ? 140 : 65) * FP;
+      const ax = ringX(target.x, R, a);
+      const ay = ringY(target.y, R, a);
+      return clampAnchor(ax, ay, bowTo(ax, ay, target.x, target.y, bow));
+    }
+    const slot = slots.get(si)!;
+    if (script === 'wheel' || script === 'grand_wheel') {
+      // charge-vs-charge: everyone joins one wheel that tightens to knife
+      // range; envelop-vs-envelop: the same figure, wider and statelier
+      const grand = script === 'grand_wheel';
+      const r = (grand ? Math.max(110, 190 - tick) : Math.max(65, 160 - tick)) * FP;
+      const a = (side === 0 ? Math.floor((32 * slot.i) / slot.n) : Math.floor((32 * slot.i + 16) / slot.n)) + Math.floor(tick / (grand ? 4 : 3));
+      const ax = ringX(MIDX, r, a);
+      const ay = ringY(FIELD_H / 2, r, a);
+      return clampAnchor(ax, ay, a + 8); // tangent: the wheel actually turns
+    }
+    if (script === 'split') {
+      const isCharger = side === chargerSide;
+      const chargerFwd = chargerSide === 0 ? 1 : -1;
+      if (tick < PATTERN_SPLIT_TICK) {
+        if (isCharger) {
+          // massed rush at the enemy's center of gravity
+          const ax = cent[foe]!.x;
+          const ay = clamp(cent[foe]!.y + (2 * slot.si - (slot.sn - 1)) * 10 * FP, 12 * FP, FIELD_H - 12 * FP);
+          return clampAnchor(ax, ay, bowTo(s.x, s.y, ax, ay, bow));
+        }
+        // the formed side receives the rush as a medium-band wall
+        return clampAnchor(MIDX - fwd * 105 * FP, Math.floor(((slot.si + 1) * FIELD_H) / (slot.sn + 1)), bow);
+      }
+      // phase 2: the chargers are herded into TWO pocket circles; the formed
+      // side stands around each pocket at its doctrine's band. A triangle
+      // wave surges the pockets out and back — against a line that keeps its
+      // distance the chargers periodically lunge to knife range and recoil.
+      const g = slot.g === 2 ? 1 : 0; // 0 = top pocket, 1 = bottom
+      const ph = (tick - PATTERN_SPLIT_TICK) % 96;
+      const tri = ph < 48 ? ph : 96 - ph; // 0..48
+      const amp = docs[formedSide] === 'line' ? 60 : 18;
+      const pcx = MIDX - chargerFwd * 30 * FP + chargerFwd * roundDiv(tri * amp, 48) * FP;
+      const pcy = PATTERN_POCKET_YS[g]! * FP;
+      if (isCharger) {
+        const vsLine = docs[formedSide] === 'line';
+        const r = Math.max(38, 5 * slot.n) * FP;
+        const a = Math.floor((32 * slot.i) / slot.n) + Math.floor(tick / 2);
+        if (tri >= 30 && vsLine && target && active(target)) {
+          // surge peak against a stand-off wall: SLAM home — a strafing run
+          // to the captor's rear quarter that ends point-blank under its
+          // guns (the charging-melee rule), where the wall's strict forward
+          // cones cannot answer. A closed-in net leaves no room to dive:
+          // against flank/pincer/envelop the chargers only nose out below.
+          const aBehind = norm32(target.heading + DIRS / 2 + (slot.i % 2 === 0 ? -4 : 4));
+          const ax = ringX(target.x, 20 * FP, aBehind);
+          const ay = ringY(target.y, 20 * FP, aBehind);
+          return clampAnchor(ax, ay, bowTo(ax, ay, target.x, target.y, bow));
+        }
+        const ax = ringX(pcx, r, a);
+        const ay = ringY(pcy, r, a);
+        if (tri >= 34 && target && active(target)) {
+          // lesser surge: stay on the wheel but nose out at the captors
+          return clampAnchor(ax, ay, bowTo(ax, ay, target.x, target.y, bow));
+        }
+        return clampAnchor(ax, ay, a + 8);
+      }
+      const doc = docs[side];
+      const baseA = side === 0 ? DIRS / 2 : 0; // between the pocket and our own edge
+      let a: number;
+      let R: number;
+      if (doc === 'envelop') {
+        R = 100 * FP; // full ring: every bow bears — envelop punishes charge
+        a = Math.floor((32 * slot.i) / slot.n) + Math.floor(tick / 4);
+      } else if (doc === 'pincer') {
+        R = 100 * FP; // the arms pinch each pocket from above/below
+        a = (g === 0 ? 24 : 8) + arcOffset(slot.i, slot.n, 8);
+      } else if (doc === 'flank') {
+        R = 100 * FP; // a wide crescent rolled around the pocket's shoulder
+        a = baseA + (g === 0 ? -5 : 5) + arcOffset(slot.i, slot.n, 10);
+      } else {
+        R = 170 * FP; // line: hold the medium band; only surges close it
+        a = baseA + arcOffset(slot.i, slot.n, 6);
+      }
+      const ax = ringX(pcx, R, a);
+      const ay = ringY(pcy, R, a);
+      return clampAnchor(ax, ay, bowTo(ax, ay, pcx, pcy, bow));
+    }
+    // maneuvers: each side flies its own doctrine's figure
+    const doc = docs[side];
+    if (doc === 'envelop') {
+      const R = Math.max(100, 230 - Math.floor((3 * tick) / 4)) * FP; // the net closes
+      const a = Math.floor((32 * slot.i) / slot.n) + Math.floor(tick / 4);
+      const ax = ringX(cent[foe]!.x, R, a);
+      const ay = ringY(cent[foe]!.y, R, a);
+      return clampAnchor(ax, ay, bowTo(ax, ay, cent[foe]!.x, cent[foe]!.y, bow));
+    }
+    if (slot.g === 1 || slot.g === 2) {
+      // wing: sprint the wide corner first, then pounce the enemy mass from
+      // above/below at knife range — where its walls' F guns do not bear
+      if (tick < PATTERN_WING_TICK) {
+        return clampAnchor(MIDX + fwd * 140 * FP, (slot.g === 1 ? 40 : 536) * FP, bow);
+      }
+      const a = (slot.g === 1 ? 24 : 8) + arcOffset(slot.i, slot.n, 4);
+      const ax = ringX(cent[foe]!.x, 100 * FP, a);
+      const ay = ringY(cent[foe]!.y, 100 * FP, a);
+      return clampAnchor(ax, ay, bowTo(ax, ay, cent[foe]!.x, cent[foe]!.y, bow));
+    }
+    // wall: line pummels from the long band then steps in; flank and pincer
+    // mains stand a band closer to fix the enemy for their wings. Phase-2
+    // walls stand 105u out so any two walls sit 210u apart — inside the
+    // medium band, where every doctrine's guns are cleared to speak.
+    const dist = doc === 'line' ? (tick < PATTERN_LINE_STEP_TICK ? 190 : 105) : tick < PATTERN_WING_TICK ? 170 : 105;
+    return clampAnchor(MIDX - fwd * dist * FP, Math.floor(((slot.i + 1) * FIELD_H) / (slot.n + 1)), bow);
+  };
+  /** physical (turn-rate-limited) steering for the ships that sit the dance
+   * out: lumbering hulls creeping in and evaders running for the edge */
+  const physTurn = (s: Sim, tx: number, ty: number): number => {
+    const want = headingToward(tx - s.x, ty - s.y);
+    const delta = headingDelta(s.heading, want);
+    const rate = turnRateOf(s.init.hullIdx, s.init.isBase);
+    if (delta !== 0) s.heading = norm32(s.heading + clamp(delta, -rate, rate));
+    return Math.abs(headingDelta(s.heading, want));
+  };
+  const physMove = (s: Sim, tx: number, ty: number, stopAt: number, speedFP: number, turnThisTick = true) => {
+    const off = turnThisTick
+      ? physTurn(s, tx, ty)
+      : Math.abs(headingDelta(s.heading, headingToward(tx - s.x, ty - s.y)));
+    const d = Math.max(1, idist(Math.abs(tx - s.x), Math.abs(ty - s.y)));
+    let travel = Math.min(speedFP, Math.max(0, d - stopAt));
+    if (off > 8) travel = 0;
+    else if (off > 4) travel = Math.floor(travel / 2);
+    if (travel > 0) {
+      s.x += roundDiv(TRIG[s.heading]![0] * travel, 16384);
+      s.y = clamp(s.y + roundDiv(TRIG[s.heading]![1] * travel, 16384), 8 * FP, FIELD_H - 8 * FP);
+    }
+  };
+  const movePattern = (s: Sim, si: number, tick: number) => {
+    if (s.init.speed === 0 || s.sysDrive) return;
+    const crippled = s.structure * 3 < s.init.structureHp;
+    const speedFP = Math.max(1, crippled ? Math.floor(s.init.speed / 2) : s.init.speed) * FP;
+    const target = s.targetIdx >= 0 ? sims[s.targetIdx] : undefined;
+    if (s.stance === 'evade_retreat') {
+      if (noRetreat[s.init.side]) {
+        // pinned by a dissipater: stand and fight, bow on target (legacy rule)
+        if (target && active(target)) physTurn(s, target.x, target.y);
+        return;
+      }
+      const dl = s.x;
+      const dr = FIELD_W - s.x;
+      const dt = s.y;
+      const db = FIELD_H - s.y;
+      const m = Math.min(dl, dr, dt, db);
+      if (m === dl) physMove(s, s.x - FIELD_W, s.y, 0, speedFP);
+      else if (m === dr) physMove(s, s.x + FIELD_W, s.y, 0, speedFP);
+      else if (m === dt) physMove(s, s.x, s.y - FIELD_H, 0, speedFP);
+      else physMove(s, s.x, s.y + FIELD_H, 0, speedFP);
+      if (s.x <= 4 * FP || s.x >= FIELD_W - 4 * FP || s.y <= 9 * FP || s.y >= FIELD_H - 9 * FP) s.retreated = true;
+      s.x = clamp(s.x, 2 * FP, FIELD_W - 2 * FP);
+      return;
+    }
+    if (!slots.has(si)) {
+      // lumbering: creep in at its own drives and fire from wherever it is —
+      // and lumber the helm too (it answers only every OTHER tick), so
+      // nimble attackers genuinely can live in its baffles
+      if (target && active(target)) physMove(s, target.x, target.y, 30 * FP, speedFP, tick % 2 === 0);
+      else physMove(s, s.x + (s.init.side === 0 ? FIELD_W : -FIELD_W), s.y, 0, speedFP, tick % 2 === 0);
+      s.x = clamp(s.x, 2 * FP, FIELD_W - 2 * FP);
+      return;
+    }
+    const a = anchorOf(s, si, tick);
+    const dx = a.x - s.x;
+    const dy = a.y - s.y;
+    const d = idist(Math.abs(dx), Math.abs(dy));
+    if (d <= speedFP) {
+      s.x = a.x;
+      s.y = a.y;
+      s.heading = a.h;
+    } else {
+      s.heading = headingToward(dx, dy);
+      s.x += roundDiv(TRIG[s.heading]![0] * speedFP, 16384);
+      s.y = clamp(s.y + roundDiv(TRIG[s.heading]![1] * speedFP, 16384), 8 * FP, FIELD_H - 8 * FP);
+    }
+    s.x = clamp(s.x, 2 * FP, FIELD_W - 2 * FP);
+  };
+  /** pattern-mode mount eligibility: geometry first (patternInArc against the
+   * choreographed heading), then the speed-scaled forward window, then — with
+   * the slewing option on — a wrenched off-axis shot at a cooldown penalty */
+  const patternMountOk = (s: Sim, w: CombatWeapon, bearing: number, tick: number, dist: number): 'in' | 'fast' | 'slew' | null => {
+    const arc = w.arc ?? 'F';
+    if (patternInArc(arc, bearing, s.heading)) return 'in';
+    if (arc === '360' || arc === 'R') return null;
+    if (s.init.isBase || s.init.speed <= 0) return null;
+    // charging melee: point-blank, the charger's guns are simply ON you
+    if (docs[s.init.side] === 'charge' && dist <= PATTERN_MELEE) return 'in';
+    if (fastForwardWindow(tick, s.init.shipId, s.init.speed)) return 'fast';
+    if (slewing && s.slews) return 'slew';
+    return null;
+  };
+
   let tick = 0;
   for (tick = 0; tick < MAX_TICKS; tick++) {
     const frameShots: ShotEvent[] = [];
     const frameDeaths: number[] = [];
+
+    // --- pattern centroids: the enemy mass the nets and wings key on ---
+    if (patterns) {
+      for (const side of [0, 1] as const) {
+        let n = 0;
+        let sx = 0;
+        let sy = 0;
+        for (const s of sims) {
+          if (s.init.side === side && active(s)) {
+            n++;
+            sx += s.x;
+            sy += s.y;
+          }
+        }
+        if (n > 0) cent[side] = { x: Math.floor(sx / n), y: Math.floor(sy / n) };
+      }
+    }
 
     // --- retreat thresholds ---
     for (const side of [0, 1] as const) {
@@ -512,8 +979,9 @@ export function runBattle(
     }
 
     // --- passthrough cohesion: once EVERY raider has punched past the enemy
-    // line, the whole group wheels around and withdraws together ---
-    for (const side of [0, 1] as const) {
+    // line, the whole group wheels around and withdraws together (legacy sim
+    // only — under patterns 'passthrough' reads as the charge doctrine) ---
+    if (!patterns) for (const side of [0, 1] as const) {
       const raiders = sims.filter((s) => s.init.side === side && s.stance === 'passthrough' && active(s));
       if (!raiders.length) continue;
       const enemies = sims.filter((s) => s.init.side !== side && active(s));
@@ -534,16 +1002,25 @@ export function runBattle(
 
     // --- formation pacing: the line advances at the slowest member's speed ---
     const formationSpeed: number[] = [0, 0];
-    for (const side of [0, 1] as const) {
+    if (!patterns) for (const side of [0, 1] as const) {
       const line = sims.filter((s) => s.init.side === side && s.stance === 'formation' && active(s) && !s.init.isBase);
       if (line.length) {
         formationSpeed[side] = Math.min(...line.map((s) => (s.sysDrive ? 0 : Math.max(1, s.init.speed))));
       }
     }
 
-    // --- movement: turn toward the desired course (hull turn rate), then move
-    // along the current heading — capitals answer the helm slowly ---
-    for (const s of sims) {
+    // --- movement (patterns): every pattern-capable ship chases its
+    // choreographed anchor; lumbering hulls creep, evaders run for the edge ---
+    if (patterns) {
+      for (let si = 0; si < sims.length; si++) {
+        const s = sims[si]!;
+        if (!active(s)) continue;
+        movePattern(s, si, tick);
+      }
+    }
+    // --- movement (legacy): turn toward the desired course (hull turn rate),
+    // then move along the current heading — capitals answer the helm slowly ---
+    else for (const s of sims) {
       if (!active(s) || s.init.speed === 0 || s.sysDrive) continue;
       const crippled = s.structure * 3 < s.init.structureHp;
       let speed = Math.max(1, crippled ? Math.floor(s.init.speed / 2) : s.init.speed) * FP;
@@ -853,9 +1330,25 @@ export function runBattle(
         }
         if (!t || !active(t)) continue;
         const dist = idist(Math.abs(t.x - s.x), Math.abs(t.y - s.y));
-        // firing arc: the mount must bear on the target (PD turrets track 360°)
+        // firing arc: the mount must bear on the target (PD turrets track
+        // 360°). Patterns mode judges bearing against the choreography —
+        // patternMountOk — with the fast-forward window and slew shots.
         const bearing = headingToward(t.x - s.x, t.y - s.y);
-        if (!isPd && !inArc(w.arc ?? 'F', bearing, s.heading)) continue;
+        let slewShot = false;
+        if (!isPd) {
+          if (patterns) {
+            const elig = patternMountOk(s, w, bearing, tick, dist);
+            if (elig === null) continue;
+            slewShot = elig === 'slew';
+          } else if (!inArc(w.arc ?? 'F', bearing, s.heading)) continue;
+        }
+        // slew shots wrench the hull off-pattern: the mount pays a turn-rate-
+        // scaled cooldown penalty (frigates near-free, titans harsh)
+        const shotCd = (): number => {
+          const base = cooldownOf(w, crippled, s.specials);
+          if (!slewShot) return base;
+          return ceilDiv(base * (SLEW_FIRE_CD_PCT[turnRateOf(s.init.hullIdx, s.init.isBase)] ?? 200), 100);
+        };
         // rangemaster treats the band one step closer
         let band = bandOf(dist);
         if (band > 0 && s.specials.has('rangemaster_target_unit')) band = (band - 1) as 0 | 1 | 2;
@@ -865,6 +1358,11 @@ export function runBattle(
           // web, ...) fire like beams: auto-hit, no band falloff
           const maxBand = isPd ? BAND_SHORT : w.mods.includes('hv') ? BAND_HV : BAND_LONG;
           if (dist > maxBand) continue;
+          // doctrine fire discipline (patterns): guns hold until the band the
+          // tactic fights in — 'line' owns the long game; chargers, wings and
+          // nets speak at medium and short. Lumbering hulls and bases fire
+          // from wherever they are; missiles/strike craft are never gated.
+          if (patterns && !s.init.isBase && !lumber[si] && band > DOCTRINE_FIRE_BAND[docs[s.init.side]]!) continue;
           const shots = w.mods.includes('af') ? 3 : 1;
           const attack = s.sysComputer ? 0 : s.init.beamAttack; // fried targeting computer
           // volley bookkeeping: once the current target is dead-on-paper the
@@ -891,7 +1389,8 @@ export function runBattle(
             const d2 = idist(Math.abs(e.x - s.x), Math.abs(e.y - s.y));
             if (d2 > maxBand) return false;
             if (isPd) return true;
-            return inArc(w.arc ?? 'F', headingToward(e.x - s.x, e.y - s.y), s.heading);
+            const b2 = headingToward(e.x - s.x, e.y - s.y);
+            return patterns ? patternMountOk(s, w, b2, tick, d2) !== null : inArc(w.arc ?? 'F', b2, s.heading);
           };
           for (let burst = 0; burst < shots; burst++) {
             for (let n = 0; n < w.count; n++) {
@@ -928,7 +1427,7 @@ export function runBattle(
               // declare targets dead-on-paper at ~half HP (fleet fire dithers)
             }
           }
-          s.cds[wi] = cooldownOf(w, crippled, s.specials);
+          s.cds[wi] = shotCd();
         } else if (w.classId === 1 || w.classId === 2) {
           const launchRange = w.classId === 1 ? 600 * FP : 500 * FP;
           if (dist > launchRange) continue;
@@ -956,7 +1455,7 @@ export function runBattle(
             hurtThisTick.set(s.targetIdx, (hurtThisTick.get(s.targetIdx) ?? 0) + dmg);
           }
           if (s.ammo[wi]! > 0) s.ammo[wi] = Math.max(0, s.ammo[wi]! - volley);
-          s.cds[wi] = cooldownOf(w, crippled, s.specials);
+          s.cds[wi] = shotCd();
         } else if (w.classId === 4) {
           // fighter bays / assault shuttles: strike craft fly out like guided
           // munitions (point defense can splash them) and hit with their
@@ -980,7 +1479,7 @@ export function runBattle(
             });
           }
           if (s.ammo[wi]! > 0) s.ammo[wi] = Math.max(0, s.ammo[wi]! - volley);
-          s.cds[wi] = cooldownOf(w, crippled, s.specials);
+          s.cds[wi] = shotCd();
         }
       }
     }

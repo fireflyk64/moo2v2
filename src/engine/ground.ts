@@ -19,7 +19,7 @@
 //   (N: dictatorship/feudal 8, democracy 4, unification 20)
 
 import { rngFor } from './rng';
-import { generateTerrain, groundModifiers, isAttackTactic, isDefenseTactic } from './groundTactics';
+import { fightGroundRounds, generateTerrain, groundModifiers, isAttackTactic, isDefenseTactic } from './groundTactics';
 import { ceilDiv } from './imath';
 import { barracksCount, colonyPopUnits, farmingViable, marineCap, MARINE_TRAIN_TURNS, marinesOf, shipMarines, traitsOf } from './economy';
 import { leaderEmpireBonuses } from './leaders';
@@ -124,29 +124,13 @@ export function landInvasion(
   const startGarrison = defMarines;
   // scenery facts for the invasion playback (judged before any losses)
   const farming = farmingViable(state, colony);
-  let civilianLosses = 0;
-  // round-by-round record for the ground-battle replay (participants only)
-  const roundsLog: Array<{ t: number; m: number }> = [{ t: troops, m: defMarines + militia }];
-  while (troops > 0 && defMarines + militia > 0) {
-    const atkPower = troops * atkStr;
-    const defPower = (defMarines + militia) * defStr;
-    if (rng.int(atkPower + defPower) < atkPower) {
-      if (defMarines > 0) {
-        defMarines--;
-      } else {
-        militia--;
-        if (pop - civilianLosses > 1) civilianLosses++;
-      }
-    } else {
-      troops--;
-    }
-    roundsLog.push({ t: troops, m: defMarines + militia });
-  }
-  // long sieges get thinned so the replay payload stays small
-  const rounds =
-    roundsLog.length <= 60
-      ? roundsLog
-      : roundsLog.filter((_, i) => i % Math.ceil(roundsLog.length / 60) === 0 || i === roundsLog.length - 1);
+  // the shared round loop (also drives the battle lab's ground sandbox)
+  const fought = fightGroundRounds(troops, defMarines, militia, atkStr, defStr, pop, rng);
+  troops = fought.troops;
+  defMarines = fought.defMarines;
+  militia = fought.militia;
+  let civilianLosses = fought.civilianLosses;
+  const rounds = fought.rounds;
 
   // apply civilian losses to groups (largest first). The colony as a WHOLE
   // keeps at least one unit (the cap below); a single group may be wiped
