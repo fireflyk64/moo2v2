@@ -1,5 +1,16 @@
 # Status 2026-07-21: all items below are FIXED — notes inline under each.
 
+Round 2 (same day): the interface should look more of a bright gray device having texturing with dark green backgrounds like a transparent oled screen that has a green tint and is displaying data. Right now it's too muted. Also we definitely want the colorful-style galaxy pixel art like in the example image of the map view.
+  ✅ FIXED: theme.css now has a two-layer system — DEVICE tokens (bright
+  textured gray: --device-hi/mid/lo/edge + an inline SVG noise texture) used
+  by buttons, table-header rails, and the game shell's header/footer bezels,
+  and SCREEN tokens (green-tinted dark glass panels, --screen-glass inner
+  glow, green-washed body/section backgrounds) for everything displaying
+  data. Active nav tabs read as lit panes of the screen. makeGalaxyBackground
+  was rewritten to render at 1/5 resolution with saturated spiral arms, a
+  bright core, and green/violet/magenta/ember/teal nebula clusters, upscaled
+  with image-rendering:pixelated for the chunky look of bugs/galaxy_compact.png.
+
 Sometimes when I click the farmer to drag them instead it selects the farmers (same with worker or scientist icons). I need to focus on clicking without moving to get them selected. I'd like that a simple drag selects everything to the right and doesn't highlight the emojis.  This is a major slowdown in play.
   ✅ FIXED (Spreadsheet.svelte): citizen emojis are user-select:none so a drag can
   never sweep-highlight them; a drag from icon i always carries i + everyone to

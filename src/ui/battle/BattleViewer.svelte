@@ -688,7 +688,7 @@
     border: 1px solid var(--line-bright);
     border-radius: 12px;
     padding: 0.8rem;
-    box-shadow: 0 14px 60px rgba(0, 0, 0, 0.65), 0 0 60px color-mix(in srgb, var(--accent) 10%, transparent);
+    box-shadow: 0 14px 60px rgba(0, 0, 0, 0.65);
     max-height: 96vh;
     max-width: 96vw;
     overflow: auto;

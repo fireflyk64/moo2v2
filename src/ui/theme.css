@@ -15,41 +15,62 @@
    ========================================================================= */
 
 :root {
-  /* surfaces: black canvas, gray panels that lighten as they stack */
-  --bg: #080a07;
-  --panel: #0f120d;
-  --panel-2: #151912;
-  --panel-3: #1c2118;
-  --line: #333a2e;
-  --line-bright: #4d573f;
+  /* SCREEN surfaces: dark green-tinted OLED glass displaying the data.
+     Panels lighten (and green up) as they stack. */
+  --bg: #08110a;
+  --panel: #0c1a10;
+  --panel-2: #112417;
+  --panel-3: #172f1e;
+  --line: #4b564a;
+  --line-bright: #79856f;
 
-  /* type: pale gray-green terminal text */
-  --text: #cdd6c0;
-  --text-dim: #8a947c;
+  /* DEVICE surfaces: the bright textured gray machine holding the screens
+     (bezel strips, button faces, column-header rails). --device-texture is a
+     self-contained SVG GREEBLE tile — engraved panel seams plus raised and
+     recessed plating blocks, star-destroyer style — stacked over a device
+     gradient. Seams are dark-over-light line pairs so they read as grooves. */
+  --device-hi: #838d7e;
+  --device-mid: #5b665c;
+  --device-lo: #39423a;
+  --device-edge: #aeb9a3;
+  --device-text: #f0f6e8;
+  --device-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cg stroke='rgba(0,0,0,0.30)' stroke-width='1'%3E%3Cpath d='M0 30.5H120M0 82.5H120M46.5 0V30M92.5 0V30M22.5 30V82M74.5 30V82M58.5 82V120M104.5 82V120'/%3E%3C/g%3E%3Cg stroke='rgba(255,255,255,0.07)' stroke-width='1'%3E%3Cpath d='M0 31.5H120M0 83.5H120M47.5 0V30M23.5 30V82M75.5 30V82M59.5 83V120'/%3E%3C/g%3E%3Cg fill='rgba(0,0,0,0.16)'%3E%3Crect x='6' y='38' width='26' height='7'/%3E%3Crect x='80' y='94' width='30' height='6'/%3E%3Crect x='30' y='8' width='12' height='14'/%3E%3Crect x='98' y='42' width='14' height='22'/%3E%3C/g%3E%3Cg fill='rgba(255,255,255,0.05)'%3E%3Crect x='52' y='12' width='30' height='6'/%3E%3Crect x='10' y='96' width='18' height='10'/%3E%3Crect x='34' y='56' width='22' height='9'/%3E%3Crect x='84' y='70' width='18' height='5'/%3E%3C/g%3E%3C/svg%3E");
+
+  /* type: pale green terminal text */
+  --text: #d6e4c8;
+  --text-dim: #94a186;
   --font-ui: 'Cascadia Mono', Consolas, 'IBM Plex Mono', ui-monospace,
     'SF Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
 
   /* signals: phosphor green primary, amber secondary, ember for danger */
-  --accent: #8ae23c;
-  --accent-soft: #b8f08a;
-  --gold: #e8c05e;
-  --good: #7fe060;
+  --accent: #90f03c;
+  --accent-soft: #c3fa90;
+  --gold: #f0c964;
+  --good: #85e962;
   --bad: #ff8a5e;
 
-  /* effects */
-  --glow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
-  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
-  --input-bg: #0b0e09;
+  /* effects — glow is for INTERACTION feedback only (hover/focus); UI
+     surfaces themselves carry no green wash (bugs.md round 3: no bleed) */
+  --glow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+  --input-bg: #071008;
   --radius: 3px;
-  /* page backdrop: a barely-there green wash behind the black */
-  --bg-glow-a: #0d120b;
-  --bg-glow-b: #090c08;
+  /* page backdrop: dark green behind the glass, kept flat — no visible wash */
+  --bg-glow-a: #0f1d12;
+  --bg-glow-b: #0b170e;
   /* CRT scanlines overlay strength (0 disables) */
-  --scanline-alpha: 0.1;
+  --scanline-alpha: 0.08;
 }
 
 /* -------- previous look: deep-space blue, soft sans, no scanlines -------- */
 [data-theme='nebula'] {
+  /* device layer collapses back into the flat blue chrome */
+  --device-hi: #1b2547;
+  --device-mid: #151d3f;
+  --device-lo: #0f1530;
+  --device-edge: #40518c;
+  --device-text: #dce3f7;
+  --device-texture: none;
   --bg: #070a16;
   --panel: #0f1530;
   --panel-2: #151d3f;

@@ -160,10 +160,12 @@
   }
 
   /* ---------- shared control styling (global design system) ---------- */
+  /* buttons are DEVICE controls: bright machined-gray faces with a noise
+     texture and a top bevel, pressed into the dark screen chrome */
   :global(button) {
-    background: linear-gradient(180deg, var(--panel-3), var(--panel-2));
-    color: var(--text);
-    border: 1px solid var(--line-bright);
+    background: var(--device-texture), linear-gradient(180deg, var(--device-hi), var(--device-mid) 45%, var(--device-lo));
+    color: var(--device-text);
+    border: 1px solid var(--device-edge);
     border-radius: var(--radius);
     padding: 0.28rem 0.7rem;
     font: inherit;
@@ -171,19 +173,24 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     cursor: pointer;
-    transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s, background 0.15s;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s, background 0.15s, filter 0.15s;
   }
   :global(button:hover:not(:disabled)) {
     border-color: var(--accent);
-    box-shadow: var(--glow);
+    box-shadow: var(--glow), inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+    filter: brightness(1.12);
   }
   :global(button:active:not(:disabled)) {
     transform: translateY(1px);
+    filter: brightness(0.92);
   }
   :global(button:disabled) {
     opacity: 0.45;
     cursor: default;
   }
+  /* inputs are SCREEN wells: flat dark glass, no glow (bugs.md: no bleed) */
   :global(input),
   :global(select) {
     background: var(--input-bg);
@@ -218,12 +225,15 @@
   :global(table) {
     border-collapse: collapse;
   }
+  /* column headers are DEVICE rails: textured gray strips over the glass */
   :global(thead th) {
-    background: linear-gradient(180deg, var(--panel-2), var(--panel));
-    color: var(--accent-soft);
+    background: var(--device-texture), linear-gradient(180deg, var(--device-mid), var(--device-lo));
+    color: var(--device-text);
     text-transform: uppercase;
     font-size: 0.72rem;
     letter-spacing: 0.08em;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
   }
   :global(tbody tr:hover td) {
     background: color-mix(in srgb, var(--accent) 6%, transparent);

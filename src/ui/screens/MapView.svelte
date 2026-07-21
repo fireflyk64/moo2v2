@@ -33,79 +33,96 @@
     };
   }
 
+  /** Colorful pixel-art galaxy backdrop (bugs.md: like bugs/galaxy_compact.png).
+   * Drawn ONCE at 1/PX resolution and upscaled with image-rendering:pixelated,
+   * so the nebulae read as chunky pixel clusters, not smooth airbrush. */
   function makeGalaxyBackground(seedText: string, w: number, h: number): string {
+    const PX = 5; // art-pixel size at texture scale — bigger = chunkier
     const seed = hashText(seedText);
     const rnd = mulberry32(seed);
+    const lw = Math.ceil(w / PX);
+    const lh = Math.ceil(h / PX);
     const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
+    canvas.width = lw;
+    canvas.height = lh;
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
 
-    // deep-space base + soft center glow
-    ctx.fillStyle = '#03050d';
-    ctx.fillRect(0, 0, w, h);
-    const core = ctx.createRadialGradient(w * 0.52, h * 0.44, 0, w * 0.52, h * 0.44, Math.max(w, h) * 0.64);
-    core.addColorStop(0, 'rgba(60,78,140,0.22)');
-    core.addColorStop(1, 'rgba(4,6,14,0)');
-    ctx.fillStyle = core;
-    ctx.fillRect(0, 0, w, h);
+    // deep-space base + bright warm core (the reference galaxy glows white-blue)
+    ctx.fillStyle = '#05060f';
+    ctx.fillRect(0, 0, lw, lh);
+    const cx = lw * (0.46 + rnd() * 0.08);
+    const cy = lh * (0.46 + rnd() * 0.08);
+    const blob = (x: number, y: number, r: number, rgba: string) => {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, rgba);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    };
+    blob(cx, cy, Math.max(lw, lh) * 0.5, 'rgba(96,112,190,0.34)');
+    blob(cx, cy, Math.min(lw, lh) * 0.18, 'rgba(240,236,220,0.6)');
+    blob(cx, cy, Math.min(lw, lh) * 0.08, 'rgba(255,250,235,0.9)');
 
-    // broad spiral-arm haze using stamped radial blobs (cheap one-time draw)
-    const cx = w * (0.45 + rnd() * 0.1);
-    const cy = h * (0.46 + rnd() * 0.08);
+    // spiral arms: saturated blue-lavender haze + bright star flecks along them
     const armCount = 3;
     const armTurns = 2.1 + rnd() * 0.7;
-    const maxR = Math.min(w, h) * (0.47 + rnd() * 0.07);
+    const maxR = Math.min(lw, lh) * (0.5 + rnd() * 0.08);
+    const squish = 0.72 + rnd() * 0.16;
     for (let arm = 0; arm < armCount; arm++) {
       const armPhase = (Math.PI * 2 * arm) / armCount + rnd() * 0.25;
-      for (let i = 0; i < 220; i++) {
-        const t = i / 220;
+      for (let i = 0; i < 190; i++) {
+        const t = i / 190;
         const th = armPhase + t * Math.PI * armTurns;
-        const r = t * maxR + (rnd() - 0.5) * 38;
+        const r = t * maxR + (rnd() - 0.5) * 9;
         const x = cx + Math.cos(th) * r;
-        const y = cy + Math.sin(th) * r * (0.72 + rnd() * 0.16);
-        const rr = 14 + rnd() * 44;
-        const g = ctx.createRadialGradient(x, y, 0, x, y, rr);
-        g.addColorStop(0, `rgba(${80 + Math.floor(rnd() * 40)},${95 + Math.floor(rnd() * 45)},${150 + Math.floor(rnd() * 60)},${0.03 + rnd() * 0.05})`);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+        const y = cy + Math.sin(th) * r * squish;
+        const rr = 3 + rnd() * 9;
+        blob(x, y, rr, `rgba(${110 + Math.floor(rnd() * 50)},${120 + Math.floor(rnd() * 50)},${190 + Math.floor(rnd() * 60)},${0.12 + rnd() * 0.12})`);
+        // arm flecks stay FAINT — at 5px art-pixels a bright white square
+        // reads as a star and fights the real star glyphs (bugs.md round 3)
+        if (rnd() < 0.35) {
+          ctx.fillStyle = rnd() < 0.25 ? `rgba(255,244,214,${0.15 + rnd() * 0.18})` : `rgba(214,228,255,${0.12 + rnd() * 0.2})`;
+          ctx.fillRect(Math.floor(x + (rnd() - 0.5) * 6), Math.floor(y + (rnd() - 0.5) * 6), 1, 1);
+        }
       }
     }
 
-    // colorful nebulas: clustered translucent blobs
+    // nebulae: the reference's loud color patches — green, violet, magenta,
+    // ember and teal clusters of overlapping chunky blobs
     const nebColors = [
-      [168, 74, 62],
-      [90, 62, 156],
-      [58, 118, 148],
-      [142, 76, 124],
+      [72, 200, 118],
+      [134, 82, 224],
+      [214, 72, 134],
+      [224, 96, 58],
+      [62, 182, 192],
     ] as const;
-    const nebulaCount = 4;
+    const order = [...nebColors].sort(() => rnd() - 0.5);
+    const nebulaCount = 4 + Math.floor(rnd() * 2);
     for (let n = 0; n < nebulaCount; n++) {
-      const px = w * (0.12 + rnd() * 0.76);
-      const py = h * (0.12 + rnd() * 0.76);
-      const [cr, cg, cb] = nebColors[Math.floor(rnd() * nebColors.length)]!;
-      for (let k = 0; k < 14; k++) {
-        const ox = (rnd() - 0.5) * 170;
-        const oy = (rnd() - 0.5) * 120;
-        const rr = 38 + rnd() * 110;
-        const a = 0.04 + rnd() * 0.08;
-        const g = ctx.createRadialGradient(px + ox, py + oy, 0, px + ox, py + oy, rr);
-        g.addColorStop(0, `rgba(${cr},${cg},${cb},${a})`);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(px + ox - rr, py + oy - rr, rr * 2, rr * 2);
+      const px = lw * (0.1 + rnd() * 0.8);
+      const py = lh * (0.1 + rnd() * 0.8);
+      const [cr, cg, cb] = order[n % order.length]!;
+      for (let k = 0; k < 16; k++) {
+        const ox = (rnd() - 0.5) * (lw * 0.18);
+        const oy = (rnd() - 0.5) * (lh * 0.14);
+        const rr = 5 + rnd() * (Math.min(lw, lh) * 0.09);
+        blob(px + ox, py + oy, rr, `rgba(${cr},${cg},${cb},${0.10 + rnd() * 0.14})`);
+      }
+      // a few lit knots inside each nebula (dim — background, not stars)
+      for (let k = 0; k < 6; k++) {
+        ctx.fillStyle = `rgba(${Math.min(255, cr + 70)},${Math.min(255, cg + 70)},${Math.min(255, cb + 70)},${0.18 + rnd() * 0.16})`;
+        ctx.fillRect(Math.floor(px + (rnd() - 0.5) * lw * 0.12), Math.floor(py + (rnd() - 0.5) * lh * 0.1), 1, 1);
       }
     }
 
-    // dense but subtle star sprinkle (single-pixel only)
-    const starCount = Math.floor((w * h) / 380);
+    // star sprinkle — kept dim so the REAL star glyphs stay the bright layer
+    const starCount = Math.floor((lw * lh) / 46);
     for (let i = 0; i < starCount; i++) {
-      const x = Math.floor(rnd() * w);
-      const y = Math.floor(rnd() * h);
+      const x = Math.floor(rnd() * lw);
+      const y = Math.floor(rnd() * lh);
       const b = rnd();
-      const alpha = 0.06 + b * 0.28;
+      const alpha = 0.06 + b * 0.2;
       const tint = rnd();
       if (tint < 0.12) ctx.fillStyle = `rgba(255,225,190,${alpha})`;
       else if (tint > 0.9) ctx.fillStyle = `rgba(190,215,255,${alpha})`;
@@ -113,12 +130,19 @@
       ctx.fillRect(x, y, 1, 1);
     }
 
+    // pixel grain: random dark speckle gives the dithered retro texture
+    const grainCount = Math.floor((lw * lh) / 9);
+    for (let i = 0; i < grainCount; i++) {
+      ctx.fillStyle = `rgba(0,0,0,${0.05 + rnd() * 0.1})`;
+      ctx.fillRect(Math.floor(rnd() * lw), Math.floor(rnd() * lh), 1, 1);
+    }
+
     // vignette to keep focus toward map center
-    const vg = ctx.createRadialGradient(w * 0.5, h * 0.5, Math.min(w, h) * 0.28, w * 0.5, h * 0.5, Math.max(w, h) * 0.82);
+    const vg = ctx.createRadialGradient(lw * 0.5, lh * 0.5, Math.min(lw, lh) * 0.3, lw * 0.5, lh * 0.5, Math.max(lw, lh) * 0.82);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(2,3,8,0.5)');
+    vg.addColorStop(1, 'rgba(2,3,8,0.55)');
     ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(0, 0, lw, lh);
 
     return canvas.toDataURL('image/png');
   }
@@ -185,7 +209,9 @@
   const mapSvgStyle = $derived.by(() => {
     const base = `width:${Math.round(mapDims.w * renderScale)}px;max-width:none`;
     if (!mapBgUrl) return base;
-    return `${base};background-image:url(${mapBgUrl});background-size:cover;background-position:center`;
+    // pixelated: the backdrop is authored at 1/5 res — upscaling must keep the
+    // chunky art-pixels instead of smoothing them away
+    return `${base};background-image:url(${mapBgUrl});background-size:cover;background-position:center;image-rendering:pixelated`;
   });
 
   function recomputeFitScale() {

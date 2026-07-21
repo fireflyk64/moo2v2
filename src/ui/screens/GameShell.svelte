@@ -980,19 +980,19 @@
 {/if}
 
 <style>
+  /* the top bar is the DEVICE bezel: bright textured gray machine face */
   header {
     display: flex;
     gap: 1rem;
     align-items: center;
     padding: 0.45rem 1rem;
-    background: linear-gradient(180deg, color-mix(in srgb, var(--panel-3) 97%, transparent), color-mix(in srgb, var(--panel) 97%, transparent));
-    border-bottom: 1px solid var(--line-bright);
+    background: var(--device-texture), linear-gradient(180deg, var(--device-mid), var(--device-lo));
+    border-bottom: 1px solid var(--device-edge);
     position: sticky;
     top: 0;
     flex-wrap: wrap;
     z-index: 10;
-    backdrop-filter: blur(6px);
-    box-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 2px 18px rgba(0, 0, 0, 0.45);
   }
   .title {
     font-weight: 800;
@@ -1086,18 +1086,22 @@
     background: transparent;
     border-color: transparent;
     color: var(--text-dim);
+    box-shadow: none;
+    text-shadow: none;
   }
   nav button:hover:not(:disabled) {
     box-shadow: none;
+    filter: none;
     color: var(--text);
     border-color: transparent;
   }
+  /* the active tab is a lit pane of the SCREEN, not a device key */
   nav button.active {
     background: linear-gradient(180deg, var(--panel-3), var(--panel-2));
     color: var(--accent-soft);
     border: 1px solid var(--line-bright);
     border-bottom: 2px solid var(--accent);
-    box-shadow: 0 -2px 14px color-mix(in srgb, var(--accent) 12%, transparent);
+    box-shadow: none;
   }
   nav button.pulse:not(.active) {
     color: var(--gold);
@@ -1128,8 +1132,8 @@
   footer {
     position: sticky;
     bottom: 0;
-    background: linear-gradient(0deg, color-mix(in srgb, var(--panel) 97%, transparent), color-mix(in srgb, var(--panel-2) 97%, transparent));
-    border-top: 1px solid var(--line);
+    background: var(--device-texture), linear-gradient(0deg, var(--device-lo), var(--device-mid));
+    border-top: 1px solid var(--device-edge);
     padding: 0.35rem 1rem;
     display: flex;
     gap: 0.5rem;
@@ -1261,7 +1265,7 @@
     border-radius: 12px;
     padding: 0.7rem 1.1rem;
     z-index: 45;
-    box-shadow: 0 0 40px color-mix(in srgb, var(--accent) 45%, transparent), 0 10px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
     animation: drop-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
   }
   @keyframes drop-in {

@@ -755,7 +755,7 @@
     border-radius: 0.4rem;
     background: var(--bg, var(--bg));
     color: var(--text, var(--text));
-    box-shadow: var(--glow, 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent));
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
     opacity: 0;
     transform: translateY(-0.25rem);
     pointer-events: none;
