@@ -112,6 +112,9 @@ export interface Colony {
   /** trained marine garrison (counters, no food/jobs). Absent in older saves:
    * defaults to a full first squad when a barracks stands (economy.marinesOf) */
   marines?: number;
+  /** standing ground-defense doctrine (groundTactics.DEFENSE_TACTICS).
+   * Absent (older saves / never set) = neutral legacy ground math */
+  groundTactic?: string;
 }
 
 export interface EmpireResearch {
@@ -287,6 +290,10 @@ export interface GameStateSettings {
   /** big-empire start: each player begins with a bubble of 10-20 colonies,
    * each 1/3-1/2 populated (absent/false = classic single homeworld) */
   bigStart?: boolean;
+  /** SLEWING (0.23.0 game option): in space battles ships may rotate beyond
+   * their hull turn rate by spending movement points to bring forward-arc
+   * guns onto off-axis targets (combat.ts). Absent/false = classic turning. */
+  slewing?: boolean;
 }
 
 export type ProposalKind =

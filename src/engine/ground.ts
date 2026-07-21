@@ -19,6 +19,7 @@
 //   (N: dictatorship/feudal 8, democracy 4, unification 20)
 
 import { rngFor } from './rng';
+import { generateTerrain, groundModifiers, isAttackTactic, isDefenseTactic } from './groundTactics';
 import { ceilDiv } from './imath';
 import { barracksCount, colonyPopUnits, farmingViable, marineCap, MARINE_TRAIN_TURNS, marinesOf, shipMarines, traitsOf } from './economy';
 import { leaderEmpireBonuses } from './leaders';
@@ -80,7 +81,14 @@ export function resolveInvasions(state: GameState, events: TurnEvent[], foughtAt
 /** Land an empire's marine transports at the colony and fight it out. The
  * transports are consumed; on capture the surviving marines stay as the
  * colony's new garrison. No-op when no marines are in orbit. */
-export function landInvasion(state: GameState, colony: Colony, attackerId: number, events: TurnEvent[]): void {
+export function landInvasion(
+  state: GameState,
+  colony: Colony,
+  attackerId: number,
+  events: TurnEvent[],
+  /** attacker's chosen ground tactic (invade order); absent = legacy neutral */
+  atkTactic?: string,
+): void {
   const planet = state.planets.find((p) => p.id === colony.planetId)!;
   const starId = planet.starId;
   const force = state.ships.filter(
@@ -99,8 +107,16 @@ export function landInvasion(state: GameState, colony: Colony, attackerId: numbe
   let defMarines = marinesOf(colony);
   let militia = ceilDiv(pop, 2);
 
-  const atkStr = groundStrength(state, attackerId, false);
-  const defStr = groundStrength(state, colony.owner, true, colony);
+  // tactics + terrain (bugs.md round 6): the planet's one deterministic map
+  // and the two doctrines scale each side's per-round strength. Both tactics
+  // absent (old logs, unset colonies) = 1/1 — exact legacy math.
+  const terrain = generateTerrain(planet.id, planet.climate);
+  const atk = isAttackTactic(atkTactic) ? atkTactic : undefined;
+  const def = isDefenseTactic(colony.groundTactic) ? colony.groundTactic : undefined;
+  const mods = groundModifiers(atk, def, atk || def ? terrain : null);
+  // integer strengths keep rng.int's bound exact (mult 1 rounds to itself)
+  const atkStr = Math.max(1, Math.round(groundStrength(state, attackerId, false) * mods.atkMult));
+  const defStr = Math.max(1, Math.round(groundStrength(state, colony.owner, true, colony) * mods.defMult));
   const rng = rngFor(state.seed, state.turn, 'ground', colony.id);
 
   const startTroops = troops;
@@ -170,6 +186,11 @@ export function landInvasion(state: GameState, colony: Colony, attackerId: numbe
         climate: planet.climate,
         farming,
         rounds,
+        // top-down tabletop replay data (viewer regenerates the map from
+        // these; optional so old entries still play back)
+        terrain,
+        ...(atk ? { atkTactic: atk } : {}),
+        ...(def ? { defTactic: def } : {}),
       },
     });
   }

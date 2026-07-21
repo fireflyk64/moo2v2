@@ -366,6 +366,15 @@
       />
       ⚡ Fast start (async turns until contact)
     </label>
+    <label title="In space battles, ships may rotate their hull beyond the normal turn rate by spending movement points — bringing forward-arc guns onto off-axis targets at the cost of speed. Small hulls slew nearly freely; capitals trade most of their move for a few degrees. Ships armed only with 360° mounts never need it. Off = classic turning.">
+      <input
+        type="checkbox"
+        data-testid="mode-slewing"
+        checked={settings.slewing ?? false}
+        onchange={(e) => updateSetting('slewing', (e.target as HTMLInputElement).checked)}
+      />
+      🔄 Slewing (tactical hull rotation)
+    </label>
     {#if settings.debugCommands}
       <label title="DEBUG: every empire begins with the entire technology tree already researched — every application known, every field completed. For testing only.">
         <input

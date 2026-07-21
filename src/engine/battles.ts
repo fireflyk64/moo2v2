@@ -490,6 +490,9 @@ export function buildBattleInput(state: GameState, battle: PendingBattle): Built
       // made unordered fleets turn tail (bugs.md "change default to charge")
       ordersA: (battle.ordersA as BattleOrders | null) ?? DEFAULT_ORDERS,
       ordersD: (battle.ordersD as BattleOrders | null) ?? DEFAULT_ORDERS,
+      // slewing game option rides the input so replays re-sim identically;
+      // the key is only present when ON (legacy inputs stay byte-exact)
+      ...(state.settings.slewing === true ? { slewing: true } : {}),
     },
     baseColonyId,
     engagedColonyId: engaged === undefined ? undefined : engaged === null ? null : engaged.id,

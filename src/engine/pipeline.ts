@@ -76,7 +76,7 @@ export function resolveCombat(state: GameState): AdvanceResult {
     // the landing at the ENGAGED colony; deep space (null) means the marines
     // stay aboard — the fleet chose to fight away from the planet; absent =
     // legacy target (first populated colony), exactly as before.
-    const ordersA = battle.ordersA as { invade?: boolean; engagePlanetId?: number | null } | null;
+    const ordersA = battle.ordersA as { invade?: boolean; engagePlanetId?: number | null; invadeTactic?: string } | null;
     if (resolved.result.winner === 0 && ordersA?.invade === true && battle.defender >= 0 && ordersA.engagePlanetId !== null) {
       const colony = state.colonies.find(
         (c) =>
@@ -86,7 +86,7 @@ export function resolveCombat(state: GameState): AdvanceResult {
             ? c.planetId === ordersA.engagePlanetId
             : state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId)),
       );
-      if (colony) landInvasion(state, colony, battle.attacker, events);
+      if (colony) landInvasion(state, colony, battle.attacker, events, ordersA.invadeTactic);
     }
   }
   state.pendingBattles = [];

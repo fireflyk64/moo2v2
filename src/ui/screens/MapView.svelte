@@ -8,6 +8,7 @@
   import { MAP_SIZE } from '@engine/galaxy';
   import { playerColor, STAR_COLORS } from '../colors';
   import PixelPlanet from '../PixelPlanet.svelte';
+  import { generateTerrain, TERRAIN_INFO, TERRAIN_W, TERRAIN_H, DEFENSE_TACTICS } from '@engine/groundTactics';
   import { app, getActive, savePerGame } from '../state.svelte';
   import { BUILD_HOTKEYS, bestColonyFor, cancelPin, pinBuild, pinnedStatus, resolveHotkeyItem } from '../quickBuild';
   import AutopilotBar from '../components/AutopilotBar.svelte';
@@ -1353,6 +1354,42 @@
                   onclick={() => session().submit('scrap_outpost', { colonyId: c.id })}
                 >🗑 scrap outpost</button>
               {/if}
+              {#if !c.outpost && (c.owner === me() || shipsHere.length > 0)}
+                <!-- the planet's one fixed terrain map: owners always see it;
+                     anyone else needs a ship (even a scout) at the star -->
+                <details class="terrainbox" data-testid="terrain-{p.id}">
+                  <summary title="every planet keeps ONE fixed terrain map — invasions are fought over it, and doctrine/tactic matchups care about the ground">🗺 terrain</summary>
+                  <span class="terrainrow">
+                    <svg viewBox="0 0 {TERRAIN_W * 8} {TERRAIN_H * 8}" class="minimap" aria-label="terrain map">
+                      {#each generateTerrain(p.id, p.climate) as trow, ty (ty)}
+                        {#each trow.split('') as ch, tx (tx)}
+                          <rect x={tx * 8} y={ty * 8} width="8" height="8" fill={TERRAIN_INFO[ch]?.color ?? '#666'}>
+                            <title>{TERRAIN_INFO[ch]?.name}{TERRAIN_INFO[ch]?.defBonus ? ` (+${Math.round((TERRAIN_INFO[ch]?.defBonus ?? 0) * 100)}% defense)` : ''}</title>
+                          </rect>
+                        {/each}
+                      {/each}
+                    </svg>
+                    {#if c.owner === me()}
+                      <label class="doctrine" title="standing ground doctrine for this colony — the terrain and the invader's tactic decide how well it holds">
+                        🛡
+                        <select
+                          data-testid="doctrine-{c.id}"
+                          value={gs?.colonies.find((x) => x.id === c.id)?.groundTactic ?? ''}
+                          onchange={(e) => {
+                            const v = (e.target as HTMLSelectElement).value;
+                            session().submit('set_ground_tactic', { colonyId: c.id, tactic: v || null });
+                          }}
+                        >
+                          <option value="">standard defense</option>
+                          {#each DEFENSE_TACTICS as t (t)}
+                            <option value={t}>{t.replaceAll('_', ' ')}</option>
+                          {/each}
+                        </select>
+                      </label>
+                    {/if}
+                  </span>
+                </details>
+              {/if}
             {/each}
             {#each shipsHere as f (f.ship.id)}
               {#if f.canColonizeHere.includes(p.id)}
@@ -1767,6 +1804,35 @@
   }
   li {
     margin-bottom: 0.3rem;
+  }
+  .terrainbox {
+    display: inline-block;
+    vertical-align: top;
+    margin-left: 0.4rem;
+    font-size: 0.72rem;
+  }
+  .terrainbox summary {
+    cursor: pointer;
+    color: var(--text-dim);
+  }
+  .terrainbox summary:hover {
+    color: var(--text);
+  }
+  .terrainrow {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin-top: 0.2rem;
+  }
+  .minimap {
+    width: 108px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    filter: brightness(0.75);
+  }
+  .doctrine select {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.25rem;
   }
   .orbit {
     display: inline-block;

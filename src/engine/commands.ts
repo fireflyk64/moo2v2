@@ -13,6 +13,7 @@ import {
   PICK_EXCLUSIVE_GROUPS,
 } from './data/index';
 import { areAtWar, relationKey, setRelation } from './battles';
+import { DEFENSE_TACTICS, isAttackTactic, isDefenseTactic } from './groundTactics';
 import { anyEmpireContact, metEmpireIds } from './contact';
 import { buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, farmingViable, freeFreighters, organicUnitsOf, traitsOf } from './economy';
 import { allocId, allocWorldId } from './ids';
@@ -23,7 +24,7 @@ import { starDistance } from './galaxy';
 import { appPickableBy, availableFields, fieldGrantsAll } from './research';
 import { availableHulls, designStats, knownWeapons } from './shipdesign';
 import { isShipStyle } from './shipstyles';
-import type { BattleOrders, Stance, TargetPriority } from './combat';
+import type { BattleOrders, Formation, Stance, TargetPriority } from './combat';
 import { ANDROID_RACE, NATIVE_RACE } from './types';
 import type { Colony, GameState, Planet, PopGroup, Ship, ShipKind, Star, TurnEvent } from './types';
 
@@ -555,6 +556,26 @@ const applyScrapOutpost: Applier = (state, cmd) => {
   state.colonies = state.colonies.filter((c) => c.id !== p.colonyId);
 };
 
+// ---------- set_ground_tactic (standing colony ground doctrine) ----------
+const validateSetGroundTactic: Validator = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; tactic: string | null };
+  const colony = state.colonies.find((c) => c.id === p?.colonyId);
+  if (!colony) return `no colony ${p?.colonyId}`;
+  if (colony.owner !== cmd.playerId) return 'not your colony';
+  if (colony.outpost) return 'outposts have no garrison to drill';
+  if (p.tactic !== null && !isDefenseTactic(p.tactic)) {
+    return `unknown doctrine (choose one of ${DEFENSE_TACTICS.join(', ')}, or null for none)`;
+  }
+  return null;
+};
+
+const applySetGroundTactic: Applier = (state, cmd) => {
+  const p = cmd.payload as { colonyId: number; tactic: string | null };
+  const colony = state.colonies.find((c) => c.id === p.colonyId)!;
+  if (p.tactic === null) delete colony.groundTactic;
+  else colony.groundTactic = p.tactic;
+};
+
 // ---------- set_tax_rate ----------
 
 const validateSetTax: Validator = (state, cmd) => {
@@ -743,6 +764,7 @@ const applyOfferPeace: Applier = (state, cmd) => {
 
 const STANCES: Stance[] = ['charge', 'hold_range', 'standoff', 'evade_retreat', 'formation', 'passthrough'];
 const PRIORITIES: TargetPriority[] = ['nearest', 'biggest', 'smallest', 'warships', 'bases', 'deadliest'];
+const FORMATIONS: Formation[] = ['line', 'flank', 'pincer', 'envelop'];
 
 const validateBattleOrders: Validator = (state, cmd) => {
   if (state.phase !== 'battle_orders') return 'no battle awaiting orders';
@@ -770,6 +792,14 @@ const validateBattleOrders: Validator = (state, cmd) => {
       return cmd.playerId === battle.attacker ? 'engage planet is not an enemy colony' : 'engage planet is not your colony';
     }
   }
+  // formation (0.23.0): absent/null = classic massed behavior
+  if (o.formation !== undefined && o.formation !== null && !FORMATIONS.includes(o.formation)) return 'bad formation';
+  // ground tactic (0.23.0): attacker-only rider for the post-victory landing
+  // (groundTactics.ts); absent = legal legacy standard assault
+  if (o.invadeTactic !== undefined) {
+    if (!isAttackTactic(o.invadeTactic)) return 'bad invade tactic';
+    if (cmd.playerId !== battle.attacker) return 'invade tactic is an attacker order';
+  }
   return null;
 };
 
@@ -789,6 +819,12 @@ const applyBattleOrders: Applier = (state, cmd) => {
     spareNoncombatants: p.orders.spareNoncombatants === true,
     // absent stays absent (legacy semantics) — never default it here
     ...(p.orders.engagePlanetId !== undefined ? { engagePlanetId: p.orders.engagePlanetId } : {}),
+    // formation: null means the same as absent (classic massed) — normalize
+    ...(p.orders.formation !== undefined && p.orders.formation !== null ? { formation: p.orders.formation } : {}),
+    // ground tactic rides only on attacker orders (pipeline reads ordersA)
+    ...(cmd.playerId === battle.attacker && p.orders.invadeTactic !== undefined
+      ? { invadeTactic: p.orders.invadeTactic }
+      : {}),
   };
   if (cmd.playerId === battle.attacker) battle.ordersA = orders;
   else battle.ordersD = orders;
@@ -1620,6 +1656,7 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   },
   scrap_ship: { validate: validateScrap, apply: applyScrap },
   scrap_outpost: { validate: validateScrapOutpost, apply: applyScrapOutpost },
+  set_ground_tactic: { validate: validateSetGroundTactic, apply: applySetGroundTactic },
   sell_building: { validate: validateSellBuilding, apply: applySellBuilding },
   set_tax_rate: { validate: validateSetTax, apply: applySetTax },
   set_ship_style: { validate: validateSetShipStyle, apply: applySetShipStyle },

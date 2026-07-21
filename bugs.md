@@ -1,5 +1,26 @@
 # Status 2026-07-21: all items below are FIXED — notes inline under each.
 
+Round 6 (same day): leader-offer fast-forward blocker needs an ignore status; ground battles should be top-down tabletop maps with battalion symbols, per-planet fixed terrain (rocky worlds favor defense), RPS tactics for both sides chosen with battle orders, scoutable/owner-previewable terrain; space battles need LOGH-style formations (hold the line / flank / 3-group envelopment) and optional SLEWING (F-arc ships trade movement to rotate guns on target, big hulls pay more, 360 mounts at full speed) as a start-screen option.
+  ✅ ALL FIXED (ENGINE_VERSION 0.23.0):
+  - 🔕 ignore per leader offer (Empires tab): auto-play rolls on, badge goes
+    quiet, offer stays hireable until expiry (committed fc47703).
+  - Ground: groundTactics.ts — fixed 12x8 terrain per planet (climate-
+    weighted; ridge/craters on rocky worlds, urban at the colony), 8 attack
+    tactics vs 4 doctrines through an RPS matrix + terrain-fit modifiers;
+    set_ground_tactic doctrine per colony (map panel, with 🗺 terrain preview
+    for owners and anyone with a ship at the star); attacker tactic on the
+    invade order (battle-orders dialog); GroundBattleDialog is now a top-down
+    theater map: NATO battalion boxes, tactic arrows, terrain legend, fallen-
+    battalion markers. Absent tactics = byte-exact legacy invasions.
+  - Space: battle_orders formation line/flank/pincer/envelop — heavies hold
+    the wall while fast wings swing wide (one seeded coin for flank side);
+    slewing as a lobby option (default off): F-arc ships spend movement per
+    extra 11.25° step (cost scales with hull turn rate — frigates slew nearly
+    free, titans pay half their move), 360-only ships never need it; both
+    carried on BattleInput so replays re-sim exactly; battle lab got a fleet-
+    plan dropdown per side + slewing toggle; bots pick flank/envelop with big
+    fleets and form a line when defending orbital works.
+
 Round 5 (same day): battle backdrops with the contested planet + galaxy-style pixel art; bombardment feels too strong (check guides, cap pop/building losses by fleet size); deterministic monster clears (12 frigates / 6 destroyers / 3 cruisers / 2 battleships / 1 titan = auto-win, bots plan with it); a visual tech tree on the research page; attackers/defenders choose the engagement planet so the right star base and batteries fight.
   ✅ ALL FIXED (ENGINE_VERSION 0.22.0):
   - Battles play over stippled pixel nebulae + 1px stars with the engaged

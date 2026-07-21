@@ -74,6 +74,11 @@ export interface GameSettings {
    * reconciled — possibly rewound — when CONTACT flashes. NPC battles
    * auto-resolve during the fast phase. */
   fastStart?: boolean;
+  /** SLEWING (0.23.0): in space battles ships may rotate their hull beyond
+   * the normal turn rate by spending movement points, bringing forward-arc
+   * guns onto off-axis targets (small hulls slew nearly freely, capitals pay
+   * dearly). Absent/false = classic turning. */
+  slewing?: boolean;
 }
 
 /** fast start: nobody may run more than this many turns past the slowest
@@ -183,6 +188,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   mirror: false,
   homeStart: 'good',
   fastStart: false,
+  slewing: false,
 };
 
 const TE = new TextEncoder();

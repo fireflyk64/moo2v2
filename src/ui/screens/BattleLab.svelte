@@ -130,6 +130,7 @@
   const fromGame = seeded !== null;
   let seed = $state(seeded?.seed ?? 'battle-lab-0001');
   let viewing = $state<ReplayEntry | null>(null);
+  let labSlewing = $state(false);
   let error = $state('');
   let editing = $state<{ side: 0 | 1; gi: number } | null>(null);
 
@@ -223,6 +224,8 @@
       ships: ships.sort((a, b) => a.shipId - b.shipId),
       ordersA: { ...snap[0].orders },
       ordersD: { ...snap[1].orders },
+      // sandbox slewing toggle: the sim honors it purely from the input
+      ...(labSlewing ? { slewing: true } : {}),
     };
     // master seeds must be 32 hex chars: encode the free-text seed as hex
     const padded = [...seed]
@@ -352,6 +355,9 @@
     {/if}
     <div class="runbar">
       <label>seed <input bind:value={seed} size="16" /></label>
+      <label title="game option preview: F-arc ships may spend movement to rotate their guns onto off-axis targets (big hulls pay more); 360-arc mounts never need it">
+        <input type="checkbox" data-testid="lab-slewing" bind:checked={labSlewing} /> slewing
+      </label>
       <button class="primary" data-testid="lab-run" onclick={run}>▶ Run battle</button>
       {#if error}<span class="error">{error}</span>{/if}
       <a href="#top" onclick={(e) => { e.preventDefault(); location.hash = ''; }}>← back</a>
@@ -394,6 +400,15 @@
               <option value="formation">formation</option>
               <option value="passthrough">passthrough (raid)</option>
               <option value="evade_retreat">evade & retreat</option>
+            </select>
+          </label>
+          <label title="fleet plan: line holds the heavies back as a wall; flank/pincer/envelop send the fast wing(s) wide LOGH-style">fleet plan
+            <select data-testid="lab-formation-{side}" bind:value={s.orders.formation}>
+              <option value={undefined}>massed (classic)</option>
+              <option value="line">line — heavies hold</option>
+              <option value="flank">flank — one wing wide</option>
+              <option value="pincer">pincer — both wings</option>
+              <option value="envelop">envelop — 3 groups</option>
             </select>
           </label>
           <label>targets

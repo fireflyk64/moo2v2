@@ -30,6 +30,16 @@ export const RETREAT_WARP_TICKS = 25;
 export type Stance = 'charge' | 'hold_range' | 'standoff' | 'evade_retreat' | 'formation' | 'passthrough';
 export type TargetPriority = 'nearest' | 'biggest' | 'smallest' | 'warships' | 'bases' | 'deadliest';
 
+/** Fleet formations (0.23.0): a per-side battle order that replaces the
+ * massed movement policy of 'charge'/'hold_range' ships with deterministic
+ * per-ship ROLES (see assignFormationRoles). evade_retreat, standoff,
+ * passthrough and the warp-dissipater pinning rules are untouched. */
+export type Formation = 'line' | 'flank' | 'pincer' | 'envelop';
+/** hold = advance to weapon range and stand (the battle line);
+ *  center = like hold at half speed (envelop's slow middle);
+ *  wingA/wingB = swing wide to the top/bottom waypoint, then turn in. */
+export type FormationRole = 'hold' | 'center' | 'wingA' | 'wingB';
+
 /** Weapon firing arcs (relative to the ship's heading):
  *  F = forward 180°, FX = extended 270°, R = rear 180°, 360 = all around. */
 export type WeaponArc = 'F' | 'FX' | 'R' | '360';
@@ -110,6 +120,17 @@ export interface BattleOrders {
    * bombardment picks its classic target — old logs and timeout defaults
    * reproduce today's outcomes byte-for-byte. */
   engagePlanetId?: number | null;
+  /** fleet FORMATION (0.23.0): line — the heaviest ~half walls up near its
+   * own edge while the light half skirmishes forward; flank — the fastest
+   * ~third swings wide around one (seeded) side; pincer — the fast wing
+   * splits to BOTH sides; envelop — two wide wings plus a slow center try to
+   * surround. ABSENT or null = classic single-mass behavior (old replays are
+   * byte-exact). */
+  formation?: Formation | null;
+  /** attacker only: the ground tactic the landing force uses when `invade`
+   * wins (groundTactics.ts ATTACK_TACTICS). Absent = standard assault. The
+   * space sim never reads it — it rides the orders to landInvasion. */
+  invadeTactic?: string;
 }
 
 export const DEFAULT_ORDERS: BattleOrders = {
@@ -176,6 +197,12 @@ export interface BattleInput {
   bystanders?: Array<{ shipId: number; side: 0 | 1; kind: string }>;
   ordersA: BattleOrders;
   ordersD: BattleOrders;
+  /** SLEWING game option (0.23.0): when true, a ship whose forward-arc guns
+   * do not bear on its target may rotate beyond its hull turn rate by
+   * SPENDING movement (see runBattle's slew block for the exact cost).
+   * Carried in the input so the replay viewer re-sims identically; ABSENT or
+   * false = exact legacy turning. */
+  slewing?: boolean;
 }
 
 export interface ShotEvent {
@@ -271,6 +298,12 @@ interface Sim {
   sysShield: boolean;
   /** consecutive ticks spent disengaging (evade_retreat warp-out countdown) */
   retreatTicks: number;
+  /** formation role (0.23.0); null = classic massed movement */
+  role: FormationRole | null;
+  /** wing ships: waypoint reached (or engaged early) — now turning in */
+  wingDone: boolean;
+  /** mounts any non-360° gun (slewing is pointless for all-turret ships) */
+  slews: boolean;
 }
 
 /** chance (%) that a structure hit knocks out a random ship system */
@@ -304,6 +337,55 @@ function bandOf(dist: number): 0 | 1 | 2 | 3 {
 const BAND_DMG = [100, 70, 40, 40];
 const BAND_HIT = [10, 0, -20, -20];
 
+// ---- formation geometry (0.23.0) ----
+/** wing waypoint: this far from the top/bottom field edge */
+export const WING_EDGE_Y = 48 * FP;
+/** wing waypoint X as % of field width, measured from the wing's own edge */
+export const WING_X_PCT = 62;
+/** line-holders advance only until their target is inside the medium band */
+export const HOLD_ENGAGE = 224 * FP;
+/** 'line' formation: the wall stands this far from the fleet's own edge */
+export const LINE_WALL_X = 168 * FP;
+
+/** Deterministic per-ship formation roles for one side. Bases and immobile
+ * ships never get a role; ships without a role keep their ordered stance's
+ * classic movement (the 'line' skirmishers deliberately stay role-less).
+ * Ordering is stable: hull weight (hullIdx) / speed with shipId tiebreaks.
+ * flankWing picks which side of the field a 'flank' wing swings around
+ * (seeded by the caller). */
+export function assignFormationRoles(
+  ships: Array<{ shipId: number; hullIdx: number; speed: number; isBase: boolean }>,
+  formation: Formation,
+  flankWing: 'wingA' | 'wingB',
+): Map<number, FormationRole> {
+  const roles = new Map<number, FormationRole>();
+  const mobile = ships.filter((s) => !s.isBase && s.speed > 0);
+  const n = mobile.length;
+  if (n === 0) return roles;
+  if (formation === 'line') {
+    // the heaviest ~half holds the wall; the light half skirmishes forward
+    const byWeight = [...mobile].sort((a, b) => b.hullIdx - a.hullIdx || a.shipId - b.shipId);
+    for (const s of byWeight.slice(0, Math.ceil(n / 2))) roles.set(s.shipId, 'hold');
+    return roles;
+  }
+  // fastest first; lighter hulls break speed ties (they make better flankers)
+  const bySpeed = [...mobile].sort((a, b) => b.speed - a.speed || a.hullIdx - b.hullIdx || a.shipId - b.shipId);
+  const wingCount = Math.floor(n / 3); // the fastest ~third per wing
+  if (formation === 'flank') {
+    bySpeed.slice(0, wingCount).forEach((s) => roles.set(s.shipId, flankWing));
+    for (const s of bySpeed.slice(wingCount)) roles.set(s.shipId, 'hold');
+  } else if (formation === 'pincer') {
+    bySpeed.slice(0, wingCount).forEach((s, i) => roles.set(s.shipId, i % 2 === 0 ? 'wingA' : 'wingB'));
+    for (const s of bySpeed.slice(wingCount)) roles.set(s.shipId, 'hold');
+  } else {
+    // envelop: two fast wings wide + everything else a slow center
+    for (const s of bySpeed.slice(0, wingCount)) roles.set(s.shipId, 'wingA');
+    for (const s of bySpeed.slice(wingCount, wingCount * 2)) roles.set(s.shipId, 'wingB');
+    for (const s of bySpeed.slice(wingCount * 2)) roles.set(s.shipId, 'center');
+  }
+  return roles;
+}
+
 export function runBattle(
   input: BattleInput,
   rng: Rng,
@@ -335,6 +417,9 @@ export function runBattle(
     sysComputer: false,
     sysShield: false,
     retreatTicks: 0,
+    role: null,
+    wingDone: false,
+    slews: init.weapons.some((w) => w.classId !== 3 && !w.mods.includes('pd') && (w.arc ?? 'F') !== '360'),
   }));
   // ECM: personal jammers, plus fleet-wide wide-area jammers
   const fleetJam = [false, false];
@@ -369,6 +454,28 @@ export function runBattle(
     }
     s.homeY = s.y;
   }
+
+  // --- formations (0.23.0): assign per-ship roles; one seeded coin decides
+  // which side of the field a 'flank' wing swings around. Sides draw in fixed
+  // order (attacker first) so replays reproduce; an absent/null formation
+  // draws NOTHING from the rng — legacy inputs replay byte-exact. ---
+  const formations: ReadonlyArray<Formation | null> = [input.ordersA.formation ?? null, input.ordersD.formation ?? null];
+  for (const side of [0, 1] as const) {
+    const f = formations[side];
+    if (!f) continue;
+    const flankWing = f === 'flank' ? (rng.int(2) === 0 ? 'wingA' : 'wingB') : 'wingA';
+    const roles = assignFormationRoles(
+      sims
+        .filter((s) => s.init.side === side)
+        .map((s) => ({ shipId: s.init.shipId, hullIdx: s.init.hullIdx, speed: s.init.speed, isBase: s.init.isBase })),
+      f,
+      flankWing,
+    );
+    for (const s of sims) {
+      if (s.init.side === side) s.role = roles.get(s.init.shipId) ?? null;
+    }
+  }
+  const slewing = input.slewing === true;
 
   const projectiles: Projectile[] = [];
   const initialHp = [0, 0];
@@ -478,7 +585,45 @@ export function runBattle(
           steer(tx, ty, -1);
         }
       };
-      switch (s.stance) {
+      // FORMATION role movement (0.23.0): replaces the massed movement of
+      // charge/hold_range ships only. Any other stance — evade_retreat after
+      // the threshold flip, standoff, passthrough, the classic 'formation'
+      // line — keeps its exact legacy behavior; retreat and warp-dissipater
+      // pinning rules are untouched.
+      const role = formations[s.init.side] !== null && (s.stance === 'charge' || s.stance === 'hold_range') ? s.role : null;
+      if (role === 'hold' || role === 'center') {
+        // battle line: advance in lane only to weapon range, then stand fast
+        // and swing the bow on target. 'line' walls up near its own edge and
+        // never advances past the wall; envelop's center advances at half
+        // speed so the wings have time to get around.
+        const wallStop =
+          formations[s.init.side] === 'line' &&
+          (s.init.side === 0 ? s.x >= LINE_WALL_X : s.x <= FIELD_W - LINE_WALL_X);
+        const nearest = target && active(target) ? idist(Math.abs(target.x - s.x), Math.abs(target.y - s.y)) : Infinity;
+        if (nearest > HOLD_ENGAGE && !wallStop) {
+          steer(s.x + dir * FIELD_W, s.homeY, 1); // advance in lane
+          if (role === 'center') travel = Math.floor(travel / 2);
+        } else if (target && active(target)) {
+          desiredX = target.x - s.x; // hold the line, bow on target
+          desiredY = target.y - s.y;
+          travel = 0;
+        } else travel = 0;
+      } else if (role === 'wingA' || role === 'wingB') {
+        // wing: run wide to the side waypoint first, then turn in and attack
+        // from the flank (charge movement once committed)
+        if (!s.wingDone) {
+          const wx = s.init.side === 0 ? roundDiv(FIELD_W * WING_X_PCT, 100) : FIELD_W - roundDiv(FIELD_W * WING_X_PCT, 100);
+          const wy = role === 'wingA' ? WING_EDGE_Y : FIELD_H - WING_EDGE_Y;
+          const dWp = idist(Math.abs(wx - s.x), Math.abs(wy - s.y));
+          const bounced = target && active(target) && idist(Math.abs(target.x - s.x), Math.abs(target.y - s.y)) <= 150 * FP;
+          if (dWp <= 32 * FP || bounced) s.wingDone = true; // arrived (or intercepted en route)
+          else steer(wx, wy, 1);
+        }
+        if (s.wingDone) {
+          if (target && active(target)) steer(target.x, target.y, 1, BRAWL);
+          else steer(s.x + dir * FIELD_W, s.y, 1);
+        }
+      } else switch (s.stance) {
         case 'charge':
           if (target && active(target)) steer(target.x, target.y, 1, BRAWL);
           else steer(s.x + dir * FIELD_W, s.y, 1);
@@ -562,6 +707,27 @@ export function runBattle(
         const rate = turnRateOf(s.init.hullIdx, s.init.isBase);
         if (delta !== 0) {
           s.heading = (s.heading + clamp(delta, -rate, rate) + DIRS) % DIRS;
+        }
+        // SLEWING (0.23.0 game option): when the free turn still leaves the
+        // target outside the forward arc, keep rotating by SPENDING movement.
+        // Cost per extra 11.25° step = speed/(2*turnRate) MP — i.e. half a
+        // tick's travel buys turnRate extra steps, so a frigate (rate 4)
+        // whips its nose around nearly free while a titan (rate 1) trades
+        // half its move per step. Fires only when the stance is already
+        // trying to face the target (want === bearing): waypoint runs and
+        // withdrawals never spin. All-360°-armed ships skip it entirely.
+        if (slewing && s.slews && !s.init.isBase && target && active(target)) {
+          const bearing = headingToward(target.x - s.x, target.y - s.y);
+          if (bearing === want) {
+            const stepCost = Math.max(1, ceilDiv(speed, 2 * rate));
+            let spent = 0;
+            // rotate until the target sits inside the F arc (±90°)
+            while (Math.abs(headingDelta(s.heading, want)) > 8 && spent + stepCost <= speed) {
+              s.heading = (s.heading + (headingDelta(s.heading, want) > 0 ? 1 : -1) + DIRS) % DIRS;
+              spent += stepCost;
+            }
+            if (spent > 0) travel = Math.max(0, Math.min(travel, speed - spent));
+          }
         }
         // hard turns bleed speed; near-aligned courses run at full burn
         const off = Math.abs(headingDelta(s.heading, want));

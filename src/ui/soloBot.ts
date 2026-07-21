@@ -20,7 +20,7 @@ import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import type { Empire, GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 import { botRaceById, botRacePicks } from './botRaces';
-import { freshOnionMemory, onionBattleOrders, onionTurn, pickAssaultPlanet, planetScore, type OnionMemory } from './onionBot';
+import { freshOnionMemory, onionBattleOrders, onionTurn, pickAssaultPlanet, pickFormation, planetScore, type OnionMemory } from './onionBot';
 
 export type BotMode = 'parity' | 'fair';
 /** fair-bot strategy generation: v1 = the original random-build brain (kept
@@ -1191,6 +1191,12 @@ export class SoloBot {
       // weakest-defended colony; a doomed (fleeing) attacker keeps to deep
       // space; a defender always meets the fleet
       const conquest = !doomed && b.attacker === me;
+      // formations (0.23.0): warlike attackers with big fleets flank/envelop;
+      // defenders holding a base form a line; small fleets stay massed
+      const formation =
+        doomed || (b.attacker === me && !(this.aggressive || this.profile.warlike))
+          ? undefined
+          : pickFormation(state, me, b, hullsAt(me));
       this.submit('battle_orders', {
         battleId: b.id,
         orders: {
@@ -1201,6 +1207,7 @@ export class SoloBot {
           // marines in orbit always land on a win — the lift was sent to invade
           invade: !doomed && b.attacker === me,
           engagePlanetId: conquest ? pickAssaultPlanet(state, b.defender, b.starId) : null,
+          ...(formation ? { formation } : {}),
         },
       });
     }

@@ -1221,6 +1221,31 @@ export function pickAssaultPlanet(state: GameState, defenderId: number, starId: 
   )[0]!.planetId;
 }
 
+/** Formation pick (0.23.0): attackers with big fleets (>= 8 hulls) flank or
+ * envelop (seeded by battle id — no rng handle here), defenders with orbital
+ * defenses form a line; everyone else stays massed (absent field = classic). */
+export function pickFormation(
+  state: GameState,
+  me: number,
+  battle: { id: string; starId: number; attacker: number; defender: number },
+  myHulls: number,
+): 'line' | 'flank' | 'envelop' | undefined {
+  if (battle.attacker === me) {
+    if (myHulls < 8) return undefined;
+    let h = 0;
+    for (let i = 0; i < battle.id.length; i++) h = (h * 31 + battle.id.charCodeAt(i)) >>> 0;
+    return h % 2 === 0 ? 'flank' : 'envelop';
+  }
+  const DEFENSES = ['star_base', 'battle_station', 'star_fortress', 'missile_base', 'ground_batteries'];
+  const hasBase = state.colonies.some(
+    (c) =>
+      c.owner === me &&
+      state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId) &&
+      c.buildings.some((b) => DEFENSES.includes(b)),
+  );
+  return hasBase ? 'line' : undefined;
+}
+
 export function onionBattleOrders(
   state: GameState,
   me: number,
@@ -1233,6 +1258,7 @@ export function onionBattleOrders(
   bombard: boolean;
   invade: boolean;
   engagePlanetId: number | null;
+  formation?: string;
 } {
   const foe = battle.attacker === me ? battle.defender : battle.attacker;
   const hullsAt = (owner: number) =>
@@ -1244,6 +1270,7 @@ export function onionBattleOrders(
   // a hopeless defense warps out and lives to mass with the rally
   const doomed = foe >= 0 && theirs > mine * 2 + 1;
   const advantage = mine / Math.max(1, theirs);
+  const formation = doomed ? undefined : pickFormation(state, me, battle, mine);
   return {
     stance: doomed ? 'evade_retreat' : battle.attacker === me || advantage >= 1.2 ? 'charge' : 'hold_range',
     priority: advantage >= 1.5 ? 'deadliest' : 'nearest',
@@ -1256,5 +1283,7 @@ export function onionBattleOrders(
     // a defender always meets the fleet
     engagePlanetId:
       battle.attacker === me && !doomed ? pickAssaultPlanet(state, battle.defender, battle.starId) : null,
+    // big attacking fleets flank/envelop; defenders with a base form a line
+    ...(formation ? { formation } : {}),
   };
 }

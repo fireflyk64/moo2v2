@@ -3,6 +3,7 @@
   // automatic cinematic once both sides have ordered (or the timeout fires).
   import type { PendingBattle } from '@engine/types';
   import { fleetBombardDamage, planetShieldBlock } from '@engine/battles';
+  import { ATTACK_TACTICS } from '@engine/groundTactics';
   import { colonyPopUnits, marinesOf, shipMarines } from '@engine/economy';
   import { ownerName } from '../colors';
   import { app, getActive } from '../state.svelte';
@@ -23,6 +24,11 @@
   let bombard = $state(false);
   let invade = $state(false);
   let spareNoncombatants = $state(false);
+  // formation (0.23.0): '' = massed (classic) — submitted as an ABSENT field
+  // so timeout defaults and old engines see byte-exact legacy orders
+  let formation = $state('');
+  // ground tactic for the landing force ('' = standard assault, absent field)
+  let invadeTactic = $state('');
   // engagement (0.22.0): the defender's colonies at the battle star — the
   // attacker picks which to assault (or deep space); the defender picks
   // meet-the-fleet vs hold-at-colony for the case the attacker stays out
@@ -221,6 +227,7 @@
   });
 
   function submit() {
+    const invading = isAttacker && engagePlanetId !== null && invadePreview !== null && invade;
     session().submit('battle_orders', {
       battleId: battle.id,
       orders: {
@@ -229,9 +236,13 @@
         retreatThresholdPct,
         // deep space = the fleet never closes with the planet: no barrage, no landing
         bombard: isAttacker && engagePlanetId !== null ? bombard : false,
-        invade: isAttacker && engagePlanetId !== null && invadePreview !== null ? invade : false,
+        invade: invading,
         spareNoncombatants,
         engagePlanetId,
+        // massed (classic) is submitted as an ABSENT field, never null
+        ...(formation ? { formation } : {}),
+        // ground tactic rides attacker orders only, and only with a landing
+        ...(invading && invadeTactic ? { invadeTactic } : {}),
       },
     });
   }
@@ -315,6 +326,16 @@
             </fieldset>
           {/if}
         {/if}
+        <label title="How your charging/holding ships maneuver as a fleet — evade & retreat is never overridden">
+          Formation
+          <select data-testid="battle-formation" bind:value={formation}>
+            <option value="" title="the whole fleet moves as one body — classic behavior">Massed (classic)</option>
+            <option value="line" title="the heaviest half walls up near your edge; light ships skirmish forward">Line — heavies wall up, light ships skirmish</option>
+            <option value="flank" title="the fastest third swings wide around one side and attacks from the flank">Flank — fast wing swings around one side</option>
+            <option value="pincer" title="the fastest third splits to BOTH sides of the field">Pincer — fast wing splits to both sides</option>
+            <option value="envelop" title="two wings run wide while a slow center advances — surround them">Envelop — two wings + slow center, surround</option>
+          </select>
+        </label>
         {#if isAttacker && engagePlanetId === null && holdings.length > 0}
           <p class="hint" data-testid="battle-deepspace-note">Deep-space engagement: no colony defenses will fire — and no bombardment or landings this pass.</p>
         {:else if isAttacker}
@@ -337,6 +358,17 @@
             <input type="checkbox" data-testid="battle-invade" bind:checked={invade} />
             🪖 Invade the colony if the pass is won ({invadePreview.marines} marine{invadePreview.marines === 1 ? '' : 's'} vs ~{invadePreview.defenders} defender{invadePreview.defenders === 1 ? '' : 's'})
           </label>
+          {#if invade}
+            <label class="row tactic" title="ground tactic for the landing force — tactic vs terrain/doctrine matchups decide the landing odds">
+              ↳ Ground tactic
+              <select data-testid="battle-invade-tactic" bind:value={invadeTactic}>
+                <option value="">— none (standard assault)</option>
+                {#each ATTACK_TACTICS as t (t)}
+                  <option value={t}>{t.replaceAll('_', ' ')}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
         {/if}
         <label class="row" title="if you win the field, the enemy's unarmed ships (colony/outpost ships, transports) are normally captured and destroyed — check to let them go">
           <input type="checkbox" data-testid="battle-spare" bind:checked={spareNoncombatants} />
@@ -381,6 +413,10 @@
     flex-direction: row;
     align-items: center;
     gap: 0.5rem;
+  }
+  label.row.tactic {
+    margin-left: 1.4rem;
+    font-size: 0.85rem;
   }
   .countdown {
     font-size: 0.85rem;
