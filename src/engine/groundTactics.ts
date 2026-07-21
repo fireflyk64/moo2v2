@@ -125,18 +125,21 @@ export function terrainFractions(rows: string[]): Record<string, number> {
 }
 
 /** RPS matchup: attacker strength multiplier per (attack, defense) pair.
- * <1 favors the defender. Wide lines repel wings; fortresses crush charges
- * but leak to infiltration; a defensive counter-charge punishes light
- * infantry but feeds envelopments. */
+ * <1 favors the defender. Retuned in round 8 so every row averages ~1.0
+ * (no dominant attack) and every doctrine has real counters: charges break
+ * thin lines but die on fortresses; infiltrators unpick fortresses but get
+ * caught in the open by a counter-charge; overwatch fire shreds that same
+ * counter-charge; the methodical tactics (anvil/pinning/overwatch) grind
+ * down elastic defenses that want to trade ground. */
 const MATCHUP: Record<AttackTactic, Record<DefenseTactic, number>> = {
-  charge: { defense_in_depth: 0.85, fortress: 0.8, long_line: 1.2, charge: 1.05 },
-  flank: { defense_in_depth: 0.95, fortress: 1.15, long_line: 0.85, charge: 1.1 },
-  surround: { defense_in_depth: 0.9, fortress: 1.1, long_line: 0.8, charge: 1.15 },
-  pincer: { defense_in_depth: 0.95, fortress: 1.05, long_line: 0.9, charge: 1.15 },
-  infiltrate: { defense_in_depth: 1.1, fortress: 1.2, long_line: 0.95, charge: 0.8 },
-  hammer_and_anvil: { defense_in_depth: 1.1, fortress: 0.9, long_line: 1.05, charge: 1.0 },
-  pinning: { defense_in_depth: 1.05, fortress: 0.95, long_line: 1.1, charge: 0.85 },
-  bounding_overwatch: { defense_in_depth: 1.1, fortress: 1.0, long_line: 0.9, charge: 1.15 },
+  charge: { defense_in_depth: 0.85, fortress: 0.75, long_line: 1.25, charge: 1.1 },
+  flank: { defense_in_depth: 0.95, fortress: 1.1, long_line: 0.85, charge: 1.1 },
+  surround: { defense_in_depth: 0.9, fortress: 1.15, long_line: 0.8, charge: 1.15 },
+  pincer: { defense_in_depth: 0.95, fortress: 1.05, long_line: 0.9, charge: 1.1 },
+  infiltrate: { defense_in_depth: 1.1, fortress: 1.25, long_line: 0.95, charge: 0.75 },
+  hammer_and_anvil: { defense_in_depth: 1.1, fortress: 0.9, long_line: 1.1, charge: 0.9 },
+  pinning: { defense_in_depth: 1.1, fortress: 0.9, long_line: 1.05, charge: 0.85 },
+  bounding_overwatch: { defense_in_depth: 1.1, fortress: 0.95, long_line: 0.85, charge: 1.2 },
 };
 
 /** Strength multipliers for one ground battle. Both tactics absent = exact
@@ -151,16 +154,22 @@ export function groundModifiers(
   const frac = terrain ? terrainFractions(terrain) : {};
   const f = (chars: string) => chars.split('').reduce((s, ch) => s + (frac[ch] ?? 0), 0);
   const open = f('pdi');
-  const rough = f('rch');
+  const rough = f('rchl'); // lava flats are broken ground too
   const cover = f('fmu');
 
+  // terrain fit (round 8: coefficients doubled so the SURFACE flips the best
+  // pick): shock and wings want open ground, methodical fire-and-move wants
+  // broken rock, infiltrators want foliage/streets — and marsh eats wings
   let atkMult = atk && def ? MATCHUP[atk][def] : 1;
   if (atk) {
-    if (atk === 'charge') atkMult += 0.15 * open - 0.25 * rough;
-    if (atk === 'flank' || atk === 'pincer' || atk === 'surround') atkMult += 0.1 * open - 0.2 * f('m') - 0.1 * f('rc');
-    if (atk === 'infiltrate') atkMult += 0.25 * cover - 0.2 * open;
-    if (atk === 'bounding_overwatch') atkMult += 0.15 * rough;
-    if (atk === 'hammer_and_anvil') atkMult += 0.1 * open;
+    if (atk === 'charge') atkMult += 0.35 * open - 0.4 * rough;
+    if (atk === 'flank') atkMult += 0.25 * open - 0.15 * rough - 0.3 * f('m');
+    if (atk === 'pincer') atkMult += 0.1 * open - 0.1 * cover;
+    if (atk === 'surround') atkMult += 0.15 * open - 0.25 * cover;
+    if (atk === 'infiltrate') atkMult += 0.35 * cover - 0.25 * open;
+    if (atk === 'hammer_and_anvil') atkMult += 0.15 * open - 0.1 * rough;
+    if (atk === 'pinning') atkMult += 0.2 * rough - 0.1 * cover;
+    if (atk === 'bounding_overwatch') atkMult += 0.3 * rough - 0.2 * open;
   }
 
   // defender terrain bonus: coverage-weighted, doctrine-emphasized
@@ -172,12 +181,32 @@ export function groundModifiers(
     terrBonus += b;
   }
   let defMult = 1 + terrBonus;
-  if (def === 'fortress') defMult *= 1.1;
+  if (def === 'fortress') defMult *= 1.08;
   if (def === 'defense_in_depth') defMult *= 1.05;
-  if (def === 'long_line') defMult *= open >= 0.4 ? 1.1 : 0.95;
-  if (def === 'charge') defMult *= 0.95; // out from behind the works
+  if (def === 'long_line') defMult *= 0.9 + 0.45 * open; // a line needs fields of fire
+  if (def === 'charge') defMult *= 0.9 + 0.35 * open; // a counter-attack needs room to run
 
   return { atkMult: Math.max(0.4, atkMult), defMult: Math.max(0.4, defMult) };
+}
+
+/** Per-doctrine effectiveness of the two defender classes (round 8):
+ * "civilians man walls; soldiers maneuver." Behind fortress works militia
+ * fight like soldiers; a counter-charge is a trained-troop move that
+ * militia rout out of. No doctrine set = exact legacy 1/1. Marines die
+ * first, so a maneuver doctrine collapses as its trained core is spent. */
+export function groundCompFactors(def: DefenseTactic | undefined): { marine: number; militia: number } {
+  switch (def) {
+    case 'fortress':
+      return { marine: 1, militia: 1 };
+    case 'long_line':
+      return { marine: 1, militia: 0.95 };
+    case 'defense_in_depth':
+      return { marine: 1.3, militia: 0.7 };
+    case 'charge':
+      return { marine: 1.6, militia: 0.5 };
+    default:
+      return { marine: 1, militia: 1 };
+  }
 }
 
 export const isAttackTactic = (x: unknown): x is AttackTactic =>
@@ -197,7 +226,8 @@ export interface GroundResolution {
 /** The one true ground-battle loop, shared by landInvasion and the battle
  * lab. P(attacker kills) = atkPower/(atkPower+defPower) each round; marines
  * die before militia; militia losses cost civilians 1:1 down to a floor of
- * one pop unit. Consumes the rng exactly as the pre-0.24 inline loop did. */
+ * one pop unit. `comp` (round 8) weights the two defender classes per the
+ * doctrine (groundCompFactors); absent or 1/1 = byte-exact legacy rounds. */
 export function fightGroundRounds(
   troops0: number,
   defMarines0: number,
@@ -206,15 +236,18 @@ export function fightGroundRounds(
   defStr: number,
   pop: number,
   rng: { int(maxExclusive: number): number },
+  comp?: { marine: number; militia: number },
 ): GroundResolution {
   let troops = troops0;
   let defMarines = defMarines0;
   let militia = militia0;
   let civilianLosses = 0;
+  const marineF = comp?.marine ?? 1;
+  const militiaF = comp?.militia ?? 1;
   const roundsLog: Array<{ t: number; m: number }> = [{ t: troops, m: defMarines + militia }];
   while (troops > 0 && defMarines + militia > 0) {
     const atkPower = troops * atkStr;
-    const defPower = (defMarines + militia) * defStr;
+    const defPower = Math.max(1, Math.round((defMarines * marineF + militia * militiaF) * defStr));
     if (rng.int(atkPower + defPower) < atkPower) {
       if (defMarines > 0) {
         defMarines--;

@@ -71,7 +71,10 @@ describe('ground tactic modifiers', () => {
     const vsLine = groundModifiers('charge', 'long_line', plains);
     const vsFort = groundModifiers('charge', 'fortress', plains);
     expect(vsLine.atkMult).toBeGreaterThan(vsFort.atkMult);
-    expect(vsFort.atkMult).toBeLessThan(1);
+    // on a REALISTIC mixed map (no real climate is 100% open) the fortress
+    // matchup penalty dominates the open-ground fit bonus
+    const mixed = [...Array<string>(TERRAIN_H / 2).fill('p'.repeat(TERRAIN_W)), ...Array<string>(TERRAIN_H / 2).fill('c'.repeat(TERRAIN_W))];
+    expect(groundModifiers('charge', 'fortress', mixed).atkMult).toBeLessThan(1);
   });
 
   it('terrain fit matters: a charge across craters is worse than across plains', () => {

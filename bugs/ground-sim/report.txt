@@ -1,0 +1,164 @@
+
+=== terran · militia-heavy (2g+10m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     41       13       57       87    50
+flank                      58       42       30       90    55
+surround                   52       45       25       92    53
+pincer                     59       39       36       89    56
+infiltrate                 69       53       38       67    57
+hammer_and_anvil           70       27       52       82    58
+pinning                    74       34       53       82    60
+bounding_overwatch         73       37       34       93    59
+(def avg — lower=better)       62       36       41       85
+
+=== terran · garrison-heavy (9g+3m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     18       14       56       37    31
+flank                      27       42       27       40    34
+surround                   24       44       23       43    33
+pincer                     30       38       32       39    35
+infiltrate                 40       53       37       16    36
+hammer_and_anvil           37       28       51       27    36
+pinning                    44       31       50       27    38
+bounding_overwatch         44       36       33       49    40
+(def avg — lower=better)       33       36       39       35
+
+=== ocean · militia-heavy (2g+10m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     46       15       61       88    53
+flank                      50       37       24       87    50
+surround                   49       40       21       91    50
+pincer                     59       38       37       91    56
+infiltrate                 75       62       50       74    65
+hammer_and_anvil           71       28       53       81    58
+pinning                    70       28       50       78    56
+bounding_overwatch         72       32       35       93    58
+(def avg — lower=better)       61       35       41       86
+
+=== ocean · garrison-heavy (9g+3m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     23       14       61       40    35
+flank                      23       36       22       34    29
+surround                   22       41       20       42    31
+pincer                     28       37       33       40    34
+infiltrate                 47       58       46       24    44
+hammer_and_anvil           41       28       52       27    37
+pinning                    40       29       49       25    36
+bounding_overwatch         43       34       34       51    41
+(def avg — lower=better)       33       35       40       35
+
+=== swamp · militia-heavy (2g+10m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     63       25       71       94    63
+flank                      61       43       32       91    57
+surround                   46       38       18       88    47
+pincer                     60       36       33       89    55
+infiltrate                 80       65       54       79    70
+hammer_and_anvil           78       32       58       85    63
+pinning                    70       21       45       74    52
+bounding_overwatch         73       29       27       92    55
+(def avg — lower=better)       66       36       42       87
+
+=== swamp · garrison-heavy (9g+3m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     34       27       67       50    44
+flank                      32       42       28       38    35
+surround                   21       39       17       37    28
+pincer                     29       36       31       39    34
+infiltrate                 53       63       48       28    48
+hammer_and_anvil           48       34       54       29    41
+pinning                    36       23       42       18    30
+bounding_overwatch         38       28       25       44    34
+(def avg — lower=better)       36       37       39       35
+
+=== desert · militia-heavy (2g+10m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     47       19       55       83    51
+flank                      62       41       28       89    55
+surround                   62       46       23       91    56
+pincer                     63       38       31       90    55
+infiltrate                 61       39       25       46    42
+hammer_and_anvil           72       25       45       78    55
+pinning                    77       30       47       77    58
+bounding_overwatch         72       27       29       90    55
+(def avg — lower=better)       65       33       35       80
+
+=== desert · garrison-heavy (9g+3m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     23       20       50       30    31
+flank                      37       41       26       39    36
+surround                   31       46       23       42    36
+pincer                     34       38       29       37    35
+infiltrate                 32       39       23        8    25
+hammer_and_anvil           45       28       43       23    35
+pinning                    50       32       45       23    37
+bounding_overwatch         42       30       28       43    36
+(def avg — lower=better)       37       34       33       31
+
+=== barren · militia-heavy (2g+10m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     49       15       51       85    50
+flank                      63       40       27       87    54
+surround                   63       48       27       92    58
+pincer                     62       37       28       87    54
+infiltrate                 62       36       23       46    42
+hammer_and_anvil           73       26       44       77    55
+pinning                    75       30       46       77    57
+bounding_overwatch         71       28       24       89    53
+(def avg — lower=better)       65       33       34       80
+
+=== barren · garrison-heavy (9g+3m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     22       17       49       34    30
+flank                      34       44       25       36    35
+surround                   33       47       24       43    37
+pincer                     33       36       29       36    33
+infiltrate                 29       35       18        7    22
+hammer_and_anvil           44       28       42       22    34
+pinning                    48       27       43       24    36
+bounding_overwatch         44       25       22       42    33
+(def avg — lower=better)       36       32       31       30
+
+=== hostile · militia-heavy (2g+10m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                     24        6       42       74    36
+flank                      49       28       23       87    47
+surround                   51       36       24       90    51
+pincer                     54       29       34       88    51
+infiltrate                 64       37       33       60    49
+hammer_and_anvil           63       17       45       75    50
+pinning                    76       27       55       85    61
+bounding_overwatch         78       33       44       96    63
+(def avg — lower=better)       57       27       37       82
+
+=== hostile · garrison-heavy (9g+3m vs 12 marines) — capture % ===
+atk \ def            defense_ fortress long_lin   charge   avg
+charge                      9        4       35       21    17
+flank                      24       29       19       33    26
+surround                   23       36       24       41    31
+pincer                     29       30       33       38    32
+infiltrate                 32       36       32       11    28
+hammer_and_anvil           35       15       45       20    29
+pinning                    47       28       54       30    40
+bounding_overwatch         48       34       39       54    44
+(def avg — lower=better)       31       27       35       31
+
+=== summary: swing at close odds (best-worst per axis) ===
+terran   militia-heavy   atk: pinning(  60) > charge(  50) swing   11pp | def: fortress(  36) > charge(  85) swing   49pp
+terran   garrison-heavy  atk: bounding_overwatch(  40) > charge(  31) swing    9pp | def: defense_in_depth(  33) > long_line(  39) swing    6pp
+ocean    militia-heavy   atk: infiltrate(  65) > flank(  50) swing   16pp | def: fortress(  35) > charge(  86) swing   50pp
+ocean    garrison-heavy  atk: infiltrate(  44) > flank(  29) swing   15pp | def: defense_in_depth(  33) > long_line(  40) swing    6pp
+swamp    militia-heavy   atk: infiltrate(  70) > surround(  47) swing   22pp | def: fortress(  36) > charge(  87) swing   50pp
+swamp    garrison-heavy  atk: infiltrate(  48) > surround(  28) swing   20pp | def: charge(  35) > long_line(  39) swing    4pp
+desert   militia-heavy   atk: pinning(  58) > infiltrate(  42) swing   15pp | def: fortress(  33) > charge(  80) swing   47pp
+desert   garrison-heavy  atk: pinning(  37) > infiltrate(  25) swing   12pp | def: charge(  31) > defense_in_depth(  37) swing    6pp
+barren   militia-heavy   atk: surround(  58) > infiltrate(  42) swing   16pp | def: fortress(  33) > charge(  80) swing   47pp
+barren   garrison-heavy  atk: surround(  37) > infiltrate(  22) swing   14pp | def: charge(  30) > defense_in_depth(  36) swing    5pp
+hostile  militia-heavy   atk: bounding_overwatch(  63) > charge(  36) swing   26pp | def: fortress(  27) > charge(  82) swing   55pp
+hostile  garrison-heavy  atk: bounding_overwatch(  44) > charge(  17) swing   26pp | def: fortress(  27) > long_line(  35) swing    8pp
+
+=== expected civilian cost of hosting an invasion, by doctrine (militia-heavy) ===
+defense_in_depth     7.6 pop per invasion
+fortress             5.2 pop per invasion
+long_line            5.7 pop per invasion
+charge               9.0 pop per invasion

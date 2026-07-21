@@ -19,7 +19,7 @@
 //   (N: dictatorship/feudal 8, democracy 4, unification 20)
 
 import { rngFor } from './rng';
-import { fightGroundRounds, generateTerrain, groundModifiers, isAttackTactic, isDefenseTactic } from './groundTactics';
+import { fightGroundRounds, generateTerrain, groundCompFactors, groundModifiers, isAttackTactic, isDefenseTactic } from './groundTactics';
 import { ceilDiv } from './imath';
 import { barracksCount, colonyPopUnits, farmingViable, marineCap, MARINE_TRAIN_TURNS, marinesOf, shipMarines, traitsOf } from './economy';
 import { leaderEmpireBonuses } from './leaders';
@@ -124,8 +124,9 @@ export function landInvasion(
   const startGarrison = defMarines;
   // scenery facts for the invasion playback (judged before any losses)
   const farming = farmingViable(state, colony);
-  // the shared round loop (also drives the battle lab's ground sandbox)
-  const fought = fightGroundRounds(troops, defMarines, militia, atkStr, defStr, pop, rng);
+  // the shared round loop (also drives the battle lab's ground sandbox);
+  // the doctrine weights trained garrison vs civilian militia (round 8)
+  const fought = fightGroundRounds(troops, defMarines, militia, atkStr, defStr, pop, rng, groundCompFactors(def));
   troops = fought.troops;
   defMarines = fought.defMarines;
   militia = fought.militia;

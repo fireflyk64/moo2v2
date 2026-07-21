@@ -1,5 +1,45 @@
 # Status 2026-07-21: all items below are FIXED — notes inline under each.
 
+Round 8 (same day): ground battle scenery is blase and the units are too big — make it look like fancy paper map battles with canyons or rivers running through for ocean worlds etc; then verify tactics change outcomes for either side in CLOSE fights with a simple ground-combat simulator — certain tactics should do better for civilian garrisons vs military, defender vs offense, depending on terrain type, so players get a feel for the tactics and discover them on surfaces.
+  ✅ ALL FIXED (ENGINE_VERSION 0.25.0):
+  - Paper war-table map (GroundBattleDialog): the theater is now a parchment
+    campaign map on planked wood — watercolor terrain washes warped under a
+    ruled survey grid (turbulence displacement), grain/stains/fold creases/
+    deckled edges, neatline + A-L/1-8 grid letters, compass rose, scale bar,
+    "SURVEY OF ... THEATRE" caption, star-fort citadel + city label. Linear
+    set-pieces per climate, seeded per colony and PURELY VISUAL: ocean gets a
+    coastal sea (amphibious landing) + wide river with tributary, gaia/terran/
+    swamp rivers, desert/arid/barren hachured canyons, energized a glowing
+    fissure, hostile a lava river, tundra a frozen crack-hatched river.
+    NATO counters shrunk 42x26 -> 28x17 with echelon pips and card shadows;
+    dashed grease-pencil plan arrows with real arrowheads.
+  - Ground-tactics simulator (proof harness):
+    MOO2_GROUND=1 npx vitest run tests/balance/ground-tactics-sim.test.ts
+    sweeps climates x maps x all 32 tactic pairs x defender compositions at
+    equal counts (close fights), writes bugs/ground-sim/report.txt, and
+    score-gates the design goals (loose aggregate margins).
+  - What it found, then fixed (groundTactics.ts retune): bounding_overwatch
+    was the best attack on 5/6 climates, fortress the best defense nearly
+    everywhere, charge strictly worst on BOTH sides, and composition did
+    NOTHING (militia == marines per-unit). Retuned MATCHUP so every attack
+    row averages ~1.0; terrain-fit coefficients ~doubled and now cover all 8
+    attacks (lava finally counts as rough); defense doctrines are terrain-
+    continuous (long_line 0.9+0.45*open, counter-charge 0.9+0.35*open).
+  - NEW composition axis (groundCompFactors): "civilians man walls; soldiers
+    maneuver" — fortress 1/1, long_line 1/0.95, depth 1.3 marine / 0.7
+    militia, counter-charge 1.6/0.5, fed into fightGroundRounds' per-round
+    defender power (marines still die first, so maneuver doctrines collapse
+    as the trained core is spent). Post-tune sim: pair swings 25-80pp in
+    close fights; infiltrate rules swamp (+27pp vs barren), overwatch rules
+    rock, charge rules the open; militia-heavy colonies want fortress (6/6
+    climates, and it costs the fewest civilians: 5.2 vs 9.0 pop/invasion for
+    counter-charge), garrison-heavy colonies want maneuver doctrines on 5/6
+    (emergent gem: swamp garrisons counter-charge BECAUSE infiltrate is the
+    swamp meta and counter-charge counters it). The Battle Lab shows the
+    garrison/militia weights next to the tactic multipliers for discovery.
+  - Legacy safety: both-tactics-absent invasions (all bots today) resolve
+    BYTE-EXACT as 0.24 — selfplay/determinism baselines untouched.
+
 Round 7 (same day): ground battle looks unimpressive — terrain needs textures that escape their squares (mountains ^^, craters o, dunes ~~~, urban skyscrapers, domed on barren); blaster fire between units vanished; attackers slide behind the defenders and idle while being pummeled — defenders should hold the line and fall back only under pressure; the battle lab should let us pick ground tactics and compare outcomes. Space: formations look beautiful but formed ships turn around mid-field and get shot in the back — replace the free sim with an RPS of formations where each pairing plays a beautiful set pattern (charge×charge = close-range circling, charge×formed = split into 2 circles, line×line = pummel from distance) that determines the fraction of long/medium/short-range shots and 360-vs-forward arcs; starbases/planets/lumbering ships creep and shoot from wherever while attackers stay out of their front arc; engine power buys forward hits without changing the shape.
   ✅ ALL FIXED (ENGINE_VERSION 0.24.0):
   - Ground visuals (GroundBattleDialog): hand-drawn terrain glyphs jittered

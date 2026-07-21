@@ -25,6 +25,7 @@
     DEFENSE_TACTICS,
     fightGroundRounds,
     generateTerrain,
+    groundCompFactors,
     groundModifiers,
     type AttackTactic,
     type DefenseTactic,
@@ -318,6 +319,7 @@
   let gGarrison = $state(6);
   let gMilitia = $state(8);
   let gMods = $state<{ atkMult: number; defMult: number } | null>(null);
+  let gComp = $state<{ marine: number; militia: number } | null>(null);
   /** master seeds must be 32 hex chars: encode the free-text seed as hex */
   const hexSeed = (text: string): string =>
     [...text]
@@ -333,12 +335,14 @@
     const terrain = generateTerrain(world, gClimate);
     const mods = groundModifiers(gAtkTactic, gDefTactic, terrain);
     gMods = mods;
+    const comp = groundCompFactors(gDefTactic);
+    gComp = comp;
     // base unit strength 20 both sides (no race picks / barracks in the lab)
     const atkStr = Math.max(1, Math.round(20 * mods.atkMult));
     const defStr = Math.max(1, Math.round(20 * mods.defMult));
     const pop = Math.ceil(mil * 2); // militia = ceil(pop/2) in the engine
     const rng = rngFor(hexSeed(seed), 0, 'ground-lab', world);
-    const res = fightGroundRounds(t0, gar, mil, atkStr, defStr, pop, rng);
+    const res = fightGroundRounds(t0, gar, mil, atkStr, defStr, pop, rng, comp);
     labGround = {
       turn: 0,
       watched: true,
@@ -409,7 +413,7 @@
       <label>militia <input type="number" min="1" max="400" bind:value={gMilitia} /></label>
       <button data-testid="lab-ground-run" onclick={resolveGround}>⚔ resolve invasion</button>
       {#if gMods}
-        <span class="dim" data-testid="lab-ground-mods" title="strength multipliers from the tactics matchup + terrain fit">tactics: ⚔ ×{gMods.atkMult.toFixed(2)} vs 🛡 ×{gMods.defMult.toFixed(2)}</span>
+        <span class="dim" data-testid="lab-ground-mods" title="strength multipliers from the tactics matchup + terrain fit; the doctrine also weights trained garrison vs civilian militia — civilians man walls, soldiers maneuver">tactics: ⚔ ×{gMods.atkMult.toFixed(2)} vs 🛡 ×{gMods.defMult.toFixed(2)}{#if gComp && (gComp.marine !== 1 || gComp.militia !== 1)} · garrison ×{gComp.marine.toFixed(2)} militia ×{gComp.militia.toFixed(2)}{/if}</span>
       {/if}
     </div>
   </header>
