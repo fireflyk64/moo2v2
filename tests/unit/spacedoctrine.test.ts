@@ -23,6 +23,8 @@ import {
   STANDOFF_SLACK,
   STRIKE_CRAFT_TICKS,
   assignTacticalGroups,
+  headingDelta,
+  headingToward,
   pickDoctrine,
   runBattle,
   tacticalDoctrineOf,
@@ -339,6 +341,70 @@ describe('each doctrine fights in its own band', () => {
     // the same faster kiter holds its band against a wall that will not chase
     // it past its own, and cannot hold it at all against a closing net
     expect(mkRace('envelop')).toBeLessThan(mkRace('line'));
+  });
+});
+
+// A slow-turning capital cannot fly a TARGET-RELATIVE figure (charge, or a
+// strike-wing dive): the anchor aims its bow at the moving target's rear arc,
+// so the desired facing is chained to the target's live heading, and a hull
+// that answers the helm at rate 1-2 cannot keep up. Two such capitals chasing
+// each other's rear arcs used to enter a mutual limit cycle — both spinning in
+// place, forward guns never bearing, the fight stalling with everyone pointing
+// AWAY from the enemy. Slow-turning capitals now hold their band bow-ON-target
+// and shoot instead. (Regression: "big forward-gunned ships turn away and
+// never fire under charge.")
+describe('slow-turning capitals hold their bow on target', () => {
+  /** fraction of live side-0 ship-ticks whose bow is more than 90 deg off the
+   * bearing to the enemy centroid — i.e. pointing away rather than engaging */
+  const awayFraction = (frames: BattleTickFrame[]): { away: number; shots: number } => {
+    let away = 0;
+    let tot = 0;
+    let shots = 0;
+    for (const f of frames) {
+      const mine = f.ships.filter((s) => s.id < 100 && s.alive);
+      const foe = f.ships.filter((s) => s.id >= 100 && s.alive);
+      if (!foe.length) break;
+      const ex = foe.reduce((a, s) => a + s.x, 0) / foe.length;
+      const ey = foe.reduce((a, s) => a + s.y, 0) / foe.length;
+      for (const s of mine) {
+        if (Math.abs(headingDelta(s.h, headingToward(ex - s.x, ey - s.y))) > 8) away++;
+        tot++;
+      }
+      const mineIds = new Set(mine.map((s) => s.id));
+      for (const sh of f.shots) if (mineIds.has(sh.from ?? -1)) shots++;
+    }
+    return { away: tot ? away / tot : 1, shots };
+  };
+
+  const capitalBrawl = (battleId: string) =>
+    inputOf(
+      [
+        // forward-beam titans (turn rate 1) on both sides — the exact fleet the
+        // player fielded when they saw capitals turn their engines to the enemy
+        ...Array.from({ length: 5 }, (_, i) => ship(i + 1, 0, { hull: 'titan', hullIdx: 5, speed: 8, armorHp: 300, structureHp: 600, startingStructure: 600, startingArmor: 300, weapons: [{ weaponId: 'laser_cannon', classId: 0, dmgMin: 12, dmgMax: 12, mods: [], ammo: -1, cooldown: 0, count: 3, arc: 'F' }] })),
+        ...Array.from({ length: 5 }, (_, i) => ship(101 + i, 1, { hull: 'titan', hullIdx: 5, speed: 8, armorHp: 300, structureHp: 600, startingStructure: 600, startingArmor: 300, weapons: [{ weaponId: 'laser_cannon', classId: 0, dmgMin: 12, dmgMax: 12, mods: [], ammo: -1, cooldown: 0, count: 3, arc: 'F' }] })),
+      ],
+      battleId,
+    );
+
+  it('titans under charge keep their bows on the enemy and fire, instead of spinning away', () => {
+    const { frames } = runFrames(withDoctrines(capitalBrawl('cap-charge'), 'charge', 'charge'));
+    const { away, shots } = awayFraction(frames);
+    // the bug parked them ~65% of ship-ticks pointing away, barely firing
+    expect(away).toBeLessThan(0.15);
+    expect(shots).toBeGreaterThan(80);
+  });
+
+  it('a slow capital keeps its bow on nimble enemies it charges', () => {
+    const input = inputOf(
+      [
+        ...Array.from({ length: 2 }, (_, i) => ship(i + 1, 0, { hull: 'titan', hullIdx: 5, speed: 8, armorHp: 300, structureHp: 600, startingStructure: 600, startingArmor: 300, weapons: [{ weaponId: 'laser_cannon', classId: 0, dmgMin: 12, dmgMax: 12, mods: [], ammo: -1, cooldown: 0, count: 3, arc: 'F' }] })),
+        ...Array.from({ length: 6 }, (_, i) => ship(101 + i, 1, { hull: 'frigate', hullIdx: 1, speed: 8 })),
+      ],
+      'cap-vs-nimble',
+    );
+    const { frames } = runFrames(withDoctrines(input, 'charge', 'charge'));
+    expect(awayFraction(frames).away).toBeLessThan(0.2);
   });
 });
 

@@ -906,7 +906,22 @@ export function runBattle(
     // is that it arrives and shoots. It still steers physically (movePattern),
     // so it still arrives late with its bow coming around, which is exactly
     // what a flanking wing is looking for.
-    if (lumber[si]) {
+    //
+    // A capital flies the spirit even when its DRIVES are fast, if its station
+    // would be TARGET-RELATIVE (a charge, or a strike-wing dive). Those figures
+    // aim the bow at the moving target's REAR arc, so the desired facing is
+    // chained to the target's live heading — and a hull that answers the helm
+    // at rate 1-2 cannot keep up. Worse, when the target is another such
+    // capital doing the same thing, the two headings enter a mutual limit
+    // cycle: each swings a half-turn faster than either bow can follow, so both
+    // spin in place, guns never bearing, and the fight stalls with everyone
+    // pointing away from the enemy. Turn rate is the axis here, not speed — a
+    // hot drive buys ground, never a quicker helm — so a slow-turning capital
+    // holds the band bow-ON-target and shoots, and lets the nimble hulls weave.
+    const wingSlot = slot.g === 1 || slot.g === 2;
+    const targetRelative = focusesTarget(doc) || (wingSlot && hasStrikeWing(doc));
+    const cannotWeave = turnRateOf(s.init.hullIdx, s.init.isBase) <= 2;
+    if (lumber[si] || (targetRelative && cannotWeave)) {
       const rx = focusesTarget(doc) && live ? live.x : E.x;
       const ry = focusesTarget(doc) && live ? live.y : E.y;
       const R = prof.standU * FP;
