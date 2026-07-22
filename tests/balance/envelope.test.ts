@@ -106,7 +106,7 @@ const STANCE_PAIRS: Array<[Stance, Stance]> = [
   ['hold_range', 'standoff'],
 ];
 
-function mirrorBattle(arch: Archetype, stances: [Stance, Stance], seedIdx: number): BattleInput {
+function mirrorBattle(arch: Archetype, stances: [Stance, Stance], seedIdx: number, tactics = false): BattleInput {
   const ships: CombatShipInit[] = [];
   for (let i = 0; i < arch.count; i++) ships.push(arch.ship(i + 1, 0));
   for (let i = 0; i < arch.count; i++) ships.push(arch.ship(100 + i, 1));
@@ -118,6 +118,7 @@ function mirrorBattle(arch: Archetype, stances: [Stance, Stance], seedIdx: numbe
     ships,
     ordersA: { ...DEFAULT_ORDERS, stance: stances[0] },
     ordersD: { ...DEFAULT_ORDERS, stance: stances[1] },
+    ...(tactics ? { patterns: true, tactics: true } : {}),
   };
 }
 
@@ -143,6 +144,31 @@ describe.skipIf(!enabled)('combat balance envelope (opt-in)', () => {
     expect(avg).toBeGreaterThanOrEqual(20);
     expect(avg).toBeLessThanOrEqual(40);
   }, 30_000); // hundreds of full battles: give the envelope real headroom
+
+  // ...and the same envelope on the engine live games actually fight (0.26
+  // doctrine tactics). The stance pairs map onto charge/line/standoff, so
+  // this is three of the six doctrines against each other at equal tech.
+  it('the doctrine engine lands in the same 20-40% envelope', () => {
+    const rows: string[] = ['archetype,docA,docD,seed,aDmg,dDmg,ticks'];
+    let sum = 0;
+    let n = 0;
+    for (const arch of ARCHETYPES) {
+      for (const stances of STANCE_PAIRS) {
+        for (let s = 0; s < 12; s++) {
+          const input = mirrorBattle(arch, stances, s, true);
+          const r = runBattle(input, rngFor(SEED, ...input.seedLabel));
+          rows.push(`${arch.name},${stances[0]},${stances[1]},${s},${r.attackerDamagePct},${r.defenderDamagePct},${r.ticks}`);
+          sum += r.attackerDamagePct + r.defenderDamagePct;
+          n += 2;
+        }
+      }
+    }
+    const avg = sum / n;
+    console.log(rows.join('\n'));
+    console.log(`AVERAGE fleet damage per pass (tactics): ${avg.toFixed(1)}%  (target 20-40)`);
+    expect(avg).toBeGreaterThanOrEqual(20);
+    expect(avg).toBeLessThanOrEqual(40);
+  }, 60_000);
 
   it('a full tech tier of advantage wins decisively', () => {
     let wins = 0;

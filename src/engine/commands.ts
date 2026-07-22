@@ -764,7 +764,7 @@ const applyOfferPeace: Applier = (state, cmd) => {
 
 const STANCES: Stance[] = ['charge', 'hold_range', 'standoff', 'evade_retreat', 'formation', 'passthrough'];
 const PRIORITIES: TargetPriority[] = ['nearest', 'biggest', 'smallest', 'warships', 'bases', 'deadliest'];
-const FORMATIONS: Formation[] = ['line', 'flank', 'pincer', 'envelop'];
+const FORMATIONS: Formation[] = ['line', 'flank', 'pincer', 'envelop', 'standoff', 'charge'];
 
 const validateBattleOrders: Validator = (state, cmd) => {
   if (state.phase !== 'battle_orders') return 'no battle awaiting orders';

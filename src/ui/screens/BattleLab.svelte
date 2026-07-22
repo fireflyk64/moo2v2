@@ -47,6 +47,7 @@
   import { variantsFor, wrapVariant, type ArtClass } from '../battle/shipart';
   import { playerColor } from '../colors';
   import { takeLabSeed } from '../labSeed';
+  import { LAB_SCENARIOS, type ScenarioSide } from './battleLabScenarios';
   import type { GroundBattleEntry, ReplayEntry } from '../state.svelte';
 
   // a laboratory empire that has researched absolutely everything
@@ -82,6 +83,10 @@
     specials: string[];
     weapons: Array<{ weapon: string; count: number; mods: string[]; arc: 'F' | 'FX' | 'R' | '360' }>;
     count: number;
+    /** combat-speed override; blank/undefined = the max-tech computed speed.
+     * The lab otherwise gives every hull the same drive, so this is the only
+     * way to explore how DRIVE decides which maneuver wins. */
+    speed?: number;
     /** cosmetic model variant within the side's ship style */
     model?: number;
   }
@@ -125,20 +130,53 @@
         }))
       : null;
 
+  // a curated scenario -> one side's editable groups/orders/style
+  const scenarioSide = (s: ScenarioSide): LabSide => ({
+    groups: s.groups.map((g) => ({
+      hull: g.hull,
+      computer: g.computer ?? 3,
+      shield: g.shield ?? 3,
+      armor: Math.max(1, Math.min(6, g.armor ?? 3)),
+      specials: [...(g.specials ?? [])],
+      weapons: g.weapons.map((w) => ({ weapon: w.weapon, count: w.count, mods: [...(w.mods ?? [])], arc: w.arc ?? 'F' })),
+      count: g.count,
+      ...(g.speed ? { speed: g.speed } : {}),
+    })),
+    orders: { ...DEFAULT_ORDERS, ...s.orders },
+    style: s.style,
+  });
+
   let sides = $state<[LabSide, LabSide]>([
     {
-      groups: seedGroups(seeded?.a) ?? [newGroup()],
-      orders: { ...DEFAULT_ORDERS, ...((seeded?.ordersA as Partial<BattleOrders> | undefined) ?? {}) },
-      style: seeded?.styleA ?? 'raptor',
+      groups: seedGroups(seeded?.a) ?? scenarioSide(LAB_SCENARIOS[0]!.a).groups,
+      orders: seeded
+        ? { ...DEFAULT_ORDERS, ...((seeded?.ordersA as Partial<BattleOrders> | undefined) ?? {}) }
+        : scenarioSide(LAB_SCENARIOS[0]!.a).orders,
+      style: seeded?.styleA ?? LAB_SCENARIOS[0]!.a.style,
     },
     {
-      groups: seedGroups(seeded?.d) ?? [newGroup()],
-      orders: { ...DEFAULT_ORDERS, ...((seeded?.ordersD as Partial<BattleOrders> | undefined) ?? {}) },
-      style: seeded?.styleD ?? 'lattice',
+      groups: seedGroups(seeded?.d) ?? scenarioSide(LAB_SCENARIOS[0]!.d).groups,
+      orders: seeded
+        ? { ...DEFAULT_ORDERS, ...((seeded?.ordersD as Partial<BattleOrders> | undefined) ?? {}) }
+        : scenarioSide(LAB_SCENARIOS[0]!.d).orders,
+      style: seeded?.styleD ?? LAB_SCENARIOS[0]!.d.style,
     },
   ]);
   const fromGame = seeded !== null;
-  let seed = $state(seeded?.seed ?? 'battle-lab-0001');
+
+  // scenario picker: blank once the user has edited away from a preset
+  let scenarioId = $state(fromGame ? '' : LAB_SCENARIOS[0]!.id);
+  function loadScenario(id: string): void {
+    const sc = LAB_SCENARIOS.find((s) => s.id === id);
+    if (!sc) return;
+    sides = [scenarioSide(sc.a), scenarioSide(sc.d)];
+    seed = sc.seed;
+    scenarioId = id;
+    viewing = null;
+    error = '';
+  }
+
+  let seed = $state(seeded?.seed ?? LAB_SCENARIOS[0]!.seed);
   let viewing = $state<ReplayEntry | null>(null);
   let labSlewing = $state(false);
   let error = $state('');
@@ -180,7 +218,7 @@
       isBase: false,
       beamAttack: stats.beamAttack,
       beamDefense: stats.beamDefense,
-      speed: stats.combatSpeed,
+      speed: g.speed && g.speed > 0 ? g.speed : stats.combatSpeed,
       armorHp: stats.armorHp,
       structureHp: stats.structureHp,
       shieldPool: stats.shieldPool,
@@ -236,8 +274,9 @@
       ordersD: { ...snap[1].orders },
       // sandbox slewing toggle: the sim honors it purely from the input
       ...(labSlewing ? { slewing: true } : {}),
-      // lab battles fight the 0.24 set-piece patterns, same as live games
+      // lab battles fight the 0.26 doctrine tactics, same as live games
       patterns: true,
+      tactics: true,
     };
     const padded = hexSeed(seed);
     const result = runBattle(structuredClone(input), rngFor(padded, ...input.seedLabel));
@@ -376,7 +415,19 @@
       <p class="dim" data-testid="lab-seeded">⚗ loaded from your game: side A = your designs, side B = enemy types you have met in battle. Edit freely — this sandbox never touches the real game.</p>
     {/if}
     <div class="runbar">
-      <label>seed <input bind:value={seed} size="16" /></label>
+      <label title="curated set-piece matchups where the doctrine makes or breaks the fight — load one, then flip a doctrine and re-run to see it swing">📖 scenario
+        <select
+          data-testid="lab-scenario"
+          value={scenarioId}
+          onchange={(e) => loadScenario((e.currentTarget as HTMLSelectElement).value)}
+        >
+          <option value="" disabled>— pick a matchup —</option>
+          {#each LAB_SCENARIOS as sc (sc.id)}
+            <option value={sc.id}>{sc.name}</option>
+          {/each}
+        </select>
+      </label>
+      <label>seed <input bind:value={seed} size="14" /></label>
       <label title="game option preview: F-arc ships may spend movement to rotate their guns onto off-axis targets (big hulls pay more); 360-arc mounts never need it">
         <input type="checkbox" data-testid="lab-slewing" bind:checked={labSlewing} /> slewing
       </label>
@@ -384,6 +435,10 @@
       {#if error}<span class="error">{error}</span>{/if}
       <a href="#top" onclick={(e) => { e.preventDefault(); location.hash = ''; }}>← back</a>
     </div>
+    {#if scenarioId}
+      {@const sc = LAB_SCENARIOS.find((s) => s.id === scenarioId)}
+      {#if sc}<p class="dim scenblurb" data-testid="lab-scenario-blurb">{sc.blurb}</p>{/if}
+    {/if}
     <div class="runbar groundbar" data-testid="lab-ground">
       <span title="the REAL invasion math: the planet's fixed terrain + the tactics matchup scale each side's strength, then the engine's round loop fights it out. Same seed + same setup = same battle — flip one tactic and compare.">🪖 ground assault lab</span>
       <label>world
@@ -441,13 +496,15 @@
               <option value="evade_retreat">evade & retreat</option>
             </select>
           </label>
-          <label title="fleet plan: line holds the heavies back as a wall; flank/pincer/envelop send the fast wing(s) wide LOGH-style">fleet plan
+          <label title="doctrine: which range band this fleet fights in, and therefore which of its weapons pay">doctrine
             <select data-testid="lab-formation-{side}" bind:value={s.orders.formation}>
-              <option value={undefined}>massed (classic)</option>
-              <option value="line">line — heavies hold</option>
-              <option value="flank">flank — one wing wide</option>
-              <option value="pincer">pincer — both wings</option>
-              <option value="envelop">envelop — 3 groups</option>
+              <option value={undefined}>by stance</option>
+              <option value="standoff">standoff — long band, warheads</option>
+              <option value="line">line — medium band, stand fast</option>
+              <option value="charge">charge — knife range</option>
+              <option value="flank">flank — wing into their baffles</option>
+              <option value="pincer">pincer — wings both sides</option>
+              <option value="envelop">envelop — closing net</option>
             </select>
           </label>
           <label>targets
@@ -490,6 +547,20 @@
                 </select>
               </label>
               <label>count <input type="number" min="1" max="12" bind:value={g.count} title="ships in this group" /></label>
+              <label title="combat speed — leave blank for the max-tech default; set it to see how DRIVE decides which maneuver wins (a slow line can't hold a range; a fast wing gets the rear arcs)">spd
+                <input
+                  type="number"
+                  min="0"
+                  max="16"
+                  data-testid="lab-speed-{side}-{gi}"
+                  value={g.speed ?? ''}
+                  placeholder={String(typeof st === 'string' ? '' : st.combatSpeed)}
+                  oninput={(e) => {
+                    const v = (e.currentTarget as HTMLInputElement).value;
+                    g.speed = v === '' ? undefined : Math.max(0, Math.min(16, Number(v)));
+                  }}
+                />
+              </label>
               <button class="mini" data-testid="lab-edit-{side}-{gi}" onclick={() => openEditor(side, gi)}>Edit</button>
               <button class="mini" data-testid="clone-{side}-{gi}" title="clone this ship type" onclick={() => (s.groups = [...s.groups.slice(0, gi + 1), structuredClone($state.snapshot(g)) as typeof g, ...s.groups.slice(gi + 1)])}>⎘ clone</button>
               <button class="mini" onclick={() => removeGroup(side, gi)}>✕</button>
@@ -497,7 +568,7 @@
             {#if typeof st === 'string'}
               <p class="error">{st}</p>
             {:else}
-              <p class="stats">space {st.spaceUsed}/{st.spaceTotal} · atk +{st.beamAttack} · def +{st.beamDefense} · speed {st.combatSpeed} · armor {st.armorHp} · struct {st.structureHp} · shields {st.shieldPool}</p>
+              <p class="stats">space {st.spaceUsed}/{st.spaceTotal} · atk +{st.beamAttack} · def +{st.beamDefense} · speed {g.speed && g.speed > 0 ? g.speed : st.combatSpeed}{#if g.speed && g.speed > 0}<span class="dim"> (set)</span>{/if} · armor {st.armorHp} · struct {st.structureHp} · shields {st.shieldPool}</p>
             {/if}
           </div>
         {/each}
@@ -589,6 +660,13 @@
     gap: 0.8rem;
     align-items: center;
     margin: 0.6rem 0 1rem;
+    flex-wrap: wrap;
+  }
+  .scenblurb {
+    margin: -0.6rem 0 1rem;
+    max-width: 62rem;
+    font-style: italic;
+    line-height: 1.4;
   }
   .groundbar {
     flex-wrap: wrap;

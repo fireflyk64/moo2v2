@@ -7,9 +7,13 @@ import {
   fightGroundRounds,
   generateTerrain,
   groundModifiers,
+  pickGroundAttack,
+  pickGroundDefense,
   terrainFractions,
   TERRAIN_H,
   TERRAIN_W,
+  type AttackTactic,
+  type DefenseTactic,
 } from '@engine/groundTactics';
 import { rngFor } from '@engine/rng';
 import type { GameState } from '@engine/types';
@@ -127,6 +131,93 @@ describe('fightGroundRounds (shared with the battle lab)', () => {
     const big = fightGroundRounds(300, 100, 200, 20, 20, 400, rngFor(SEED, 0, 'ground-lab', 7));
     expect(big.rounds.length).toBeLessThanOrEqual(61);
     expect(big.rounds[big.rounds.length - 1]!.t).toBe(big.troops);
+  });
+});
+
+// pure terrain of one zone char, for scoring the pickers against a known map
+const flat = (ch: string): string[] => Array.from({ length: TERRAIN_H }, () => ch.repeat(TERRAIN_W));
+
+describe('pickGroundAttack', () => {
+  it('never picks a tactic the resolver would score below its best', () => {
+    // the pick IS the argmax of the resolver's own atkMult, so it can never
+    // be beaten by another tactic on the same ground
+    for (const ch of ['p', 'f', 'r', 'c', 'm', 'u', 'd', 'i', 'l', 'h']) {
+      const terrain = flat(ch);
+      const best = pickGroundAttack(terrain);
+      const bestMult = groundModifiers(best, undefined, terrain).atkMult;
+      for (const atk of ATTACK_TACTICS) {
+        expect(groundModifiers(atk, undefined, terrain).atkMult).toBeLessThanOrEqual(bestMult + 1e-9);
+      }
+    }
+  });
+
+  it('reads the ground: cover wants infiltration, broken rock wants overwatch, open wants shock', () => {
+    // forest/marsh/urban = cover -> an infiltration
+    expect(pickGroundAttack(flat('f'))).toBe('infiltrate');
+    expect(pickGroundAttack(flat('u'))).toBe('infiltrate');
+    // ridge/craters/lava = broken rock -> fire-and-move
+    expect(pickGroundAttack(flat('r'))).toBe('bounding_overwatch');
+    expect(pickGroundAttack(flat('l'))).toBe('bounding_overwatch');
+    // plains/dunes = open -> a charge or a flank, never an infiltration
+    expect(['charge', 'flank', 'hammer_and_anvil']).toContain(pickGroundAttack(flat('p')));
+    expect(pickGroundAttack(flat('f'))).not.toBe(pickGroundAttack(flat('r')));
+  });
+
+  it('folds in the RPS matchup when the defender doctrine is known', () => {
+    // on neutral ground the pick is driven purely by the matrix row
+    const neutral: string[] | null = null;
+    for (const def of DEFENSE_TACTICS) {
+      const pick = pickGroundAttack(neutral, def);
+      let bestMult = -Infinity;
+      let best: AttackTactic = 'charge';
+      for (const atk of ATTACK_TACTICS) {
+        const m = groundModifiers(atk, def, neutral).atkMult;
+        if (m > bestMult) { bestMult = m; best = atk; }
+      }
+      expect(pick).toBe(best);
+    }
+  });
+});
+
+describe('pickGroundDefense', () => {
+  it('a militia-heavy colony forts up; a marine-heavy garrison maneuvers', () => {
+    const terran = generateTerrain(4242, 'terran');
+    // almost all civilians: fortress lets them fight full strength behind walls
+    expect(pickGroundDefense(0.1, terran)).toBe('fortress');
+    // almost all trained marines: a maneuver doctrine leverages them
+    const marineHeavy = pickGroundDefense(0.85, terran);
+    expect(['defense_in_depth', 'charge']).toContain(marineHeavy);
+    expect(marineHeavy).not.toBe('fortress');
+  });
+
+  it('never picks a doctrine the composition-weighted resolver would beat', () => {
+    for (const climate of ['terran', 'desert', 'swamp', 'hostile']) {
+      const terrain = generateTerrain(99, climate);
+      for (const share of [0, 0.3, 0.6, 1]) {
+        const pick = pickGroundDefense(share, terrain);
+        const score = (def: DefenseTactic) => {
+          const defMult = groundModifiers(undefined, def, terrain).defMult;
+          const comp = { fortress: [1, 1], long_line: [1, 0.95], defense_in_depth: [1.3, 0.7], charge: [1.6, 0.5] }[def]!;
+          return defMult * (share * comp[0]! + (1 - share) * comp[1]!);
+        };
+        for (const def of DEFENSE_TACTICS) {
+          expect(score(pick)).toBeGreaterThanOrEqual(score(def) - 1e-9);
+        }
+      }
+    }
+  });
+
+  it('is monotone in composition: more marines never pushes it back toward fortress', () => {
+    // as the garrison trains up, the pick moves from walls toward maneuver,
+    // never the other way — the compFactors are ordered that way
+    const terrain = generateTerrain(7, 'terran');
+    const order: Record<string, number> = { fortress: 0, long_line: 1, defense_in_depth: 2, charge: 3 };
+    let prev = -1;
+    for (const share of [0, 0.25, 0.5, 0.75, 1]) {
+      const rank = order[pickGroundDefense(share, terrain)]!;
+      expect(rank).toBeGreaterThanOrEqual(prev);
+      prev = rank;
+    }
   });
 });
 

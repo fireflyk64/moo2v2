@@ -13,6 +13,7 @@ import { clamp, ceilDiv, roundDiv } from './imath';
 import { idist } from './isqrt';
 import type { Rng } from './rng';
 import type { DesignStats } from './shipdesign';
+import { DOCTRINE_PROFILE, focusesTarget, hasStrikeWing, isRing, tacticalDoctrineOf, type Doctrine } from './spaceTactics';
 
 export const FP = 256; // fixed-point scale
 export const FIELD_W = 768 * FP;
@@ -34,7 +35,7 @@ export type TargetPriority = 'nearest' | 'biggest' | 'smallest' | 'warships' | '
  * massed movement policy of 'charge'/'hold_range' ships with deterministic
  * per-ship ROLES (see assignFormationRoles). evade_retreat, standoff,
  * passthrough and the warp-dissipater pinning rules are untouched. */
-export type Formation = 'line' | 'flank' | 'pincer' | 'envelop';
+export type Formation = 'line' | 'flank' | 'pincer' | 'envelop' | 'standoff' | 'charge';
 /** hold = advance to weapon range and stand (the battle line);
  *  center = like hold at half speed (envelop's slow middle);
  *  wingA/wingB = swing wide to the top/bottom waypoint, then turn in. */
@@ -215,6 +216,18 @@ export interface BattleInput {
    * Carried in the input so replays re-sim identically; ABSENT or false =
    * byte-exact 0.23 behavior. */
   patterns?: boolean;
+  /** DOCTRINE TACTICS (0.26.0): the set-piece patterns of 0.24 all converged
+   * on one range band, so the doctrine a player picked barely moved the
+   * result. With this flag the choreography becomes ENEMY-RELATIVE and
+   * table-driven (spaceTactics.ts DOCTRINE_PROFILE): each doctrine holds its
+   * own distance from the enemy mass, so the range band — and therefore
+   * which weapon systems pay — follows the tactic; hulls rotate toward their
+   * choreographed heading at the HULL TURN RATE, so a maneuver doctrine only
+   * brings forward guns to bear if the hull can answer the helm; and slow
+   * fleets simply fail to reach the station their doctrine asks for. Implies
+   * `patterns`. Carried in the input so replays re-sim identically; ABSENT or
+   * false = byte-exact 0.24/0.25 behavior. */
+  tactics?: boolean;
 }
 
 export interface ShotEvent {
@@ -316,12 +329,19 @@ interface Sim {
   wingDone: boolean;
   /** mounts any non-360° gun (slewing is pointless for all-turret ships) */
   slews: boolean;
+  /** 0.26: movement points (fixed point) actually spent TRANSLATING this
+   * tick — the motion-evasion pool. Turning on the spot does not count. */
+  mpMoved: number;
+  /** 0.26: this tick's unspent movement, the budget jukes are paid out of */
+  mpFree: number;
 }
 
 /** chance (%) that a structure hit knocks out a random ship system */
 export const SYSTEM_KNOCKOUT_PCT = 20;
 
 interface Projectile {
+  /** tick it was launched (0.26 strike-craft endurance) */
+  born: number;
   from: number; // sim index
   targetIdx: number;
   x: number;
@@ -374,7 +394,10 @@ export function assignFormationRoles(
   const mobile = ships.filter((s) => !s.isBase && s.speed > 0);
   const n = mobile.length;
   if (n === 0) return roles;
-  if (formation === 'line') {
+  // 0.26 doctrines seen by the legacy role assigner: standoff walls up like a
+  // line, charge keeps the classic massed movement (no roles at all)
+  if (formation === 'charge') return roles;
+  if (formation === 'line' || formation === 'standoff') {
     // the heaviest ~half holds the wall; the light half skirmishes forward
     const byWeight = [...mobile].sort((a, b) => b.hullIdx - a.hullIdx || a.shipId - b.shipId);
     for (const s of byWeight.slice(0, Math.ceil(n / 2))) roles.set(s.shipId, 'hold');
@@ -404,7 +427,7 @@ export function assignFormationRoles(
 // every pattern-capable ship flies. Free movement is gone under `patterns`;
 // what a doctrine buys is WHERE its ships stand (range band) and WHICH arcs
 // bear during each segment of the dance.
-export type Doctrine = 'charge' | 'line' | 'flank' | 'pincer' | 'envelop';
+// (the Doctrine union itself lives in spaceTactics.ts, next to its table)
 /** wheel: charge-vs-charge — both fleets close, then circle each other on one
  *  shared close-range wheel. split: charge vs any formed doctrine — the
  *  formed side herds the chargers into TWO pocket circles and stands around
@@ -417,6 +440,10 @@ export type PatternScript = 'wheel' | 'split' | 'grand_wheel' | 'maneuvers';
 /** A side's doctrine: an explicit formation order wins; otherwise stand-off
  * stances read as 'line' and every committed stance as 'charge'. */
 export function doctrineOf(orders: BattleOrders): Doctrine {
+  // the two doctrines that only exist under the 0.26 tactics engine collapse
+  // onto their 0.24 equivalents here, so a legacy re-sim never sees them
+  if (orders.formation === 'standoff') return 'line';
+  if (orders.formation === 'charge') return 'charge';
   if (orders.formation) return orders.formation;
   return orders.stance === 'hold_range' || orders.stance === 'standoff' ? 'line' : 'charge';
 }
@@ -471,7 +498,7 @@ export const SLEW_FIRE_CD_PCT: Record<number, number> = { 4: 120, 3: 160, 2: 220
  * strike craft) are exempt — the classic run-in weapons — and so are
  * lumbering ships and bases, which fire from wherever they are. Rangemaster
  * counts a band closer here too, so fire-control tech opens up early. */
-export const DOCTRINE_FIRE_BAND: Record<Doctrine, number> = { charge: 1, line: 3, flank: 1, pincer: 1, envelop: 1 };
+export const DOCTRINE_FIRE_BAND: Record<Doctrine, number> = { charge: 1, line: 3, standoff: 3, flank: 1, pincer: 1, envelop: 1 };
 
 /** Pattern-mode arc bearing: F counts only when the pattern genuinely points
  * the ship AT its target (±45°, half the free-sim F arc — abeam is not
@@ -499,6 +526,51 @@ export const PATTERN_WING_TICK = 80;
  * target freely (F/FX count as bearing) — under the enemy's guns is exactly
  * where a charger wants to be. Field units ×FP. */
 export const PATTERN_MELEE = 48 * FP;
+/** 0.26 STRIKE-CRAFT ENDURANCE: fighters and assault shuttles carry fuel for
+ * this many ticks of flight and then turn for home. At their 6u/tick that is
+ * a reach of about 170 field units, which is what makes a carrier a
+ * SHORT-RANGE weapon: launched from a charge or a closing net the sortie
+ * arrives, launched from a standoff it never gets there. Guided munitions
+ * with real motors (missiles, torpedoes) keep their own launch ranges. */
+export const STRIKE_CRAFT_TICKS = 28;
+/** 0.26 REAR-ARC HITS: direct fire that lands from astern of the target's
+ * beam does this percent of its damage — you are shooting into the drives and
+ * the thin plating, not the armored bow. This is the payoff that makes
+ * position and turn rate matter: a flanking wing exists to earn it, a
+ * lumbering capital cannot keep its bow around to deny it, and a fleet of
+ * fast, nimble hulls is the hardest thing in the game to get behind. Guided
+ * munitions steer in and never collect it, and neither does long-range fire —
+ * picking out a drive nacelle is a knife-fighting skill. */
+export const REAR_ARC_DMG_PCT = 140;
+/** 0.26 JUKE: a ship with movement left over can swing the hull off its
+ * course, fire an off-axis mount and swing back, paying MOVEMENT POINTS for
+ * the privilege. Cost is JUKE_MP_PER_STEP movement points per 11.25 degrees
+ * beyond the mount's true arc, divided by the hull turn rate — a frigate
+ * flicks its nose across, a titan has to heave the whole ship over. Charged
+ * once per MOUNT per tick out of that tick's UNSPENT movement, so a ship
+ * that is running flat out cannot juke at all and a ship parked on station
+ * can juke most of its battery. */
+export const JUKE_MP_PER_STEP = 2;
+/** a juke widens a mount by at most this far off the bow (12 steps = 135°):
+ * an F mount can be worked round to FX coverage, never to a stern shot. */
+export const JUKE_MAX_OFF = 12;
+/** being enveloped costs this multiple on every juke — there is no safe
+ * quarter to swing your bow toward when they are all around you. */
+export const JUKE_ENVELOPED_PCT = 200;
+/** 0.26 MOTION EVASION: direct fire is this much less likely to hit (to-hit
+ * points) per movement point the target actually SPENT MOVING this tick —
+ * translation only; coming about on the spot buys nothing. Stillness is a
+ * firing position, not a safe one: the wall that stands to work its guns is
+ * the easiest thing on the field to hit, and the fleet dancing through the
+ * medium band is the hardest. Guided munitions are unaffected — they steer
+ * (that is what ECM is for). */
+export const EVASION_PER_MP = 4;
+/** ...capped here, so no drive makes a hull untouchable */
+export const EVASION_MAX = 30;
+/** 0.26 standoff hysteresis: a giving-ground fleet starts running when the
+ * enemy comes inside its band and stops only once it has re-opened the band
+ * by this much (field units) — without the gap it would spin on the line. */
+export const STANDOFF_SLACK = 90;
 
 export interface PatternSlot {
   /** 0 = main body/wall/wheel, 1 = wingA/top pocket, 2 = wingB/bottom pocket,
@@ -564,6 +636,50 @@ export function assignPatternGroups(
   return out;
 }
 
+/**
+ * Doctrine group assignment for the 0.26 tactics engine: a main body (g 0)
+ * plus, for the doctrines that field one, a fast strike element split off the
+ * top of the speed order (g 1 = the side that sweeps above, g 2 = below;
+ * flank sends everyone to one side, pincer alternates). The share of the
+ * roster comes straight from DOCTRINE_PROFILE.strikePct, so the size of the
+ * wing is a tuning number, not code.
+ *
+ * Ordering is stable and mirrors assignFormationRoles: speed first (lighter
+ * hulls break ties — they make better flankers), shipId last. `wing` picks
+ * which half of the field a flank sweeps.
+ */
+export function assignTacticalGroups(
+  ships: Array<{ shipId: number; hullIdx: number; speed: number }>,
+  doctrine: Doctrine,
+  wing: 1 | 2,
+): Map<number, PatternSlot> {
+  const out = new Map<number, PatternSlot>();
+  const byId = [...ships].sort((a, b) => a.shipId - b.shipId);
+  const sn = byId.length;
+  if (sn === 0) return out;
+  const sideIdx = new Map(byId.map((s, k) => [s.shipId, k]));
+  const put = (shipId: number, g: 0 | 1 | 2 | 3, i: number, n: number) =>
+    out.set(shipId, { g, i, n, si: sideIdx.get(shipId)!, sn });
+  if (!hasStrikeWing(doctrine)) {
+    byId.forEach((s, k) => put(s.shipId, 0, k, sn));
+    return out;
+  }
+  const bySpeed = [...byId].sort((a, b) => b.speed - a.speed || a.hullIdx - b.hullIdx || a.shipId - b.shipId);
+  // the wing never swallows the whole fleet: someone has to fix the enemy
+  const strike = clamp(Math.floor((sn * DOCTRINE_PROFILE[doctrine].strikePct) / 100), 0, Math.max(0, sn - 1));
+  const groups: number[][] = [[], [], []]; // [main, wingA(top), wingB(bottom)]
+  bySpeed.forEach((s, k) => {
+    if (k >= strike) groups[0]!.push(s.shipId);
+    else if (doctrine === 'flank') groups[wing]!.push(s.shipId);
+    else groups[k % 2 === 0 ? 1 : 2]!.push(s.shipId);
+  });
+  for (const [g, ids] of groups.entries()) {
+    ids.sort((a, b) => a - b);
+    ids.forEach((id, i) => put(id, g as 0 | 1 | 2, i, ids.length));
+  }
+  return out;
+}
+
 export function runBattle(
   input: BattleInput,
   rng: Rng,
@@ -597,6 +713,8 @@ export function runBattle(
     retreatTicks: 0,
     role: null,
     wingDone: false,
+    mpMoved: 0,
+    mpFree: 0,
     slews: init.weapons.some((w) => w.classId !== 3 && !w.mods.includes('pd') && (w.arc ?? 'F') !== '360'),
   }));
   // ECM: personal jammers, plus fleet-wide wide-area jammers
@@ -633,7 +751,8 @@ export function runBattle(
     s.homeY = s.y;
   }
 
-  const patterns = input.patterns === true;
+  const tactics = input.tactics === true;
+  const patterns = tactics || input.patterns === true;
   // --- formations (0.23.0): assign per-ship roles; one seeded coin decides
   // which side of the field a 'flank' wing swings around. Sides draw in fixed
   // order (attacker first) so replays reproduce; an absent/null formation
@@ -659,8 +778,15 @@ export function runBattle(
   }
   const slewing = input.slewing === true;
 
-  // --- set-piece patterns (0.24.0): doctrines, script, groups, geometry ---
-  const docs: readonly [Doctrine, Doctrine] = [doctrineOf(input.ordersA), doctrineOf(input.ordersD)];
+  // --- set-piece patterns (0.24.0) / doctrine tactics (0.26.0): doctrines,
+  // script, groups, geometry. Under `tactics` the script taxonomy is gone —
+  // each side simply flies its own doctrine's figure relative to the enemy
+  // mass, and the interaction between two doctrines is physics, not a
+  // lookup — and lumbering hulls fly the figure too, just badly (they steer
+  // physically, so they arrive late with their bows still coming around). ---
+  const docs: readonly [Doctrine, Doctrine] = tactics
+    ? [tacticalDoctrineOf(input.ordersA), tacticalDoctrineOf(input.ordersD)]
+    : [doctrineOf(input.ordersA), doctrineOf(input.ordersD)];
   const script: PatternScript = matchupScript(docs[0], docs[1]);
   const lumber: boolean[] = sims.map((s) => isLumbering(s.init));
   const slots = new Map<number, PatternSlot>(); // sim index -> slot
@@ -668,17 +794,35 @@ export function runBattle(
     for (const side of [0, 1] as const) {
       const roster = sims
         .map((s, idx) => ({ s, idx }))
-        .filter(({ s, idx }) => s.init.side === side && !lumber[idx]);
-      const groups = assignPatternGroups(
-        roster.map(({ s }) => ({ shipId: s.init.shipId, hullIdx: s.init.hullIdx, speed: s.init.speed })),
-        docs[side],
-        script,
-        side === 0 ? 1 : 2, // flank wings: attacker sweeps the top, defender the bottom
-      );
+        // 0.26: only bases and dead drives sit the dance out; lumbering hulls
+        // get a station like everybody else and creep toward it
+        .filter(({ s, idx }) => s.init.side === side && (tactics ? !s.init.isBase && s.init.speed > 0 : !lumber[idx]));
+      const groups = tactics
+        ? assignTacticalGroups(
+            roster.map(({ s }) => ({ shipId: s.init.shipId, hullIdx: s.init.hullIdx, speed: s.init.speed })),
+            docs[side],
+            side === 0 ? 1 : 2,
+          )
+        : assignPatternGroups(
+            roster.map(({ s }) => ({ shipId: s.init.shipId, hullIdx: s.init.hullIdx, speed: s.init.speed })),
+            docs[side],
+            script,
+            side === 0 ? 1 : 2, // flank wings: attacker sweeps the top, defender the bottom
+          );
       for (const { s, idx } of roster) {
         const slot = groups.get(s.init.shipId);
         if (slot) slots.set(idx, slot);
       }
+    }
+  }
+  if (tactics) {
+    // the strike element hunts what the doctrine tells it to (capitals, for
+    // the flanking wings): a rear arc is worth most on a hull that cannot
+    // swing its bow back around in time
+    for (const [si, slot] of slots) {
+      if (slot.g !== 1 && slot.g !== 2) continue;
+      const prio = DOCTRINE_PROFILE[docs[sims[si]!.init.side]].strikePriority;
+      if (prio) sims[si]!.priority = prio;
     }
   }
   const norm32 = (a: number) => ((a % DIRS) + DIRS) % DIRS;
@@ -698,6 +842,13 @@ export function runBattle(
     { x: FIELD_W / 2, y: FIELD_H / 2 },
     { x: FIELD_W / 2, y: FIELD_H / 2 },
   ];
+  /** 0.26: which way each side stands off from the enemy mass this tick */
+  const standDir: [number, number] = [DIRS / 2, 0];
+  /** 0.26: is a giving-ground side currently RUNNING? Latched with hysteresis
+   * at the fleet level (it flips on when the enemy comes inside the band and
+   * off only once the band is comfortably re-opened) so nobody spends the
+   * battle spinning on the threshold. */
+  const running: [boolean, boolean] = [false, false];
 
   const projectiles: Projectile[] = [];
   const initialHp = [0, 0];
@@ -710,7 +861,140 @@ export function runBattle(
   const chargerSide: 0 | 1 = docs[0] === 'charge' ? 0 : 1; // meaningful under 'split' only
   const formedSide: 0 | 1 = chargerSide === 0 ? 1 : 0;
   const MIDX = FIELD_W / 2;
+  // --- 0.26 doctrine tactics: every station is measured from the ENEMY MASS
+  // (or from the ship you are shooting at), so the two doctrines resolve
+  // their range by physics. Both sides advance while they are farther out
+  // than their doctrine wants; the side that wants MORE distance can only
+  // keep it while its drives out-run the other's — which is the whole reason
+  // a slow missile fleet has to fear a fast one. ---
+  /** how much room a field point has before the wall */
+  const clearance = (x: number, y: number) => Math.min(x, FIELD_W - x, y, FIELD_H - y);
+  /** the bearing (from the enemy mass) a side holds its station on: start
+   * from "directly away from them" and slide up to ±67° toward open field,
+   * so a fleet giving ground slides ALONG the edge instead of grinding into
+   * a corner — and a fleet already pinned there has nowhere left to go. */
+  const standDirOf = (side: 0 | 1, standU: number): number => {
+    const e = cent[1 - side]!;
+    const o = cent[side]!;
+    const base = o.x === e.x && o.y === e.y ? (side === 0 ? DIRS / 2 : 0) : headingToward(o.x - e.x, o.y - e.y);
+    let best = base;
+    let bestScore = -Infinity;
+    for (const off of [0, -2, 2]) {
+      const a = norm32(base + off);
+      const c = clearance(ringX(e.x, standU * FP, a), ringY(e.y, standU * FP, a));
+      if (c > bestScore) {
+        bestScore = c;
+        best = a;
+      }
+    }
+    return best;
+  };
+  const tacticalAnchor = (s: Sim, si: number, tick: number): { x: number; y: number; h: number } => {
+    const side = s.init.side;
+    const foe = (1 - side) as 0 | 1;
+    const bow = side === 0 ? 0 : DIRS / 2;
+    const doc = docs[side];
+    const prof = DOCTRINE_PROFILE[doc];
+    const slot = slots.get(si)!;
+    const t = s.targetIdx >= 0 ? sims[s.targetIdx] : undefined;
+    const live = t && active(t) ? t : undefined;
+    const E = cent[foe]!;
+    // A LUMBERING hull flies the SPIRIT of its doctrine, not its figure: it
+    // makes for its doctrine's band by the shortest route and holds there,
+    // bows on. Ordering a battleship division to fly a dogfight weave only
+    // leaves it turning in circles — a capital's contribution to any tactic
+    // is that it arrives and shoots. It still steers physically (movePattern),
+    // so it still arrives late with its bow coming around, which is exactly
+    // what a flanking wing is looking for.
+    if (lumber[si]) {
+      const rx = focusesTarget(doc) && live ? live.x : E.x;
+      const ry = focusesTarget(doc) && live ? live.y : E.y;
+      const R = prof.standU * FP;
+      const out = bowTo(rx, ry, s.x, s.y, side === 0 ? DIRS / 2 : 0);
+      const ax = ringX(rx, R, out);
+      const ay = ringY(ry, R, out);
+      const face =
+        prof.giveGround && running[side]
+          ? norm32(out + (slot.si % 2 === 0 ? -8 : 8))
+          : bowTo(ax, ay, live ? live.x : rx, live ? live.y : ry, bow);
+      return clampAnchor(ax, ay, face);
+    }
+    // the fast strike element: stage off their beam, then dive on the REAR
+    // arc of whatever it is shooting at, where forward guns cannot answer.
+    // Getting there is a pure drive problem — the station is a place in the
+    // world, and a wing that cannot cover the ground simply never arrives.
+    if ((slot.g === 1 || slot.g === 2) && hasStrikeWing(doc)) {
+      if (tick < prof.commitTick || !live) {
+        const a = norm32(standDir[side]! + (slot.g === 1 ? -8 : 8));
+        const ax = ringX(E.x, prof.stageU * FP, a);
+        const ay = ringY(E.y, prof.stageU * FP, a);
+        // running the corner: point along the RUN, not at the enemy — a wing
+        // that keeps its guns trained while it sprints never gets there
+        return clampAnchor(ax, ay, bowTo(s.x, s.y, ax, ay, bow));
+      }
+      const a = norm32(live.heading + DIRS / 2) + arcOffset(slot.i, slot.n, 4);
+      const ax = ringX(live.x, prof.strikeU * FP, a);
+      const ay = ringY(live.y, prof.strikeU * FP, a);
+      return clampAnchor(ax, ay, bowTo(ax, ay, live.x, live.y, bow));
+    }
+    // charge: ride the ship you are shooting at, at knife range and in its
+    // BAFFLES — a charger's whole job is to live behind the thing it is
+    // killing, where its forward guns cannot answer and every hit lands on
+    // the drives (REAR_ARC_DMG_PCT). It weaves across the rear quarter
+    // rather than parking there, because a ship that stops moving stops
+    // being hard to hit (EVASION_PER_MP).
+    if (focusesTarget(doc) && live) {
+      const rear = norm32(live.heading + DIRS / 2);
+      const ph = (tick * prof.spin16) % 512;
+      const tri = ph < 256 ? ph : 512 - ph; // 0..256 triangle wave
+      const weave = roundDiv(tri - 128, 32); // +/- 4 heading steps across the stern
+      const a = rear + arcOffset(slot.si, slot.sn, 6) + weave;
+      const ax = ringX(live.x, prof.standU * FP, a);
+      const ay = ringY(live.y, prof.standU * FP, a);
+      return clampAnchor(ax, ay, bowTo(ax, ay, live.x, live.y, bow));
+    }
+    // everyone else holds a station off the enemy mass: a crescent for the
+    // walls (span degrees of arc around standDir), a closing ring for envelop
+    let R =
+      (prof.openU === prof.standU
+        ? prof.standU
+        : Math.max(prof.standU, prof.openU - roundDiv((prof.openU - prof.standU) * tick, Math.max(1, prof.closeTicks)))) *
+      FP;
+    // Only a standoff actually GIVES GROUND. Every other doctrine that finds
+    // the enemy already inside its band stands and fights there — a gun wall
+    // that reverses out of a knife fight is not a gun wall, and the fleets
+    // that must not be allowed to kite forever are exactly the ones whose
+    // tactic is to hold a line.
+    if (!prof.giveGround) {
+      const cur = idist(Math.abs(s.x - E.x), Math.abs(s.y - E.y));
+      // a wall that has reached its band STANDS: it holds the exact spot it
+      // is on and only works the bow round. That is what buys it a full
+      // juke allowance and costs it every point of motion evasion.
+      if (prof.holdsStation && cur <= R) {
+        return clampAnchor(s.x, s.y, bowTo(s.x, s.y, live ? live.x : E.x, live ? live.y : E.y, bow));
+      }
+      if (cur < R) R = cur;
+    }
+    const a = isRing(doc)
+      ? Math.floor((32 * slot.i) / Math.max(1, slot.n)) + roundDiv(tick * prof.spin16, 16)
+      : norm32(standDir[side]! + arcOffset(slot.i, slot.n, prof.span));
+    const ax = ringX(E.x, R, a);
+    const ay = ringY(E.y, R, a);
+    // A standoff that is actually being pressed runs — ABEAM, alternate ships
+    // to alternate sides: the fighting withdrawal of every age. The course
+    // opens the range while the broadside stays on the pursuer, and it costs
+    // a quarter of the fleet's way (the off-bow travel rule in movePattern).
+    // Only hulls nimble enough to afford a juke can still work their forward
+    // guns while they do it, which is why a standoff is a bet on your drives
+    // and why it belongs to guided munitions and turrets in the first place.
+    if (prof.giveGround && running[side]) {
+      const away = bowTo(E.x, E.y, ax, ay, bow);
+      return clampAnchor(ax, ay, norm32(away + (slot.si % 2 === 0 ? -8 : 8)));
+    }
+    return clampAnchor(ax, ay, bowTo(ax, ay, live ? live.x : E.x, live ? live.y : E.y, bow));
+  };
   const anchorOf = (s: Sim, si: number, tick: number): { x: number; y: number; h: number } => {
+    if (tactics) return tacticalAnchor(s, si, tick);
     const side = s.init.side;
     const foe = (1 - side) as 0 | 1;
     const fwd = side === 0 ? 1 : -1;
@@ -871,9 +1155,15 @@ export function runBattle(
     }
   };
   const movePattern = (s: Sim, si: number, tick: number) => {
+    s.mpMoved = 0;
+    s.mpFree = s.sysDrive ? 0 : Math.max(0, s.init.speed) * FP;
     if (s.init.speed === 0 || s.sysDrive) return;
     const crippled = s.structure * 3 < s.init.structureHp;
-    const speedFP = Math.max(1, crippled ? Math.floor(s.init.speed / 2) : s.init.speed) * FP;
+    let speedFP = Math.max(1, crippled ? Math.floor(s.init.speed / 2) : s.init.speed) * FP;
+    // running with the guns pointed astern costs way (0.26 DOCTRINE_PROFILE)
+    if (tactics && running[s.init.side]) {
+      speedFP = Math.max(FP, roundDiv(speedFP * DOCTRINE_PROFILE[docs[s.init.side]].runPct, 100));
+    }
     const target = s.targetIdx >= 0 ? sims[s.targetIdx] : undefined;
     if (s.stance === 'evade_retreat') {
       if (noRetreat[s.init.side]) {
@@ -898,15 +1188,66 @@ export function runBattle(
       // lumbering: creep in at its own drives and fire from wherever it is —
       // and lumber the helm too (it answers only every OTHER tick), so
       // nimble attackers genuinely can live in its baffles
+      const px = s.x;
+      const py = s.y;
       if (target && active(target)) physMove(s, target.x, target.y, 30 * FP, speedFP, tick % 2 === 0);
       else physMove(s, s.x + (s.init.side === 0 ? FIELD_W : -FIELD_W), s.y, 0, speedFP, tick % 2 === 0);
       s.x = clamp(s.x, 2 * FP, FIELD_W - 2 * FP);
+      s.mpMoved = Math.min(speedFP, idist(Math.abs(s.x - px), Math.abs(s.y - py)));
+      s.mpFree = speedFP - s.mpMoved;
       return;
     }
     const a = anchorOf(s, si, tick);
     const dx = a.x - s.x;
     const dy = a.y - s.y;
     const d = idist(Math.abs(dx), Math.abs(dy));
+    if (tactics) {
+      // 0.26: the choreography says where to be AND which way to point, and
+      // the two are separate problems. The hull answers the helm at its own
+      // rate toward the choreographed facing — so a maneuver doctrine only
+      // pays off for ships that can get their bows around — and it makes way
+      // toward its station at a speed that depends on how far that station
+      // lies off the bow. A fleet backing away with its guns on you is
+      // making HALF SPEED, which is the whole reason a standoff only holds
+      // while your drives are genuinely faster than theirs, and why a wing
+      // running the long way round arrives late.
+      const rate = turnRateOf(s.init.hullIdx, s.init.isBase);
+      const slow = lumber[si] === true;
+      // lumbering hulls answer the helm only every other tick
+      if (!slow || tick % 2 === 0) {
+        const delta = headingDelta(s.heading, a.h);
+        if (delta !== 0) s.heading = norm32(s.heading + clamp(delta, -rate, rate));
+      }
+      if (d <= speedFP) {
+        s.mpMoved = d;
+        s.mpFree = speedFP - d;
+        s.x = a.x;
+        s.y = a.y;
+        s.x = clamp(s.x, 2 * FP, FIELD_W - 2 * FP);
+        return;
+      }
+      const course = headingToward(dx, dy);
+      const off = Math.abs(headingDelta(s.heading, course));
+      // a hard course change costs way: dead ahead is full burn, abeam three
+      // quarters, and anything astern of the beam is a crawl (a lumbering
+      // hull cannot make sternway at all — it has to come about first)
+      let travel = speedFP;
+      if (slow) travel = off > 8 ? 0 : off > 4 ? Math.floor(travel / 2) : travel;
+      else if (off > 12) travel = roundDiv(travel, 3);
+      else if (off > 8) travel = Math.floor(travel / 2);
+      else if (off > 4) travel = roundDiv(travel * 3, 4);
+      s.mpMoved = travel;
+      s.mpFree = speedFP - travel;
+      if (travel > 0) {
+        // nimble hulls slide onto station; lumbering ones only make way along
+        // the bow, so their figures come out wide and late
+        const h = slow ? s.heading : course;
+        s.x += roundDiv(TRIG[h]![0] * travel, 16384);
+        s.y = clamp(s.y + roundDiv(TRIG[h]![1] * travel, 16384), 8 * FP, FIELD_H - 8 * FP);
+      }
+      s.x = clamp(s.x, 2 * FP, FIELD_W - 2 * FP);
+      return;
+    }
     if (d <= speedFP) {
       s.x = a.x;
       s.y = a.y;
@@ -921,17 +1262,54 @@ export function runBattle(
   /** pattern-mode mount eligibility: geometry first (patternInArc against the
    * choreographed heading), then the speed-scaled forward window, then — with
    * the slewing option on — a wrenched off-axis shot at a cooldown penalty */
-  const patternMountOk = (s: Sim, w: CombatWeapon, bearing: number, tick: number, dist: number): 'in' | 'fast' | 'slew' | null => {
+  /** how many heading steps a mount's true arc already covers */
+  const arcSteps = (arc: WeaponArc) => (arc === 'FX' ? 12 : 4);
+  /** movement cost (fixed point) of working a mount `off` steps off the bow */
+  const jukeCost = (s: Sim, arc: WeaponArc, off: number): number => {
+    const steps = Math.max(0, off - arcSteps(arc));
+    const rate = Math.max(1, turnRateOf(s.init.hullIdx, s.init.isBase));
+    let mp = ceilDiv(steps * JUKE_MP_PER_STEP * FP, rate);
+    if (docs[1 - s.init.side] === 'envelop') mp = roundDiv(mp * JUKE_ENVELOPED_PCT, 100);
+    return mp;
+  };
+  const patternMountOk = (s: Sim, w: CombatWeapon, bearing: number, tick: number, dist: number, commit = false): 'in' | 'fast' | 'juke' | 'slew' | null => {
+    // 0.26: guided munitions do not need the bow on the target — guidance is
+    // the entire point of them, and it is what lets a missile fleet fight a
+    // running battle that a beam fleet simply cannot.
+    if (tactics && (w.classId === 1 || w.classId === 2 || w.classId === 4)) return 'in';
     const arc = w.arc ?? 'F';
     if (patternInArc(arc, bearing, s.heading)) return 'in';
     if (arc === '360' || arc === 'R') return null;
     if (s.init.isBase || s.init.speed <= 0) return null;
-    // charging melee: point-blank, the charger's guns are simply ON you
-    if (docs[s.init.side] === 'charge' && dist <= PATTERN_MELEE) return 'in';
+    // point-blank, the guns are simply ON you. 0.26 extends this from the
+    // charge doctrine to anyone who got there — a flanking wing in the
+    // baffles is at knife range by definition, and that is its whole payoff.
+    if (dist <= PATTERN_MELEE && (tactics || docs[s.init.side] === 'charge')) return 'in';
+    if (tactics) {
+      // JUKE: buy the shot with movement you did not spend going anywhere.
+      // A mount can be worked out to FX coverage and no further, and the
+      // budget is charged once per mount per tick — so a fleet standing to
+      // its guns fires most of its battery off-axis, and a fleet crossing
+      // the field at full burn fires only what genuinely bears. The other
+      // half of that bargain is EVASION_PER_MP, below: standing still is
+      // what makes you easy to hit.
+      const off = Math.abs(headingDelta(s.heading, bearing));
+      if (off > JUKE_MAX_OFF) return slewing && s.slews ? 'slew' : null;
+      const cost = jukeCost(s, arc, off);
+      if (s.mpFree >= cost) {
+        if (commit) s.mpFree -= cost;
+        return 'juke';
+      }
+      return slewing && s.slews ? 'slew' : null;
+    }
+    // 0.24/0.25: engine power bought off-axis shots as a fixed duty cycle
     if (fastForwardWindow(tick, s.init.shipId, s.init.speed)) return 'fast';
     if (slewing && s.slews) return 'slew';
     return null;
   };
+  /** to-hit penalty a target earns by actually moving this tick (0.26) */
+  const motionEvasion = (t: Sim): number =>
+    tactics ? Math.min(EVASION_MAX, roundDiv(t.mpMoved * EVASION_PER_MP, FP)) : 0;
 
   let tick = 0;
   for (tick = 0; tick < MAX_TICKS; tick++) {
@@ -952,6 +1330,24 @@ export function runBattle(
           }
         }
         if (n > 0) cent[side] = { x: Math.floor(sx / n), y: Math.floor(sy / n) };
+      }
+      // ...and, under 0.26 tactics, the bearing each side holds its station
+      // on. Recomputed live, so a fleet backed toward a wall slides along it.
+      if (tactics) {
+        for (const side of [0, 1] as const) {
+          const prof = DOCTRINE_PROFILE[docs[side]];
+          standDir[side] = standDirOf(side, prof.standU);
+          if (!prof.giveGround) continue;
+          // there is nowhere to run from a fleet that is all around you: an
+          // ENVELOP is the classic answer to an enemy trying to keep the range
+          if (docs[1 - side] === 'envelop') {
+            running[side] = false;
+            continue;
+          }
+          const sep = idist(Math.abs(cent[0]!.x - cent[1]!.x), Math.abs(cent[0]!.y - cent[1]!.y));
+          if (sep < prof.standU * FP) running[side] = true;
+          else if (sep > (prof.standU + STANDOFF_SLACK) * FP) running[side] = false;
+        }
       }
     }
 
@@ -1241,6 +1637,12 @@ export function runBattle(
     // --- projectiles fly ---
     for (const p of projectiles) {
       if (p.hp <= 0) continue;
+      // strike craft run out of fuel and turn for home: a carrier that never
+      // closes never lands a sortie (0.26)
+      if (tactics && p.classId === 4 && tick - p.born >= STRIKE_CRAFT_TICKS) {
+        p.hp = 0;
+        continue;
+      }
       const t = sims[p.targetIdx];
       if (!t || !active(t)) {
         p.hp = 0;
@@ -1337,7 +1739,7 @@ export function runBattle(
         let slewShot = false;
         if (!isPd) {
           if (patterns) {
-            const elig = patternMountOk(s, w, bearing, tick, dist);
+            const elig = patternMountOk(s, w, bearing, tick, dist, true);
             if (elig === null) continue;
             slewShot = elig === 'slew';
           } else if (!inArc(w.arc ?? 'F', bearing, s.heading)) continue;
@@ -1362,7 +1764,12 @@ export function runBattle(
           // tactic fights in — 'line' owns the long game; chargers, wings and
           // nets speak at medium and short. Lumbering hulls and bases fire
           // from wherever they are; missiles/strike craft are never gated.
-          if (patterns && !s.init.isBase && !lumber[si] && band > DOCTRINE_FIRE_BAND[docs[s.init.side]]!) continue;
+          // (0.26: lumbering hulls fly a doctrine too, so they keep its fire
+          // discipline; only bases shoot at whatever wanders into reach)
+          if (patterns && !s.init.isBase && (tactics || !lumber[si])) {
+            const fireBand = tactics ? DOCTRINE_PROFILE[docs[s.init.side]].fireBand : DOCTRINE_FIRE_BAND[docs[s.init.side]]!;
+            if (band > fireBand) continue;
+          }
           const shots = w.mods.includes('af') ? 3 : 1;
           const attack = s.sysComputer ? 0 : s.init.beamAttack; // fried targeting computer
           // volley bookkeeping: once the current target is dead-on-paper the
@@ -1399,7 +1806,7 @@ export function runBattle(
               let band2 = bandOf(d2);
               if (band2 > 0 && s.specials.has('rangemaster_target_unit')) band2 = (band2 - 1) as 0 | 1 | 2;
               let hitPct = clamp(
-                50 + attack - tt.init.beamDefense + BAND_HIT[band2]! +
+                50 + attack - tt.init.beamDefense - motionEvasion(tt) + BAND_HIT[band2]! +
                   (w.mods.includes('co') ? 25 : 0) + (w.mods.includes('af') ? -20 : 0),
                 5,
                 95,
@@ -1418,6 +1825,13 @@ export function runBattle(
               if (w.mods.includes('ovr')) dmg = roundDiv(dmg * 150, 100); // overloaded mount
               if (w.mods.includes('env')) dmg *= 2; // enveloping: wraps the shields
               if (isPd) dmg = Math.max(1, roundDiv(dmg * 50, 100));
+              // 0.26: into the drives, not the armored bow — the reason a
+              // flanking wing is worth splitting the fleet for, and the
+              // reason a hull that cannot come about is in real trouble
+              if (tactics && !isPd && band2 <= 1) {
+                const rel = Math.abs(headingDelta(tt.heading, headingToward(s.x - tt.x, s.y - tt.y)));
+                if (rel >= 8) dmg = roundDiv(dmg * REAR_ARC_DMG_PCT, 100);
+              }
               if (s.specials.has('high_energy_focus')) dmg = roundDiv(dmg * 150, 100);
               if (s.specials.has('structural_analyzer')) dmg *= 2;
               const mods = s.specials.has('achilles_targeting_unit') ? [...w.mods, 'achilles'] : w.mods;
@@ -1440,6 +1854,7 @@ export function runBattle(
             if (w.mods.includes('ovr')) dmg = roundDiv(dmg * 150, 100); // overloaded warhead
             if (w.mods.includes('env')) dmg *= 2; // enveloping: wraps the shields
             projectiles.push({
+              born: tick,
               from: s.init.shipId,
               targetIdx: s.targetIdx,
               x: s.x,
@@ -1466,6 +1881,7 @@ export function runBattle(
           for (let n = 0; n < volley; n++) {
             const boarding = w.dmgMax <= 0; // assault shuttles carry marines, not bombs
             projectiles.push({
+              born: tick,
               from: s.init.shipId,
               targetIdx: s.targetIdx,
               x: s.x,

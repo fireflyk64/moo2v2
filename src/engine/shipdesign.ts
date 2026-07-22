@@ -298,6 +298,30 @@ export interface DesignStats {
   weapons: FittedWeapon[];
 }
 
+/** Mount mix of a design by weapon role, in MOUNTS (count, not damage):
+ * guided = missiles and torpedoes (classId 1/2, no range falloff, no bow
+ * needed), strike = fighter bays and assault shuttles (classId 4, short
+ * legs), direct = everything that has to be aimed. Bombs never fire in the
+ * pass. Used by the doctrine chooser (spaceTactics.pickDoctrine). */
+export function designMountMix(design: { weapons: DesignWeapon[] }): { guided: number; strike: number; direct: number } {
+  let guided = 0;
+  let strike = 0;
+  let direct = 0;
+  for (const dw of design.weapons) {
+    const row = weaponById.get(dw.weapon);
+    if (!row || row.classId === 3) continue;
+    if (row.classId === 1 || row.classId === 2) guided += dw.count;
+    else if (row.classId === 4) strike += dw.count;
+    else direct += dw.count;
+  }
+  return { guided, strike, direct };
+}
+
+/** hull index (1 frigate .. 6 doomstar, 7+ bases) for a hull id */
+export function hullIndexOf(hull: string): number {
+  return HULLS_BUILDABLE.indexOf(hull as never) + 1 || BASE_HULLS.indexOf(hull as never) + 7;
+}
+
 /** Hull availability (C7): frigate/destroyer always; cruiser needs capsule
  * construction (field 21); battleship astro construction (field 19); titan and
  * doomstar need their construction applications. */

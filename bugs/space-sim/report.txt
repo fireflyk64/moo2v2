@@ -1,0 +1,300 @@
+=== space-tactics Monte Carlo — engine: 0.26 tactics, trials/cell 4, retreat 0% ===
+
+=== fleet archetypes ===
+archetype           hulls  hp      dps     power   identity
+slow_missile        5      736     106     78      lumbering missile boats — warheads ignore range falloff, hulls cannot run
+fast_carrier        7      736     144     106     fast fighter carriers — strike craft must be launched from close in
+beam_skirmisher     22     704     126     89      nimble forward-beam frigates — every gun is a front arc, every hull turns fast
+heavy_line          3      758     149     113     lumbering heavy-mount capitals — enormous reach, cannot answer the helm
+turret_cruiser      10     736     160     118     all-round turret cruisers — weaker guns that never care where the bow points
+fx_destroyer        13     736     130     96      oblique-mount destroyers — 270° arcs that bear through most of a turn
+pd_escort           12     736     132     97      interceptor screens — point defense and rockets that eat guided munitions
+shield_wall         4      792     52      41      shielded gun wall — flat deflection blunts every small hit
+torpedo_raider      20     744     164     122     fast torpedo boats — heavy warheads, thin hulls, short legs
+boarding_assault    8      920     88      81      assault-shuttle boarders — marines that cripple systems, only from knife range
+
+=== LEVERAGE — how far the doctrine choice moves the material edge, per matchup ===
+(edge = own damage taken subtracted from foe damage taken, in points; both orientations averaged)
+matchup                                 leverage  best      worst     ticks   
+slow_missile vs slow_missile                   6.9 pincer    envelop       400
+slow_missile vs fast_carrier                  21.6 standoff  pincer        309
+slow_missile vs beam_skirmisher               22.2 charge    line          316
+slow_missile vs heavy_line                    20.7 envelop   line          262
+slow_missile vs turret_cruiser                42.5 charge    line          301
+slow_missile vs fx_destroyer                  26.9 charge    line          345
+slow_missile vs pd_escort                      4.2 standoff  pincer        198
+slow_missile vs shield_wall                   25.1 standoff  pincer        397
+slow_missile vs torpedo_raider                12.2 envelop   pincer        394
+slow_missile vs boarding_assault              12.1 standoff  envelop       293
+fast_carrier vs fast_carrier                  48.6 standoff  pincer        249
+fast_carrier vs beam_skirmisher               36.8 standoff  charge        249
+fast_carrier vs heavy_line                    37.7 charge    standoff      202
+fast_carrier vs turret_cruiser                18.5 standoff  charge        170
+fast_carrier vs fx_destroyer                  17.2 standoff  charge        237
+fast_carrier vs pd_escort                     21.3 standoff  envelop       210
+fast_carrier vs shield_wall                   62.2 envelop   standoff      304
+fast_carrier vs torpedo_raider                27.9 standoff  charge        324
+fast_carrier vs boarding_assault              35.5 standoff  flank         261
+beam_skirmisher vs beam_skirmisher            62.3 flank     line          219
+beam_skirmisher vs heavy_line                 32.3 envelop   flank         211
+beam_skirmisher vs turret_cruiser             18.0 standoff  line          198
+beam_skirmisher vs fx_destroyer               51.7 flank     standoff      219
+beam_skirmisher vs pd_escort                  22.2 envelop   charge        235
+beam_skirmisher vs shield_wall               115.5 charge    standoff      271
+beam_skirmisher vs torpedo_raider             21.5 standoff  charge        256
+beam_skirmisher vs boarding_assault           42.4 standoff  charge        297
+heavy_line vs heavy_line                      54.0 charge    standoff      275
+heavy_line vs turret_cruiser                  68.1 charge    standoff      177
+heavy_line vs fx_destroyer                   103.7 charge    standoff      200
+heavy_line vs pd_escort                       89.9 charge    standoff      232
+heavy_line vs shield_wall                    105.0 charge    envelop       318
+heavy_line vs torpedo_raider                   9.1 pincer    envelop       164
+heavy_line vs boarding_assault                47.8 flank     standoff      247
+turret_cruiser vs turret_cruiser              61.4 pincer    line          180
+turret_cruiser vs fx_destroyer                15.5 flank     line          185
+turret_cruiser vs pd_escort                   28.4 standoff  charge        167
+turret_cruiser vs shield_wall                 81.5 charge    standoff      270
+turret_cruiser vs torpedo_raider              37.0 standoff  charge        290
+turret_cruiser vs boarding_assault            49.3 standoff  charge        211
+fx_destroyer vs fx_destroyer                  45.6 flank     charge        208
+fx_destroyer vs pd_escort                     22.1 envelop   charge        224
+fx_destroyer vs shield_wall                  122.7 charge    standoff      303
+fx_destroyer vs torpedo_raider                35.4 standoff  charge        265
+fx_destroyer vs boarding_assault              61.5 standoff  pincer        282
+pd_escort vs pd_escort                        50.9 flank     standoff      223
+pd_escort vs shield_wall                      85.6 charge    standoff      316
+pd_escort vs torpedo_raider                    8.3 line      charge        205
+pd_escort vs boarding_assault                 47.6 envelop   standoff      253
+shield_wall vs shield_wall                    94.2 charge    standoff      373
+shield_wall vs torpedo_raider                 12.0 envelop   charge        300
+shield_wall vs boarding_assault               46.9 line      charge        364
+torpedo_raider vs torpedo_raider               8.1 standoff  charge        231
+torpedo_raider vs boarding_assault            45.6 standoff  pincer        377
+boarding_assault vs boarding_assault          47.1 line      pincer        306
+
+mean leverage 42.7  |  flattest: slow_missile vs pd_escort (4.2)  |  sharpest: fx_destroyer vs shield_wall (122.7)
+
+=== DOMINANCE — doctrine vs doctrine, all archetypes pooled (mean edge) ===
+own \ foe      charge     line standoff    flank   pincer  envelop
+charge            0.0     -6.4     14.1     -1.2      2.8      0.2
+line              6.4      0.0    -20.8      1.2      3.1     -2.7
+standoff        -14.1     20.8      0.0    -21.3    -22.7      8.9
+flank             1.2     -1.2     21.3      0.0      0.3      3.9
+pincer           -2.8     -3.1     22.7     -0.3      0.0      1.4
+envelop          -0.2      2.7     -8.9     -3.9     -1.4      0.0
+
+doctrine    mean edge   win%      worst reply
+charge               1.6      52.0 line (-6.4)
+line                -2.1      49.8 standoff (-20.8)
+standoff            -4.7      44.1 pincer (-22.7)
+flank                4.2      53.1 line (-1.2)
+pincer               3.0      51.5 line (-3.1)
+envelop             -1.9      49.6 standoff (-8.9)
+
+dominance spread 9.0  (flank strongest, standoff weakest)
+
+=== IDENTITY — mean edge per doctrine, by fleet archetype (pooled over every foe and foe doctrine) ===
+archetype           charge   line     standoff flank    pincer   envelop    best      wanted
+slow_missile             14.9      4.8     12.9      6.8      7.1     11.0  charge    standoff/line
+fast_carrier             -6.3     -8.8     -2.9     -9.4     -8.0     -3.5  standoff  charge/envelop
+beam_skirmisher          -9.7    -12.9     -9.3     -0.7     -3.7     -4.5  flank     flank/pincer
+heavy_line                7.5    -21.8    -49.4    -15.3    -16.7    -39.3  charge    line/standoff
+turret_cruiser           14.1      7.3     23.4     22.2     24.9     15.1  pincer    envelop/charge
+fx_destroyer            -14.3    -19.0     -5.6     -6.4    -10.8    -14.4  standoff  pincer/flank
+pd_escort                13.4     12.2     -3.1     19.6     21.3     16.0  pincer    line/envelop
+shield_wall             -17.8     -9.2    -38.0     -5.8     -5.2    -22.3  pincer    line/charge
+torpedo_raider           23.3     27.4     36.8     22.4     22.5     25.4  standoff  charge/flank
+boarding_assault        -10.5      3.2     -7.7      4.4     -2.1     -5.3  flank     charge/envelop
+
+distinct preferred doctrines across 10 archetypes: 4 (charge, standoff, flank, pincer)
+archetypes whose measured best is one they were DESIGNED to want: 1/10
+
+=== ARCHETYPE BALANCE — mean edge of row fleet vs column fleet (pooled over all doctrine pairs) ===
+fleet                slow_mis fast_car beam_ski heav_lin turr_cru  fx_dest  pd_esco shie_wal torp_rai boar_ass   mean
+slow_missile              0.0    -38.8     62.4     66.0     40.0     51.4    -93.7     24.3     18.5    -34.3      9.6
+fast_carrier             38.8      0.0     -0.7    -22.1    -34.8     -0.2    -52.2     19.6     11.1    -24.5     -6.5
+beam_skirmisher         -62.4      0.7      0.0     37.7    -33.4      2.1     22.5     25.1    -78.2     17.9     -6.8
+heavy_line              -66.0     22.1    -37.7      0.0    -43.8    -25.2      9.0      6.9    -76.9    -13.4    -22.5
+turret_cruiser          -40.0     34.8     33.4     43.8      0.0     38.7     56.4     32.2    -58.4     37.5     17.8
+fx_destroyer            -51.4      0.2     -2.1     25.2    -38.7      0.0     18.4     -1.7    -72.1      4.6    -11.8
+pd_escort                93.7     52.2    -22.5     -9.0    -56.4    -18.4      0.0    -25.6     87.6     30.6     13.2
+shield_wall             -24.3    -19.6    -25.1     -6.9    -32.2      1.7     25.6      0.0    -81.2     -1.8    -16.4
+torpedo_raider          -18.5    -11.1     78.2     76.9     58.4     72.1    -87.6     81.2      0.0     13.7     26.3
+boarding_assault         34.3     24.5    -17.9     13.4    -37.5     -4.6    -30.6      1.8    -13.7      0.0     -3.0
+
+=== IDENTITY BY MATCHUP — the row fleet's best doctrine against each column fleet ===
+fleet                slow_mis fast_car beam_ski heav_lin turr_cru  fx_dest  pd_esco shie_wal torp_rai boar_ass
+slow_missile           pincer standoff   charge  envelop   charge   charge standoff standoff  envelop standoff
+fast_carrier           charge standoff standoff   charge standoff standoff standoff  envelop standoff standoff
+beam_skirmisher         flank standoff    flank  envelop standoff    flank  envelop   charge standoff standoff
+heavy_line             charge   charge   charge   charge   charge   charge   charge   charge   pincer    flank
+turret_cruiser          flank standoff standoff standoff   pincer    flank standoff   charge standoff standoff
+fx_destroyer           pincer standoff    flank standoff standoff    flank  envelop   charge standoff standoff
+pd_escort              pincer  envelop   pincer     line  envelop   pincer    flank   charge     line  envelop
+shield_wall            charge     line     line   pincer   pincer     line   pincer   charge  envelop     line
+torpedo_raider        envelop standoff standoff standoff standoff standoff   charge standoff standoff standoff
+boarding_assault        flank standoff standoff     line  envelop    flank    flank   charge standoff     line
+
+how often each doctrine is the right answer: charge 21, line 8, standoff 37, flank 12, pincer 10, envelop 12
+
+=== MAXIMIN — per matchup, the doctrine with the best worst-case reply ===
+matchup                                 A picks     worst-case  
+slow_missile vs slow_missile            charge              -1.3
+slow_missile vs fast_carrier            line               -42.9
+slow_missile vs beam_skirmisher         charge              73.4
+slow_missile vs heavy_line              charge              63.6
+slow_missile vs turret_cruiser          charge              53.9
+slow_missile vs fx_destroyer            charge              65.9
+slow_missile vs pd_escort               charge             -95.5
+slow_missile vs shield_wall             charge               5.3
+slow_missile vs torpedo_raider          standoff            19.0
+slow_missile vs boarding_assault        charge             -38.8
+fast_carrier vs fast_carrier            standoff             0.0
+fast_carrier vs beam_skirmisher         standoff           -28.4
+fast_carrier vs heavy_line              charge             -43.0
+fast_carrier vs turret_cruiser          pincer             -59.4
+fast_carrier vs fx_destroyer            pincer             -26.0
+fast_carrier vs pd_escort               pincer             -64.1
+fast_carrier vs shield_wall             charge              19.6
+fast_carrier vs torpedo_raider          flank                2.6
+fast_carrier vs boarding_assault        envelop            -40.0
+beam_skirmisher vs beam_skirmisher      pincer               0.0
+beam_skirmisher vs heavy_line           envelop             41.9
+beam_skirmisher vs turret_cruiser       charge             -40.3
+beam_skirmisher vs fx_destroyer         flank                3.3
+beam_skirmisher vs pd_escort            flank               23.1
+beam_skirmisher vs shield_wall          charge              55.1
+beam_skirmisher vs torpedo_raider       flank              -83.5
+beam_skirmisher vs boarding_assault     envelop              1.6
+heavy_line vs heavy_line                charge               0.0
+heavy_line vs turret_cruiser            charge             -35.8
+heavy_line vs fx_destroyer              charge               6.8
+heavy_line vs pd_escort                 charge              10.3
+heavy_line vs shield_wall               charge              59.9
+heavy_line vs torpedo_raider            pincer             -79.3
+heavy_line vs boarding_assault          flank              -18.6
+turret_cruiser vs turret_cruiser        pincer               0.0
+turret_cruiser vs fx_destroyer          flank               30.4
+turret_cruiser vs pd_escort             pincer              59.8
+turret_cruiser vs shield_wall           envelop             33.9
+turret_cruiser vs torpedo_raider        standoff           -66.5
+turret_cruiser vs boarding_assault      standoff            53.5
+fx_destroyer vs fx_destroyer            flank                0.0
+fx_destroyer vs pd_escort               envelop             -2.0
+fx_destroyer vs shield_wall             charge              42.0
+fx_destroyer vs torpedo_raider          standoff           -70.9
+fx_destroyer vs boarding_assault        standoff            17.0
+pd_escort vs pd_escort                  flank                0.0
+pd_escort vs shield_wall                charge             -38.0
+pd_escort vs torpedo_raider             flank               80.3
+pd_escort vs boarding_assault           envelop             43.9
+shield_wall vs shield_wall              charge               0.0
+shield_wall vs torpedo_raider           envelop            -84.8
+shield_wall vs boarding_assault         flank              -19.3
+torpedo_raider vs torpedo_raider        standoff             0.0
+torpedo_raider vs boarding_assault      standoff            18.4
+boarding_assault vs boarding_assault    standoff            -3.1
+
+=== SIGNATURE MATCHUPS (full doctrine x doctrine tables) ===
+
+--- slow_missile (rows) vs beam_skirmisher (cols) — edge for slow_missile ---
+own \ foe      charge     line standoff    flank   pincer  envelop
+charge           75.0     73.4     78.3     75.6     78.1     79.1
+line             65.5     40.1     63.5     43.9     43.4     70.1
+standoff         59.0     73.9     79.5     50.0     52.5     69.4
+flank            57.4     41.1     66.8     41.0     66.0     71.5
+pincer           55.6     36.5     70.3     45.3     51.8     73.1
+envelop          74.6     63.6     72.3     41.9     71.3     76.9
+
+--- slow_missile (rows) vs fast_carrier (cols) — edge for slow_missile ---
+own \ foe      charge     line standoff    flank   pincer  envelop
+charge          -38.5    -44.6    -54.8    -43.9    -42.0    -39.0
+line            -42.9    -29.1    -37.4    -14.9    -28.9    -35.8
+standoff        -41.4    -11.5     -0.9    -21.6    -44.0    -30.9
+flank           -46.8    -41.5    -38.3    -30.4    -46.0    -44.4
+pincer          -45.9    -54.1    -37.1    -49.9    -47.5    -45.1
+envelop         -46.4    -40.6    -40.8    -38.6    -49.8    -51.8
+
+--- fast_carrier (rows) vs beam_skirmisher (cols) — edge for fast_carrier ---
+own \ foe      charge     line standoff    flank   pincer  envelop
+charge          -14.4    -51.1    -57.3     -9.4     26.4      5.3
+line             41.1    -60.5    -41.9      5.8     12.0    -12.4
+standoff         -2.5     84.1    -28.4     34.0     17.6     15.1
+flank            14.9    -28.8    -29.0     23.0     -3.9     29.4
+pincer            5.5    -35.4    -28.1     21.5     11.1      8.8
+envelop          39.3     21.4    -65.9     -9.5      6.4     29.9
+
+--- beam_skirmisher (rows) vs heavy_line (cols) — edge for beam_skirmisher ---
+own \ foe      charge     line standoff    flank   pincer  envelop
+charge           -9.0     49.1     71.9     56.5     55.6     46.3
+line            -34.4    -16.1     82.5     31.8     33.3     65.3
+standoff        -23.3     85.6     55.8     55.5     57.4     69.4
+flank             0.3    -20.0     73.4     14.1     -1.0     72.6
+pincer           14.9    -17.4     65.8     37.3     10.9     41.0
+envelop          41.9     63.3     49.1     45.8     63.1     70.3
+
+--- slow_missile (rows) vs heavy_line (cols) — edge for slow_missile ---
+own \ foe      charge     line standoff    flank   pincer  envelop
+charge           63.6     78.4     70.5     69.6     68.3     80.9
+line             43.8     49.9     78.4     46.6     47.1     82.5
+standoff         46.3     79.1     76.0     61.8     60.9     77.9
+flank            36.3     40.8     77.0     57.1     54.6     82.9
+pincer           41.8     54.4     77.1     61.8     52.3     87.4
+envelop          76.1     88.6     59.5     77.6     74.6     96.0
+
+=== DRIVE RACE — best doctrine as one side gains/loses engine speed ===
+(A is the side whose drives change; edge is A's. Foe always plays its own best doctrine.)
+
+slow_missile (drive delta) vs beam_skirmisher
+delta   charge   line     standoff flank    pincer   envelop    best
+-4           67.5     60.7     58.8     62.8     64.3     72.0  envelop
+-2           74.8     56.0     63.3     57.8     59.1     68.0  charge
+0            76.4     56.5     64.7     57.6     57.0     65.8  charge
++2           69.8     53.7     67.7     57.3     48.9     70.5  envelop
++4           69.3     50.3     69.0     53.0     49.8     73.9  envelop
+
+beam_skirmisher (drive delta) vs turret_cruiser
+delta   charge   line     standoff flank    pincer   envelop    best
+-4          -62.8    -52.7    -53.7    -47.3    -54.9    -53.2  flank
+-2          -50.6    -49.8    -38.0    -39.8    -45.3    -41.3  standoff
+0           -27.1    -47.8    -25.6    -27.2    -41.5    -24.6  envelop
++2          -15.5    -35.9    -21.1    -34.0    -36.0     -9.0  envelop
++4            2.9    -40.7    -21.1    -30.1    -29.9     -3.9  charge
+
+fast_carrier (drive delta) vs pd_escort
+delta   charge   line     standoff flank    pincer   envelop    best
+-4          -66.1    -54.4    -75.5    -58.8    -50.2    -64.8  pincer
+-2          -57.9    -47.8    -52.4    -54.8    -54.5    -65.7  line
+0           -55.9    -50.8    -38.8    -55.5    -49.8    -59.7  standoff
++2          -44.9    -53.4    -46.1    -57.6    -43.9    -53.1  pincer
++4          -38.4    -55.5    -36.6    -55.8    -34.1    -51.2  pincer
+
+=== BAND FORENSICS — where each doctrine actually fights ===
+(one fleet flies the row doctrine against every foe doctrine; distances in field units)
+
+-- beam_skirmisher --
+doctrine    fleet sep fire dist short%  med%    long%   u/tick  shots   hit%   taken   theirhit% ticks  
+charge             176       124      58      20      22     4.3     278     54     307        46    227
+line               182       142      23      77       0     2.3     299     59     370        47    273
+standoff           215       267       7      26      67     3.9     625     41     380        36    318
+flank              170       178      23      49      28     3.5     408     52     284        48    259
+pincer             169       170      30      42      27     3.9     380     52     286        48    236
+envelop            146       146      44      33      23     4.5     386     54     312        43    209
+
+-- slow_missile --
+doctrine    fleet sep fire dist short%  med%    long%   u/tick  shots   hit%   taken   theirhit% ticks  
+charge             179       100      65      24      12     2.4     143     84     206        63    253
+line               188       168      30      40      30     1.1      92     89     251        64    346
+standoff           218       190      30      28      42     1.5      93     91     251        58    363
+flank              183       160      40      32      29     1.4     102     88     250        63    336
+pincer             185       160      40      31      29     1.6     104     88     229        65    316
+envelop            200       164      45      24      32     1.8     110     85     234        64    310
+
+-- fast_carrier --
+doctrine    fleet sep fire dist short%  med%    long%   u/tick  shots   hit%   taken   theirhit% ticks  
+charge             186        82      78      12      10     3.4     203     68     266        62    223
+line               183       111      45      55       0     1.8     200     66     309        62    269
+standoff           228       221      20      28      52     3.3     342     50     313        50    315
+flank              171       138      47      35      18     2.6     232     62     287        63    254
+pincer             165       125      57      27      17     2.8     228     66     294        61    261
+envelop            155       107      64      23      13     3.8     247     65     251        60    199

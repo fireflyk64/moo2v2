@@ -14,7 +14,8 @@
 // All tunables live in the tables at the top — the tournament improvement
 // loop edits weights, not control flow.
 
-import { HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
+import { HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, designMountMix, designStats, hullIndexOf, marinesOf, pickDoctrine, selectors, shipMarines, starDistance } from '@engine/index';
+import { generateTerrain, pickGroundAttack } from '@engine/groundTactics';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import { leaderById } from '@engine/leaders';
 import type { Empire, GameState, Planet } from '@engine/types';
@@ -1208,7 +1209,7 @@ export function onionTurn(ctx: OnionCtx): void {
  * — a pure deep-space fleet hunt. */
 export function pickAssaultPlanet(state: GameState, defenderId: number, starId: number): number | null {
   if (defenderId < 0) return null;
-  const DEFENSES = ['star_base', 'battle_station', 'star_fortress', 'missile_base', 'ground_batteries'];
+  const DEFENSES = ORBITAL_DEFENSES;
   const holdings = state.colonies.filter(
     (c) => c.owner === defenderId && state.planets.some((p) => p.id === c.planetId && p.starId === starId),
   );
@@ -1221,29 +1222,89 @@ export function pickAssaultPlanet(state: GameState, defenderId: number, starId: 
   )[0]!.planetId;
 }
 
-/** Formation pick (0.23.0): attackers with big fleets (>= 8 hulls) flank or
- * envelop (seeded by battle id — no rng handle here), defenders with orbital
- * defenses form a line; everyone else stays massed (absent field = classic). */
+const ORBITAL_DEFENSES = ['star_base', 'battle_station', 'star_fortress', 'missile_base', 'ground_batteries'];
+
+const defendsStar = (state: GameState, owner: number, starId: number): boolean =>
+  state.colonies.some(
+    (c) =>
+      c.owner === owner &&
+      state.planets.some((p) => p.id === c.planetId && p.starId === starId) &&
+      c.buildings.some((b) => ORBITAL_DEFENSES.includes(b)),
+  );
+
+/**
+ * Doctrine pick (0.26.0): read the fleet we actually brought and let
+ * spaceTactics.pickDoctrine choose the tactic that suits it — warhead fleets
+ * hold the range, carriers and boarders close, fast light hulls go for the
+ * rear arcs, and anything fighting under its own orbital guns stands with
+ * them. Only our OWN designs are consulted; the enemy's blueprints are not
+ * ours to read.
+ *
+ * (Before 0.26 this was a coin between flank and envelop for big attacking
+ * fleets, which is exactly as much thought as the old engine rewarded.)
+ */
 export function pickFormation(
   state: GameState,
   me: number,
   battle: { id: string; starId: number; attacker: number; defender: number },
   myHulls: number,
-): 'line' | 'flank' | 'envelop' | undefined {
-  if (battle.attacker === me) {
-    if (myHulls < 8) return undefined;
-    let h = 0;
-    for (let i = 0; i < battle.id.length; i++) h = (h * 31 + battle.id.charCodeAt(i)) >>> 0;
-    return h % 2 === 0 ? 'flank' : 'envelop';
-  }
-  const DEFENSES = ['star_base', 'battle_station', 'star_fortress', 'missile_base', 'ground_batteries'];
-  const hasBase = state.colonies.some(
-    (c) =>
-      c.owner === me &&
-      state.planets.some((p) => p.id === c.planetId && p.starId === battle.starId) &&
-      c.buildings.some((b) => DEFENSES.includes(b)),
+): string | undefined {
+  if (myHulls === 0) return undefined;
+  const empire = state.empires.find((e) => e.id === me);
+  if (!empire) return undefined;
+  const here = state.ships.filter(
+    (s) =>
+      s.owner === me && s.shipKind === 'design' && s.location.kind === 'star' && s.location.starId === battle.starId,
   );
-  return hasBase ? 'line' : undefined;
+  let guided = 0;
+  let strike = 0;
+  let direct = 0;
+  let speed = 0;
+  let hullIdx = 0;
+  let n = 0;
+  for (const ship of here) {
+    const d = empire.designs.find((x) => x.id === ship.designId);
+    if (!d) continue;
+    const mix = designMountMix(d);
+    guided += mix.guided;
+    strike += mix.strike;
+    direct += mix.direct;
+    const stats = designStats(state, empire, d);
+    if (typeof stats === 'string') continue;
+    speed += stats.combatSpeed;
+    hullIdx += hullIndexOf(d.hull);
+    n++;
+  }
+  if (n === 0) return undefined;
+  const mounts = Math.max(1, guided + strike + direct);
+  return pickDoctrine(
+    {
+      hulls: n,
+      guidedPct: Math.round((100 * guided) / mounts),
+      strikePct: Math.round((100 * strike) / mounts),
+      speed: Math.round(speed / n),
+      hullIdx: Math.round(hullIdx / n),
+    },
+    {
+      defending: battle.defender === me,
+      ownBases: defendsStar(state, me, battle.starId),
+      enemyBases: defendsStar(state, battle.attacker === me ? battle.defender : battle.attacker, battle.starId),
+    },
+  );
+}
+
+/**
+ * Ground attack tactic for a planned invasion: read the target planet's
+ * public terrain map and let spaceTactics' sibling pickGroundAttack choose
+ * the tactic that best fits the ground (cover → infiltrate, broken rock →
+ * bounding overwatch, open → a charge/flank). Fair by construction — it
+ * reads the map, not the defender's standing doctrine.
+ */
+export function pickInvadeTactic(state: GameState, planetId: number | null): string | undefined {
+  if (planetId == null) return undefined;
+  const planet = state.planets.find((p) => p.id === planetId);
+  if (!planet) return undefined;
+  return pickGroundAttack(generateTerrain(planet.id, planet.climate));
 }
 
 export function onionBattleOrders(
@@ -1259,6 +1320,7 @@ export function onionBattleOrders(
   invade: boolean;
   engagePlanetId: number | null;
   formation?: string;
+  invadeTactic?: string;
 } {
   const foe = battle.attacker === me ? battle.defender : battle.attacker;
   const hullsAt = (owner: number) =>
@@ -1271,19 +1333,24 @@ export function onionBattleOrders(
   const doomed = foe >= 0 && theirs > mine * 2 + 1;
   const advantage = mine / Math.max(1, theirs);
   const formation = doomed ? undefined : pickFormation(state, me, battle, mine);
+  // engagement: an attacker meaning conquest assaults the weakest-defended
+  // colony; a doomed attacker stays in deep space (it is fleeing anyway); a
+  // defender always meets the fleet
+  const engagePlanetId =
+    battle.attacker === me && !doomed ? pickAssaultPlanet(state, battle.defender, battle.starId) : null;
+  const invade = !doomed && battle.attacker === me;
+  // pick the landing tactic for the ground the invasion will be fought on
+  const invadeTactic = invade ? pickInvadeTactic(state, engagePlanetId) : undefined;
   return {
     stance: doomed ? 'evade_retreat' : battle.attacker === me || advantage >= 1.2 ? 'charge' : 'hold_range',
     priority: advantage >= 1.5 ? 'deadliest' : 'nearest',
     retreatThresholdPct: personality === 'militarist' || personality === 'rusher' ? 15 : 25,
     bombard: !doomed && battle.attacker === me,
     // marines in orbit always land on a win — the lift was sent to invade
-    invade: !doomed && battle.attacker === me,
-    // engagement: an attacker meaning conquest assaults the weakest-defended
-    // colony; a doomed attacker stays in deep space (it is fleeing anyway);
-    // a defender always meets the fleet
-    engagePlanetId:
-      battle.attacker === me && !doomed ? pickAssaultPlanet(state, battle.defender, battle.starId) : null,
+    invade,
+    engagePlanetId,
     // big attacking fleets flank/envelop; defenders with a base form a line
     ...(formation ? { formation } : {}),
+    ...(invadeTactic ? { invadeTactic } : {}),
   };
 }

@@ -15,12 +15,13 @@
 // to parity, that bot built RANDOM items and never sailed the colony ships it
 // happened to build, so it sat on one system all game.)
 
-import { HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
+import { colonyPopUnits, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
+import { generateTerrain, pickGroundDefense } from '@engine/groundTactics';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import type { Empire, GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 import { botRaceById, botRacePicks } from './botRaces';
-import { freshOnionMemory, onionBattleOrders, onionTurn, pickAssaultPlanet, pickFormation, planetScore, type OnionMemory } from './onionBot';
+import { freshOnionMemory, onionBattleOrders, onionTurn, pickAssaultPlanet, pickFormation, pickInvadeTactic, planetScore, type OnionMemory } from './onionBot';
 
 export type BotMode = 'parity' | 'fair';
 /** fair-bot strategy generation: v1 = the original random-build brain (kept
@@ -262,6 +263,27 @@ export class SoloBot {
     return this.session.submit(kind, payload); // rejections are fine — the bot shrugs
   }
 
+  /** Standing ground-defense doctrine per owned colony. Reads the colony's
+   * own garrison mix (trained marines vs civilian militia) and its terrain
+   * and lets pickGroundDefense choose — "civilians man walls, soldiers
+   * maneuver." Only re-submitted when the pick actually changes, so it never
+   * spams the log; a doctrine-absent colony (fresh save, old game) still
+   * resolves byte-exact until the bot first sets one. */
+  private orderGroundDoctrine(state: GameState, me: number): void {
+    const planned = this.session.getPlanned() ?? state;
+    for (const c of planned.colonies) {
+      if (c.owner !== me || c.outpost) continue;
+      const planet = planned.planets.find((p) => p.id === c.planetId);
+      if (!planet) continue;
+      const pop = colonyPopUnits(c);
+      const marines = marinesOf(c);
+      const militia = Math.ceil(pop / 2);
+      const share = marines / Math.max(1, marines + militia);
+      const want = pickGroundDefense(share, generateTerrain(planet.id, planet.climate));
+      if (c.groundTactic !== want) this.submit('set_ground_tactic', { colonyId: c.id, tactic: want });
+    }
+  }
+
   private playTurn(state: GameState): void {
     const me = this.session.playerId;
     if (this.requestedPersonality === 'auto' && me >= 0) {
@@ -344,6 +366,11 @@ export class SoloBot {
     if (this.mirrorCatchUp && state.settings.mirror && state.settings.debugCommands) {
       this.mirrorTopUp(state, me, bot);
     }
+
+    // standing ground-defense doctrine for every colony (all brains): a
+    // militia-heavy world forts up, a marine-heavy garrison maneuvers, and
+    // the terrain shades the pick — set once and re-set only when it changes
+    this.orderGroundDoctrine(state, me);
 
     // ---- onion brain: the constraint-driven doctrine owns the whole turn
     // (research, colonies, expansion, military) — shared shell above (lobby,
@@ -1191,12 +1218,16 @@ export class SoloBot {
       // weakest-defended colony; a doomed (fleeing) attacker keeps to deep
       // space; a defender always meets the fleet
       const conquest = !doomed && b.attacker === me;
-      // formations (0.23.0): warlike attackers with big fleets flank/envelop;
-      // defenders holding a base form a line; small fleets stay massed
-      const formation =
-        doomed || (b.attacker === me && !(this.aggressive || this.profile.warlike))
-          ? undefined
-          : pickFormation(state, me, b, hullsAt(me));
+      // doctrine (0.26): every fleet that is going to fight picks the tactic
+      // its own weapons and drives want (pickFormation -> pickDoctrine); only
+      // a fleet already fleeing (doomed) skips it. Was gated to warlike
+      // attackers back when formations were a flourish rather than the whole
+      // shape of the battle.
+      const formation = doomed ? undefined : pickFormation(state, me, b, hullsAt(me));
+      const engagePlanetId = conquest ? pickAssaultPlanet(state, b.defender, b.starId) : null;
+      const invade = !doomed && b.attacker === me;
+      // land on the ground the target planet's terrain actually rewards
+      const invadeTactic = invade ? pickInvadeTactic(state, engagePlanetId) : undefined;
       this.submit('battle_orders', {
         battleId: b.id,
         orders: {
@@ -1205,9 +1236,10 @@ export class SoloBot {
           retreatThresholdPct: this.profile.warlike ? 15 : 25,
           bombard: !doomed && (this.aggressive || this.profile.warlike) && b.attacker === me,
           // marines in orbit always land on a win — the lift was sent to invade
-          invade: !doomed && b.attacker === me,
-          engagePlanetId: conquest ? pickAssaultPlanet(state, b.defender, b.starId) : null,
+          invade,
+          engagePlanetId,
           ...(formation ? { formation } : {}),
+          ...(invadeTactic ? { invadeTactic } : {}),
         },
       });
     }

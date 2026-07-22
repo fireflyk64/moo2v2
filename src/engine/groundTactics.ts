@@ -209,6 +209,64 @@ export function groundCompFactors(def: DefenseTactic | undefined): { marine: num
   }
 }
 
+// ---- choosing a ground tactic ---------------------------------------------
+// Both pickers score every option with the SAME strength math the battle
+// uses (groundModifiers / groundCompFactors), so a heuristic can never drift
+// from the resolver — retune the matrix and the picks move with it.
+
+/**
+ * Best attack tactic for the ground the invasion is fought on. Scored purely
+ * by terrain fit (groundModifiers with the attacker's tactic), so it is fair:
+ * the attacker reads the planet's map, which is public, not the defender's
+ * standing doctrine. Pass `knownDef` only when the defender's doctrine is
+ * genuinely known (a repeat assault, espionage) to fold in the RPS matchup.
+ *
+ * The signatures fall out of the matrix: cover (forest/marsh/urban) wants an
+ * infiltration, broken rock (ridge/craters/lava) wants bounding overwatch or
+ * pinning fire, open ground wants a charge or a flank, and a mixed field
+ * rewards the methodical all-rounders.
+ */
+export function pickGroundAttack(terrain: string[] | null, knownDef?: DefenseTactic): AttackTactic {
+  let best: AttackTactic = 'charge';
+  let bestScore = -Infinity;
+  for (const atk of ATTACK_TACTICS) {
+    const score = groundModifiers(atk, knownDef, terrain).atkMult;
+    if (score > bestScore) {
+      bestScore = score;
+      best = atk;
+    }
+  }
+  return best;
+}
+
+/**
+ * Best standing defense doctrine for a colony, given how much of its garrison
+ * is trained marines vs civilian militia (marineShare in [0,1]) and its
+ * terrain. Scores each doctrine by the defender's expected per-unit power —
+ * its terrain-shaped strength multiplier times the average effectiveness of
+ * the two classes it actually fields (groundCompFactors). That is the whole
+ * "civilians man walls, soldiers maneuver" trade: a militia-heavy colony
+ * forts up (militia fight full-strength behind walls), a marine-heavy one
+ * maneuvers (defense-in-depth / a counter-charge leverage trained troops),
+ * and open ground is what lets a counter-charge run.
+ */
+export function pickGroundDefense(marineShare: number, terrain: string[] | null): DefenseTactic {
+  const share = Math.max(0, Math.min(1, marineShare));
+  let best: DefenseTactic = 'fortress';
+  let bestScore = -Infinity;
+  for (const def of DEFENSE_TACTICS) {
+    const defMult = groundModifiers(undefined, def, terrain).defMult;
+    const comp = groundCompFactors(def);
+    const perUnit = share * comp.marine + (1 - share) * comp.militia;
+    const score = defMult * perUnit;
+    if (score > bestScore) {
+      bestScore = score;
+      best = def;
+    }
+  }
+  return best;
+}
+
 export const isAttackTactic = (x: unknown): x is AttackTactic =>
   typeof x === 'string' && (ATTACK_TACTICS as readonly string[]).includes(x);
 export const isDefenseTactic = (x: unknown): x is DefenseTactic =>

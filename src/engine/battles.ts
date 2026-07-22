@@ -497,6 +497,11 @@ export function buildBattleInput(state: GameState, battle: PendingBattle): Built
       // the flag rides the input so replays re-sim identically, and old
       // replay inputs without it keep the byte-exact free-movement sim
       patterns: true,
+      // doctrine tactics (0.26.0): the choreography is enemy-relative and
+      // table-driven, so the doctrine a player picks decides the range band,
+      // which arcs bear and whether the fleet can even reach its station.
+      // Same contract: the flag rides the input, older inputs re-sim as 0.24.
+      tactics: true,
     },
     baseColonyId,
     engagedColonyId: engaged === undefined ? undefined : engaged === null ? null : engaged.id,

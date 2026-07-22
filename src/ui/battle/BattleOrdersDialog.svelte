@@ -326,14 +326,16 @@
             </fieldset>
           {/if}
         {/if}
-        <label title="Your battle doctrine — the two fleets' doctrines choose the choreography they fly against each other. A doctrine also sets when your guns speak: line pummels from long range, everything else holds fire until medium (missiles always fly). Slow, forward-gunned capitals sit the dance out and creep in; evade & retreat is never overridden.">
+        <label title="Your battle doctrine — it decides the RANGE BAND you fight in, and therefore which of your weapons are worth carrying. Damage falls off with range (100% inside 96u, 70% to 224u, 40% beyond) but warheads do not, so missiles like it far and beams like it close. Strike craft and boarding shuttles only reach a target you have closed on. Standing still frees your whole engine allowance to juke off-axis guns onto a target but makes you far easier to hit; moving does the reverse. Hits from astern of a target's beam do half again the damage — which is why a hull that cannot answer the helm is in trouble, and why drives decide which doctrine you can actually fly.">
           Doctrine
           <select data-testid="battle-formation" bind:value={formation}>
-            <option value="" title="no set doctrine: a charging stance fights as CHARGE, a holding/standoff stance as LINE">By stance — charge when closing, line when holding</option>
-            <option value="line" title="a gun wall that pummels from long range — strongest with long-range, accurate guns; chargers get herded into pockets at your preferred range">Line — gun wall, pummel from distance</option>
-            <option value="flank" title="the main wall fixes them at medium range while the fastest third sweeps the wide corner and pounces at knife range">Flank — wall + a wing around one side</option>
-            <option value="pincer" title="like flank, but the fast wing splits and pounces from BOTH sides">Pincer — wings pounce from both sides</option>
-            <option value="envelop" title="the whole fleet closes as one rotating net — every bow bears; the classic answer to a wild charge">Envelop — a closing net, every bow bears</option>
+            <option value="" title="no set doctrine: a charging stance fights as CHARGE, a holding stance as LINE, a standoff stance as STANDOFF">By stance — charge when closing, line when holding</option>
+            <option value="standoff" title="hold the long band and give ground: warheads at full strength, beams at 40%, forward guns mostly silent while you run. Only works while your drives keep the range open, and there is nowhere to run from a net">Standoff — keep the range, fight with warheads</option>
+            <option value="line" title="stand at medium range with the bows on: the steadiest firing platform in the game, with the whole engine allowance free to juke guns off-axis — and no motion evasion at all. Blind to its own flanks">Line — gun wall at medium range, stand fast</option>
+            <option value="charge" title="dive onto individual targets at knife range: full damage, +10 to hit, guns always bearing, and the only band where strike craft and boarding shuttles pay. You eat the whole approach getting there">Charge — knife range, full damage</option>
+            <option value="flank" title="the wall fixes them at medium range while the fastest third stages wide and dives on the REAR arcs of their capitals, where forward guns cannot answer">Flank — wall plus a wing into their baffles</option>
+            <option value="pincer" title="like flank, but a bigger wing splits to BOTH sides — more rear-arc pressure, a thinner wall">Pincer — wings into both flanks</option>
+            <option value="envelop" title="the whole fleet closes a rotating ring at knife range: no safe quarter for either side, off-axis jukes cost the enemy double, and nobody inside it can run. The answer to lumbering capitals and to fleets that keep the range">Envelop — a closing net, nobody runs</option>
           </select>
         </label>
         {#if isAttacker && engagePlanetId === null && holdings.length > 0}
