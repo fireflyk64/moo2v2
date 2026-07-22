@@ -1199,6 +1199,37 @@ export function runBattle(
       s.x = clamp(s.x, 2 * FP, FIELD_W - 2 * FP);
       return;
     }
+    if (tactics && s.stance === 'passthrough') {
+      // RAID: punch straight across to the far edge and warp out the moment it
+      // is reached — guns firing on whatever bears as they pass, never stopping
+      // to brawl. Under 0.26 tactics 'passthrough' used to fold into the charge
+      // doctrine, so the fleet dived to knife range and HELD there instead of
+      // passing through — the exact opposite of a raid, and what the player saw
+      // as "holding in the middle". Here SPEED is the armor: a ship crossing at
+      // full burn earns motion evasion (EVASION_PER_MP) and offers only its bow
+      // for the instant it is in range, so most of the fleet lives, trades a
+      // few potshots, and clears off. Each raider clears on its OWN — no
+      // waiting for the group, so nobody parks against the far wall (stationary
+      // = no evasion = a free kill). Warp-dissipater pinning still denies the
+      // exit, which is the whole counter to a raid. (Legacy non-tactics keeps
+      // its own passthrough steering in the free-mover below.)
+      const dir = s.init.side === 0 ? 1 : -1;
+      const px = s.x;
+      const py = s.y;
+      // hold the deployment LANE straight across — a raid does not vector onto
+      // targets (that is a charge); it drives past in formation and takes fire
+      // only from whatever its lane carries it near, keeping contact to potshots
+      physMove(s, s.x + dir * FIELD_W, s.homeY, 0, speedFP);
+      s.mpMoved = Math.min(speedFP, idist(Math.abs(s.x - px), Math.abs(s.y - py)));
+      s.mpFree = speedFP - s.mpMoved;
+      // punched out the far side (or driven off any edge): the raid is over —
+      // warp clear, unless a dissipater is holding the fleet on the field
+      if (!noRetreat[s.init.side] && (s.x <= 4 * FP || s.x >= FIELD_W - 4 * FP || s.y <= 9 * FP || s.y >= FIELD_H - 9 * FP)) {
+        s.retreated = true;
+      }
+      s.x = clamp(s.x, 2 * FP, FIELD_W - 2 * FP);
+      return;
+    }
     if (!slots.has(si)) {
       // lumbering: creep in at its own drives and fire from wherever it is —
       // and lumber the helm too (it answers only every OTHER tick), so
@@ -1391,7 +1422,8 @@ export function runBattle(
 
     // --- passthrough cohesion: once EVERY raider has punched past the enemy
     // line, the whole group wheels around and withdraws together (legacy sim
-    // only — under patterns 'passthrough' reads as the charge doctrine) ---
+    // only — under 0.26 tactics movePattern flies the raid: each raider drives
+    // straight through and warps out the far edge on its own) ---
     if (!patterns) for (const side of [0, 1] as const) {
       const raiders = sims.filter((s) => s.init.side === side && s.stance === 'passthrough' && active(s));
       if (!raiders.length) continue;

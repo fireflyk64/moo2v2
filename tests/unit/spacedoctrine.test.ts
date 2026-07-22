@@ -408,6 +408,69 @@ describe('slow-turning capitals hold their bow on target', () => {
   });
 });
 
+// The 'passthrough' stance is a RAID, not a doctrine: the fleet drives straight
+// across the field and warps out the far side, trading potshots on the way but
+// never stopping to brawl. Under 0.26 tactics it used to fold into the charge
+// doctrine — so the fleet dived to knife range and HELD there ("held in the
+// middle"), the opposite of a raid. Now it flies the raid: most of the fleet
+// survives and clears off, a few take fire, and SPEED buys survival.
+describe('passthrough is a raid: cross and clear off, do not brawl', () => {
+  const raid = (atkStance: 'passthrough' | 'charge', defStance: 'charge' | 'hold_range', speed = 8) => {
+    const input = inputOf(
+      [
+        ...Array.from({ length: 6 }, (_, i) => ship(i + 1, 0, { speed, structureHp: 30, startingStructure: 30 })),
+        ...Array.from({ length: 6 }, (_, i) => ship(101 + i, 1, { speed: 6 })),
+      ],
+      `raid-${atkStance}-${defStance}-${speed}`,
+    );
+    input.ordersA = { ...input.ordersA, stance: atkStance };
+    input.ordersD = { ...input.ordersD, stance: defStance };
+    input.tactics = true;
+    const { frames, result } = runFrames(input);
+    let maxX = 0;
+    for (const f of frames) for (const s of f.ships) if (s.id < 100) maxX = Math.max(maxX, s.x);
+    const atk = result.outcomes.filter((o) => o.side === 0);
+    return {
+      survived: atk.filter((o) => !o.destroyed).length,
+      retreated: atk.filter((o) => o.retreated).length,
+      maxX: maxX / FP,
+    };
+  };
+
+  it('raiders cross to the far side and warp out instead of holding in the middle', () => {
+    const r = raid('passthrough', 'charge');
+    // they punch through to the far edge (field is 768 wide) and clear off...
+    expect(r.maxX).toBeGreaterThan(FIELD_W / FP - 80);
+    expect(r.retreated).toBeGreaterThanOrEqual(5);
+    // ...and most of the fleet lives (contrast the charge control below, which
+    // dives in and is wiped)
+    expect(r.survived).toBeGreaterThanOrEqual(5);
+  });
+
+  it('the same fleet ordered to CHARGE brawls in the middle instead of raiding', () => {
+    const pass = raid('passthrough', 'charge');
+    const charge = raid('charge', 'charge');
+    // the raid crosses the field and warps out; the charge stops to brawl and
+    // never reaches the far side (nor retreats)
+    expect(pass.retreated).toBeGreaterThanOrEqual(5);
+    expect(charge.retreated).toBe(0);
+    expect(charge.maxX).toBeLessThan(pass.maxX - 100);
+  });
+
+  it('a raid survives a holding line that wipes a charge', () => {
+    const pass = raid('passthrough', 'hold_range');
+    const charge = raid('charge', 'hold_range');
+    expect(pass.survived).toBeGreaterThan(charge.survived);
+  });
+
+  it('speed is the raiders armor: a faster raid takes fewer losses', () => {
+    const slow = raid('passthrough', 'hold_range', 6);
+    const fast = raid('passthrough', 'hold_range', 14);
+    expect(fast.survived).toBeGreaterThanOrEqual(slow.survived);
+    expect(fast.survived).toBe(6);
+  });
+});
+
 // ---------- (d) the mechanics that make position and drives pay ----------
 
 describe('rear-arc hits', () => {
