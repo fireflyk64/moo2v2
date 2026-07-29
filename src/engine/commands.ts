@@ -84,14 +84,14 @@ const validateSetJobs: Validator = (state, cmd) => {
     if (g.farmers + g.workers + g.scientists !== units) {
       return `jobs must total ${units} for race ${g.race}`;
     }
-    // androids are hardwired at the factory: the group's job split may only
-    // ever be restated verbatim, never changed (bugs.md)
-    if (g.race === ANDROID_RACE) {
-      if (g.farmers !== grp.farmers || g.workers !== grp.workers || g.scientists !== grp.scientists) {
-        return 'androids are hardwired to the job they were built for';
-      }
-      continue;
-    }
+    // androids rewire freely WITHIN their colony (0.28.1): they were BUILT
+    // for a category, but the +3 android bonus already follows whatever job
+    // they work (economy.ts), so the old verbatim-only rule was a pure
+    // command-level shackle that made them undraggable in the jobs UI. They
+    // skip the organic guards below — they are not natives, and android
+    // farmers synthesize food even where nothing grows. Leaving the colony
+    // is still forbidden (move_colonists: wired into this colony).
+    if (g.race === ANDROID_RACE) continue;
     // natives only ever farm (planet_specials.md); their idle-farming on a
     // spoiled world is fine — the viability guard is for the owner's citizens
     if (g.race === NATIVE_RACE) {

@@ -127,7 +127,7 @@ describe('android units', () => {
     expect(out.research).toBe(12); // (3 base + 3 bonus) × 2, organics do no science here
   });
 
-  it('never grow, never crowd organic growth, never change jobs, never leave', () => {
+  it('never grow, never crowd organic growth, rewire jobs freely in place, never leave', () => {
     const state = makeState();
     const colony = state.colonies[0]!;
     const maxPop = colonyMaxPop(state, colony);
@@ -139,14 +139,24 @@ describe('android units', () => {
     expect(groupGrowthK(state, colony, grp, maxPop, 12)).toBe(0);
     // organic growth ignores android units (their housing is separate)
     expect(groupGrowthK(state, colony, organic, maxPop, 12)).toBe(growthWithout);
-    // job rewiring is rejected; restating the same split is fine
-    const reject = validateCommand(state, {
+    // job rewiring IS allowed in place (0.28.1) — the +3 android bonus
+    // follows whatever job they work, and this is what lets the jobs UI
+    // drag androids between columns without any freighter nonsense
+    const rewire = validateCommand(state, {
       turn: 1,
       playerId: 0,
       kind: 'set_jobs',
       payload: { colonyId: 100, groups: [{ race: ANDROID_RACE, farmers: 4, workers: 0, scientists: 0 }] },
     } as never);
-    expect(reject).toMatch(/hardwired/);
+    expect(rewire).toBeNull();
+    // ...but the split must still account for every android unit
+    const short = validateCommand(state, {
+      turn: 1,
+      playerId: 0,
+      kind: 'set_jobs',
+      payload: { colonyId: 100, groups: [{ race: ANDROID_RACE, farmers: 1, workers: 0, scientists: 0 }] },
+    } as never);
+    expect(short).toBeTruthy();
     const okay = validateCommand(state, {
       turn: 1,
       playerId: 0,

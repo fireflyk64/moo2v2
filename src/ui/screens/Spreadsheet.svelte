@@ -670,12 +670,21 @@
               {#each row.groups as grp (grp.race)}
                 {#each Array(grp[job]) as _, i (i)}
                   {#if grp.race === ANDROID_RACE}
-                    <!-- androids: hardwired to their job, never draggable -->
+                    <!-- androids: draggable between jobs IN THIS COLONY (0.28.1);
+                         they still never board freighters to leave it -->
                     <span
                       class="citizen android"
+                      class:sel={isPicked(row, job, grp.race, i)}
                       style={i > 0 ? `margin-left:-${overlapPx(row.jobs[job])}px` : ''}
-                      title="android {job.slice(0, -1)} — hardwired to this job for life; consumes 1 production per turn instead of food, immune to morale, houses in compact subterranean compartments"
+                      draggable="true"
+                      role="button"
+                      tabindex="-1"
+                      title="android {job.slice(0, -1)} — drag to another job in this colony (+3 output wherever they work); consumes 1 production per turn instead of food, immune to morale, never leaves the colony"
                       data-testid="android-{job}-{row.id}"
+                      onclick={() => onCitizenClick(row, job, grp.race, i)}
+                      onkeydown={(e) => e.key === 'Enter' && pickFrom(row, job, grp.race, i)}
+                      ondragstart={(e) => onDragStart(row, job, grp.race, i, e)}
+                      ondragend={onDragEnd}
                     >🤖</span>
                   {:else}
                     <span
