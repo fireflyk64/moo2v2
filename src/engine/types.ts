@@ -404,6 +404,11 @@ export interface PopTransit {
   fromColonyId: number;
   toColonyId: number;
   units: number;
+  /** androids only: the job they were hardwired for at the factory rides the
+   * freighter with them and they disembark into it (organic arrivals pick up
+   * tools as workers instead). Key present only on android transits, so
+   * organic-only saves hash unchanged. */
+  job?: 'farmers' | 'workers' | 'scientists';
   departedTurn: number;
   arrivalTurn: number;
 }

@@ -1,7 +1,8 @@
 // Android population units (bugs.md, cybertechnics): buildable projects that
 // add hardwired pop units — +3 in their category, 1 production upkeep, no
 // food, no income, immune to morale, compact subterranean housing (own cap),
-// never change jobs, never leave, destroyed on capture.
+// never change jobs, destroyed on capture. They CAN relocate to another
+// colony, keeping their built job forever (movecolonists.test.ts).
 import { describe, expect, it } from 'vitest';
 import { ANDROID_RACE, canQueue, resolveTraits, type Colony, type GameState } from '@engine/index';
 import { colonyOutput, groupGrowthK, colonyMaxPop } from '@engine/economy';
@@ -127,7 +128,7 @@ describe('android units', () => {
     expect(out.research).toBe(12); // (3 base + 3 bonus) × 2, organics do no science here
   });
 
-  it('never grow, never crowd organic growth, rewire jobs freely in place, never leave', () => {
+  it('never grow, never crowd organic growth, stay hardwired to their built job', () => {
     const state = makeState();
     const colony = state.colonies[0]!;
     const maxPop = colonyMaxPop(state, colony);
@@ -139,17 +140,16 @@ describe('android units', () => {
     expect(groupGrowthK(state, colony, grp, maxPop, 12)).toBe(0);
     // organic growth ignores android units (their housing is separate)
     expect(groupGrowthK(state, colony, organic, maxPop, 12)).toBe(growthWithout);
-    // job rewiring IS allowed in place (0.28.1) — the +3 android bonus
-    // follows whatever job they work, and this is what lets the jobs UI
-    // drag androids between columns without any freighter nonsense
+    // job rewiring is rejected (0.29.0 restores the rule 0.28.1 broke):
+    // a worker built is a worker forever, here or on any other colony
     const rewire = validateCommand(state, {
       turn: 1,
       playerId: 0,
       kind: 'set_jobs',
       payload: { colonyId: 100, groups: [{ race: ANDROID_RACE, farmers: 4, workers: 0, scientists: 0 }] },
     } as never);
-    expect(rewire).toBeNull();
-    // ...but the split must still account for every android unit
+    expect(rewire).toMatch(/hardwired/);
+    // the split must still account for every android unit
     const short = validateCommand(state, {
       turn: 1,
       playerId: 0,
@@ -157,6 +157,7 @@ describe('android units', () => {
       payload: { colonyId: 100, groups: [{ race: ANDROID_RACE, farmers: 1, workers: 0, scientists: 0 }] },
     } as never);
     expect(short).toBeTruthy();
+    // restating the same split verbatim is fine
     const okay = validateCommand(state, {
       turn: 1,
       playerId: 0,
@@ -164,13 +165,5 @@ describe('android units', () => {
       payload: { colonyId: 100, groups: [{ race: ANDROID_RACE, farmers: 0, workers: 4, scientists: 0 }] },
     } as never);
     expect(okay).toBeNull();
-    // and they never board freighters
-    const move = validateCommand(state, {
-      turn: 1,
-      playerId: 0,
-      kind: 'move_colonists',
-      payload: { fromColonyId: 100, toColonyId: 100, race: ANDROID_RACE, count: 1 },
-    } as never);
-    expect(move).toBeTruthy();
   });
 });

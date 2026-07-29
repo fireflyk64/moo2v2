@@ -303,8 +303,15 @@
     pickFrom(row, job, race, i);
   }
   function onDrop(row: selectors.ColonyRow, job: Job) {
-    if (drag && drag.colonyId === row.id) moveJob(row, drag.race, drag.job, job, drag.count);
-    else if (drag && drag.colonyId !== row.id) dropOnColony(row); // job cell of another colony works too
+    if (drag && drag.colonyId === row.id) {
+      // androids are hardwired to their built job — within a colony there is
+      // nothing to drag them to; relocating to another colony is their one move
+      if (drag.race === ANDROID_RACE && job !== drag.job) {
+        note('⛔ androids are hardwired to the job they were built for — drop them on another colony to relocate them');
+      } else {
+        moveJob(row, drag.race, drag.job, job, drag.count);
+      }
+    } else if (drag && drag.colonyId !== row.id) dropOnColony(row); // job cell of another colony works too
     drag = null;
     picked = null;
     dragOver = null;
@@ -642,7 +649,12 @@
             class="jobs"
             class:dropping={dragOver?.colonyId === row.id && dragOver?.job === job}
             ondragover={(e) => {
-              if ((drag?.colonyId === row.id || canDropColony(row)) && (job !== 'farmers' || row.farmable)) {
+              if (
+                (drag?.colonyId === row.id || canDropColony(row)) &&
+                // android farmers synthesize food where nothing grows, so the
+                // farmers cell takes their drops even on a dead world
+                (job !== 'farmers' || row.farmable || drag?.race === ANDROID_RACE)
+              ) {
                 e.preventDefault();
                 dragOver = { colonyId: row.id, job };
               }
@@ -670,8 +682,9 @@
               {#each row.groups as grp (grp.race)}
                 {#each Array(grp[job]) as _, i (i)}
                   {#if grp.race === ANDROID_RACE}
-                    <!-- androids: draggable between jobs IN THIS COLONY (0.28.1);
-                         they still never board freighters to leave it -->
+                    <!-- androids: hardwired to their built job (0.29.0) — a drag
+                         onto another job column is refused, but dropping them on
+                         a DIFFERENT colony relocates them in the same job -->
                     <span
                       class="citizen android"
                       class:sel={isPicked(row, job, grp.race, i)}
@@ -679,7 +692,7 @@
                       draggable="true"
                       role="button"
                       tabindex="-1"
-                      title="android {job.slice(0, -1)} — drag to another job in this colony (+3 output wherever they work); consumes 1 production per turn instead of food, immune to morale, never leaves the colony"
+                      title="android {job.slice(0, -1)} — hardwired to this job for life; drag onto another colony to relocate them (they stay a {job.slice(0, -1)} there); consumes 1 production per turn instead of food, immune to morale, houses in compact subterranean compartments"
                       data-testid="android-{job}-{row.id}"
                       onclick={() => onCitizenClick(row, job, grp.race, i)}
                       onkeydown={(e) => e.key === 'Enter' && pickFrom(row, job, grp.race, i)}

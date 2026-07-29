@@ -11,12 +11,12 @@ import { assimilate, landInvasion, resolveInvasions, trainMarines } from './grou
 import { leaderEmpireBonuses, leadersUpkeep } from './leaders';
 import { antaranUpkeep, hostileMonsterAt, randomEventsUpkeep } from './npc';
 import { allocId } from './ids';
-import { ANDROID_ITEMS, itemCost, parseDesignItem, parseRefitItem } from './items';
+import { ANDROID_ITEMS, androidCap, itemCost, parseDesignItem, parseRefitItem } from './items';
 import { commandPoints, inRange, supportStars } from './movement';
 import { availableHulls, defaultDesign, designLoadoutKey, rollModelIdx } from './shipdesign';
 import { ceilDiv } from './imath';
 import { applyTerraformStep, constructAsBarren, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
-import { colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, foodLogistics, groupGrowthK, MARINES_PER_TRANSPORT, marinesOf, maxPopulation, organicUnitsOf, traitsOf } from './economy';
+import { androidUnitsOf, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, foodLogistics, groupGrowthK, MARINES_PER_TRANSPORT, marinesOf, maxPopulation, organicUnitsOf, traitsOf } from './economy';
 import { applyFoundingSpecials, normalizeJobsForGroup } from './commands';
 import { rngFor } from './rng';
 import { applyResearch, appPickableBy, availableFields, grantApp } from './research';
@@ -651,9 +651,14 @@ function s6_movement(state: GameState, events: TurnEvent[]): void {
         });
         continue;
       }
-      // organic units only — validateMoveColonists admits the trip on the
-      // same measure, so a validated transfer always has its room on arrival
-      const room = Math.max(0, colonyMaxPop(state, colony) - organicUnitsOf(colony));
+      // room on the housing the arrivals actually use — validateMoveColonists
+      // admits the trip on the same measure, so a validated transfer always
+      // has its room on arrival: androids against their own compartment cap,
+      // organics against the climate ceiling
+      const room =
+        t.race === ANDROID_RACE
+          ? Math.max(0, androidCap(state.planets.find((x) => x.id === colony.planetId)!) - androidUnitsOf(colony))
+          : Math.max(0, colonyMaxPop(state, colony) - organicUnitsOf(colony));
       const landed = Math.min(t.units, room);
       if (landed > 0) {
         let dst = colony.groups.find((g) => g.race === t.race);
@@ -663,7 +668,8 @@ function s6_movement(state: GameState, events: TurnEvent[]): void {
           colony.groups.sort((a, b) => a.race - b.race);
         }
         dst.popK += landed * 1000;
-        dst.workers += landed;
+        // hardwired androids disembark into the job they were built for
+        dst[t.job ?? 'workers'] += landed;
         events.push({
           visibleTo: t.empireId,
           kind: 'colonists_arrived',

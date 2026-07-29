@@ -15,10 +15,10 @@ import {
 import { areAtWar, relationKey, setRelation } from './battles';
 import { DEFENSE_TACTICS, isAttackTactic, isDefenseTactic } from './groundTactics';
 import { anyEmpireContact, metEmpireIds } from './contact';
-import { buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, farmingViable, freeFreighters, organicUnitsOf, traitsOf } from './economy';
+import { androidUnitsOf, buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, farmingViable, freeFreighters, organicUnitsOf, traitsOf } from './economy';
 import { allocId, allocWorldId } from './ids';
 import { constructAsBarren } from './terraform';
-import { canQueue, itemCost, parseRefitItem } from './items';
+import { androidCap, canQueue, itemCost, parseRefitItem } from './items';
 import { inRange, settlerTravelTurns, shipStar, supportStars, travelTurns } from './movement';
 import { starDistance } from './galaxy';
 import { appPickableBy, availableFields, fieldGrantsAll } from './research';
@@ -84,14 +84,18 @@ const validateSetJobs: Validator = (state, cmd) => {
     if (g.farmers + g.workers + g.scientists !== units) {
       return `jobs must total ${units} for race ${g.race}`;
     }
-    // androids rewire freely WITHIN their colony (0.28.1): they were BUILT
-    // for a category, but the +3 android bonus already follows whatever job
-    // they work (economy.ts), so the old verbatim-only rule was a pure
-    // command-level shackle that made them undraggable in the jobs UI. They
-    // skip the organic guards below — they are not natives, and android
-    // farmers synthesize food even where nothing grows. Leaving the colony
-    // is still forbidden (move_colonists: wired into this colony).
-    if (g.race === ANDROID_RACE) continue;
+    // androids are hardwired at the factory (0.29.0 restores the rule the
+    // 0.28.1 loosening broke): a group's job split may only ever be restated
+    // verbatim, never changed. Relocation is the one freedom they have —
+    // move_colonists carries an android to another colony IN THE SAME JOB —
+    // and they skip the organic guards below (android farmers synthesize
+    // food even where nothing grows).
+    if (g.race === ANDROID_RACE) {
+      if (g.farmers !== grp.farmers || g.workers !== grp.workers || g.scientists !== grp.scientists) {
+        return 'androids are hardwired to the job they were built for';
+      }
+      continue;
+    }
     // natives only ever farm (planet_specials.md); their idle-farming on a
     // spoiled world is fine — the viability guard is for the owner's citizens
     if (g.race === NATIVE_RACE) {
@@ -1148,7 +1152,9 @@ interface MoveColonistsPayload {
   race: number;
   count: number;
   /** the job the moved colonists vacate at the source (the UI drags SPECIFIC
-   * citizens; without this the renormalizer always sheds scientists first) */
+   * citizens; without this the renormalizer always sheds scientists first).
+   * REQUIRED for androids: hardwired units keep this exact job at the
+   * destination, so the command must say which android job is relocating. */
   fromJob?: 'farmers' | 'workers' | 'scientists';
 }
 
@@ -1168,7 +1174,13 @@ const validateMoveColonists: Validator = (state, cmd) => {
   if (from.id === to.id) return 'already there';
   if (!Number.isSafeInteger(p.count) || p.count < 1) return 'bad count';
   if (p.race === NATIVE_RACE) return 'natives never leave their world';
-  if (p.race === ANDROID_RACE) return 'androids are wired into this colony and never leave';
+  // androids relocate freely (0.29.0) — near or far, on the same freighter
+  // logistics as everyone else — but they are hardwired to the job they were
+  // built for, so the command must name the job and they hold it at the
+  // destination (applyMoveColonists / the transit landing route it there)
+  if (p.race === ANDROID_RACE && p.fromJob !== 'farmers' && p.fromJob !== 'workers' && p.fromJob !== 'scientists') {
+    return 'androids are hardwired to one job — the move must say which android job relocates';
+  }
   const fromStarId = state.planets.find((x) => x.id === from.planetId)!.starId;
   const toStarId = state.planets.find((x) => x.id === to.planetId)!.starId;
   if (fromStarId !== toStarId) {
@@ -1188,11 +1200,23 @@ const validateMoveColonists: Validator = (state, cmd) => {
   const groupUnits = Math.floor(group.popK / 1000);
   const totalUnits = popUnitsOf(from);
   if (groupUnits < p.count) return `only ${groupUnits} unit(s) of that group`;
+  if (p.race === ANDROID_RACE && group[p.fromJob!] < p.count) {
+    return `only ${group[p.fromJob!]} android ${p.fromJob} here`;
+  }
   if (totalUnits - p.count < 1) return 'the last colonist cannot leave';
-  const cap = colonyMaxPop(state, to);
-  const there = organicUnitsOf(to);
-  const incoming = (state.popTransits ?? []).reduce((n, t) => n + (t.toColonyId === to.id ? t.units : 0), 0);
-  if (there + incoming + p.count > cap) return `destination full (${there + incoming}/${cap} incl. en route)`;
+  if (p.race === ANDROID_RACE) {
+    // androids house in their own compartments (androidCap), never organic
+    // housing — so they are checked, and counted en route, separately
+    const cap = androidCap(state.planets.find((x) => x.id === to.planetId)!);
+    const there = androidUnitsOf(to);
+    const incoming = (state.popTransits ?? []).reduce((n, t) => n + (t.toColonyId === to.id && t.race === ANDROID_RACE ? t.units : 0), 0);
+    if (there + incoming + p.count > cap) return `android compartments full (${there + incoming}/${cap} incl. en route)`;
+  } else {
+    const cap = colonyMaxPop(state, to);
+    const there = organicUnitsOf(to);
+    const incoming = (state.popTransits ?? []).reduce((n, t) => n + (t.toColonyId === to.id && t.race !== ANDROID_RACE ? t.units : 0), 0);
+    if (there + incoming + p.count > cap) return `destination full (${there + incoming}/${cap} incl. en route)`;
+  }
   return null;
 };
 
@@ -1221,7 +1245,10 @@ const applyMoveColonists: Applier = (state, cmd) => {
       to.groups.sort((a, b) => a.race - b.race);
     }
     dst.popK += moveK;
-    dst.workers += p.count; // arrivals pick up tools first; reassign as you like
+    // androids disembark into the job they were built for; organic arrivals
+    // pick up tools first — reassign as you like
+    if (p.race === ANDROID_RACE) dst[p.fromJob!] += p.count;
+    else dst.workers += p.count;
     return;
   }
   // between systems: colonists board freighters and sail
@@ -1236,6 +1263,9 @@ const applyMoveColonists: Applier = (state, cmd) => {
     fromColonyId: from.id,
     toColonyId: to.id,
     units: p.count,
+    // the hardwired job rides along; key absent on organic transits so
+    // pre-0.29 saves and organic-only games hash identically
+    ...(p.race === ANDROID_RACE ? { job: p.fromJob } : {}),
     departedTurn: state.turn,
     arrivalTurn: state.turn + turns,
   });
