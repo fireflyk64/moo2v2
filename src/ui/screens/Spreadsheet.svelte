@@ -708,7 +708,7 @@
           class:starving={row.foodLack > 0}
           data-testid="foodnet-{row.id}"
           title={row.output.foodNet < 0
-            ? `${ex.farm} — deficit ${-row.output.foodNet}: ${-row.output.foodNet - row.foodLack} covered by freighters/chartered haulers${row.foodLack > 0 ? `, ${row.foodLack} UNCOVERED (starvation)` : ''}`
+            ? `${ex.farm} — deficit ${-row.output.foodNet}: ${-row.output.foodNet - row.foodLack} covered by freighters${row.foodLack > 0 ? `, ${row.foodLack} UNCOVERED (starvation)` : ''}`
             : ex.farm}
         >{row.output.foodNet >= 0 ? '+' : ''}{row.output.foodNet}{#if row.output.foodNet < 0 && row.foodLack === 0}<span class="fed" title="deficit fully covered by food shipments">✓</span>{/if}</td>
         <td data-testid="prod-{row.id}" title={ex.prod}>

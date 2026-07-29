@@ -187,6 +187,16 @@ export function salaryOf(row: LeaderRow): number {
   return leaderPoints(row);
 }
 
+/** the empire's whole per-turn salary bill — what leadersUpkeep will charge */
+export function leaderSalaries(empire: Empire): number {
+  let salary = 0;
+  for (const hired of empire.leaders) {
+    const row = leaderById.get(hired.leaderId);
+    if (row) salary += salaryOf(row);
+  }
+  return salary;
+}
+
 function hiredAnywhere(state: GameState, leaderId: string): boolean {
   return state.empires.some((e) => e.leaders.some((l) => l.leaderId === leaderId));
 }
@@ -274,12 +284,7 @@ export function leadersUpkeep(state: GameState, events: TurnEvent[]): void {
     }
 
     // ---- salaries ----
-    let salary = 0;
-    for (const hired of empire.leaders) {
-      const row = leaderById.get(hired.leaderId);
-      if (row) salary += salaryOf(row);
-    }
-    empire.bc -= salary;
+    empire.bc -= leaderSalaries(empire);
     // broke: leaders quit, most expensive first, until the books balance
     while (empire.bc < 0 && empire.leaders.length > 0) {
       let worst: HiredLeader | null = null;

@@ -3,11 +3,10 @@
 // from here so alternate front ends and headless bots agree exactly.
 
 import { fieldByNum, applicationsOfField, FIELD_SUBJECTS, type FieldRow } from './data/index';
-import { busyFreighters, buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, marineCap, marinesOf, shipMarines, type ColonyOutput } from './economy';
+import { buyCost, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, foodLogistics, freeFreighters, groupGrowthK, marineCap, marinesOf, shipMarines, traitsOf, type ColonyOutput } from './economy';
 import { buildableItems, itemCost, refitCost, SHIPYARD_BASES } from './items';
 import { empireAccum } from './effects';
-import { isBlockaded } from './ground';
-import { leaderById } from './leaders';
+import { leaderById, leaderEmpireBonuses, leaderSalaries } from './leaders';
 import { commandPoints, driveSpeed, inRange } from './movement';
 import { hostileMonsterAt } from './npc';
 import { appPickableBy, availableFields, fieldGrantsAll, fieldListedCost, researchEtaTurns, researchOddsPct } from './research';
@@ -53,8 +52,8 @@ export interface ColonyRow {
   stickyInvested: Record<string, number>;
   /** projected population change next turn, in popK (1000 = one colonist unit) */
   growthK: number;
-  /** projected UNCOVERED food shortage next turn (units), after freighter and
-   * chartered-hauler deliveries; > 0 means starvation penalty applies */
+  /** projected UNCOVERED food shortage next turn (units), after owned-freighter
+   * deliveries; > 0 means starvation penalty applies */
   foodLack: number;
   /** buildings that may be sold this turn, with the BC refund for each */
   sellables: Array<{ id: string; refund: number }>;
@@ -68,39 +67,17 @@ export interface ColonyRow {
   marineCap: number;
 }
 
-/** Project this turn's food distribution (mirrors the pipeline: surpluses
- * cover deficits within freighter capacity, then chartered haulers within the
- * treasury; blockaded colonies get nothing) → uncovered lack per colony.
+/** Project this turn's food distribution — the same foodLogistics arithmetic
+ * the pipeline charges from (surpluses cover deficits within owned-freighter
+ * capacity only; blockaded colonies get nothing) → uncovered lack per colony.
  * Pure read: powers the LIVE growth estimate so reassigning farmers moves the
  * projection immediately instead of one turn late. */
 export function projectedFoodShortages(state: GameState, empireId: number): Map<number, number> {
   const empire = state.empires.find((e) => e.id === empireId)!;
-  const mine = state.colonies.filter((c) => c.owner === empireId && !c.outpost);
+  const lack = foodLogistics(state, empire, (c) => colonyOutput(state, c)).lack;
   const out = new Map<number, number>();
-  let surplus = 0;
-  let bcIncome = 0;
-  const deficits: Array<{ colony: Colony; lack: number }> = [];
-  for (const c of mine) {
-    const o = colonyOutput(state, c);
-    bcIncome += o.bcIncome;
-    if (o.foodNet >= 0) surplus += o.foodNet;
-    else deficits.push({ colony: c, lack: -o.foodNet });
-    out.set(c.id, 0);
-  }
-  let capacity = freeFreighters(state, empire); // 1 food per freighter (matches pipeline)
-  let charterBudget = Math.max(0, empire.bc + bcIncome);
-  deficits.sort((a, b) => a.colony.id - b.colony.id);
-  for (const d of deficits) {
-    const blockaded = isBlockaded(state, d.colony);
-    const moved = blockaded ? 0 : Math.min(d.lack, surplus, capacity);
-    surplus -= moved;
-    capacity -= moved;
-    d.lack -= moved;
-    const chartered = blockaded ? 0 : Math.min(d.lack, surplus, charterBudget);
-    surplus -= chartered;
-    charterBudget -= chartered;
-    d.lack -= chartered;
-    out.set(d.colony.id, d.lack);
+  for (const c of state.colonies) {
+    if (c.owner === empireId && !c.outpost) out.set(c.id, lack.get(c.id) ?? 0);
   }
   return out;
 }
@@ -234,12 +211,34 @@ function emptyOutput(): ColonyOutput {
   };
 }
 
+/** the itemized per-turn cash flow behind bcDelta: every term the turn
+ * pipeline will actually apply, so the sum IS the projected treasury change */
+export interface BcBreakdown {
+  /** Σ colony bcIncome: taxes + specials + bonuses + trade goods + empire tax,
+   * net of building maintenance */
+  colonyIncome: number;
+  /** leftover food surplus minted into BC (fantastic traders only) */
+  tradeSurplusBC: number;
+  /** flat BC/turn from megawealth leaders */
+  megawealth: number;
+  /** 0.5 BC per freighter in use (food hauls + colonist transits), rounded up */
+  freighterUpkeep: number;
+  /** the whole leader salary bill (leadersUpkeep charges this each turn) */
+  leaderSalaries: number;
+  /** 10 BC per command point over sources */
+  cpOverage: number;
+}
+
 export interface EmpireSummary {
   id: number;
   name: string;
   raceName: string;
   bc: number;
+  /** projected treasury change next turn: the SUM of bcBreakdown's credits
+   * minus its charges — kept honest by using the same foodLogistics/salary
+   * arithmetic the pipeline itself charges from */
   bcDelta: number;
+  bcBreakdown: BcBreakdown;
   foodNet: number;
   researchPerTurn: number;
   freighters: number;
@@ -286,17 +285,34 @@ export function empireSummary(state: GameState, empireId: number): EmpireSummary
   // the UI; players see list price, progress toward it, and discovery odds
   const listedNow = field ? fieldListedCost(empire, field) : 0;
   const cp = commandPoints(state, empire);
-  // projected freighter upkeep: 0.5 BC per freighter in use (food hauls up to
-  // free capacity + colonists in transit at 5 per unit); idle hulls are free
-  const projectedHaul = Math.min(freightersNeeded, freeFreighters(state, empire));
-  const busy = busyFreighters(state, empireId);
-  if (projectedHaul + busy > 0) bcDelta -= ceilDiv(projectedHaul + busy, 2);
+  // ---- the honest delta: every term the pipeline will actually apply ----
+  // (bcDelta used to be colony income minus freighter upkeep only; leader
+  // salaries, CP overage, megawealth and traders' surplus were all charged
+  // for real but never shown, so the top bar could read +8 while the
+  // treasury crept up +1 — the exact bug report this fixes)
+  const logi = foodLogistics(state, empire, (c) => colonyOutput(state, c));
+  const breakdown: BcBreakdown = {
+    colonyIncome: bcDelta,
+    tradeSurplusBC: traitsOf(empire).fantasticTraders ? logi.leftoverSurplus : 0,
+    megawealth: leaderEmpireBonuses(empire).bcFlat,
+    freighterUpkeep: logi.freighterUpkeep,
+    leaderSalaries: leaderSalaries(empire),
+    cpOverage: Math.max(0, cp.usage - cp.sources) * 10,
+  };
+  bcDelta =
+    breakdown.colonyIncome +
+    breakdown.tradeSurplusBC +
+    breakdown.megawealth -
+    breakdown.freighterUpkeep -
+    breakdown.leaderSalaries -
+    breakdown.cpOverage;
   return {
     id: empireId,
     name: empire.name,
     raceName: empire.raceName,
     bc: empire.bc,
     bcDelta,
+    bcBreakdown: breakdown,
     foodNet,
     researchPerTurn: rp,
     freighters: empire.freighters,

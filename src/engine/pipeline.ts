@@ -7,7 +7,7 @@
 import { detectBattles, resolveBattle, retreatDestination } from './battles';
 import { diplomacyUpkeep } from './diplomacy';
 import { resolveEspionage } from './espionage';
-import { assimilate, isBlockaded, landInvasion, resolveInvasions, trainMarines } from './ground';
+import { assimilate, landInvasion, resolveInvasions, trainMarines } from './ground';
 import { leaderEmpireBonuses, leadersUpkeep } from './leaders';
 import { antaranUpkeep, hostileMonsterAt, randomEventsUpkeep } from './npc';
 import { allocId } from './ids';
@@ -16,7 +16,7 @@ import { commandPoints, inRange, supportStars } from './movement';
 import { availableHulls, defaultDesign, designLoadoutKey } from './shipdesign';
 import { ceilDiv } from './imath';
 import { applyTerraformStep, constructAsBarren, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
-import { busyFreighters, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, freeFreighters, groupGrowthK, MARINES_PER_TRANSPORT, marinesOf, maxPopulation, organicUnitsOf, traitsOf } from './economy';
+import { colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, foodLogistics, groupGrowthK, MARINES_PER_TRANSPORT, marinesOf, maxPopulation, organicUnitsOf, traitsOf } from './economy';
 import { applyFoundingSpecials, normalizeJobsForGroup } from './commands';
 import { rngFor } from './rng';
 import { applyResearch, appPickableBy, availableFields, grantApp } from './research';
@@ -312,68 +312,37 @@ function s2_colonyOutput(state: GameState, events: TurnEvent[]): TurnOutputs {
     colony.housingPPPrev = out.housingPP;
   }
 
-  // food redistribution per empire: surpluses cover deficits within freighter capacity
+  // food redistribution per empire: surpluses cover deficits within freighter
+  // capacity, and ONLY within it — food moves on owned freighter fleets or not
+  // at all (0.27.0: the 1-BC-per-unit chartered civilian haulers are gone; an
+  // empire with no freighters cannot ship food, however much rots elsewhere)
   for (const empire of state.empires) {
     if (empire.eliminated) continue;
     const mine = state.colonies.filter((c) => c.owner === empire.id && !c.outpost);
-    let surplus = 0;
-    let deficits: Array<{ colony: Colony; lack: number }> = [];
-    for (const c of mine) {
-      const out = perColony.get(c.id);
-      if (!out) continue;
-      if (out.foodNet >= 0) surplus += out.foodNet;
-      else deficits.push({ colony: c, lack: -out.foodNet });
-    }
-    let capacity = freeFreighters(state, empire); // 1 food per freighter (5 per fleet)
-    // chartered civilian haulers beyond freighter capacity: 1 BC per food unit
-    let charterBudget = Math.max(0, empire.bc + (empireBC.get(empire.id) ?? 0));
-    let charterSpent = 0;
-    let freighterFood = 0; // food units hauled by OWN freighters this turn
-    deficits = deficits.sort((a, b) => a.colony.id - b.colony.id);
-    for (const d of deficits) {
-      // blockaded colonies cannot receive deliveries at all
-      const blockaded = isBlockaded(state, d.colony);
-      const moved = blockaded ? 0 : Math.min(d.lack, surplus, capacity);
-      surplus -= moved;
-      capacity -= moved;
-      freighterFood += moved;
-      d.lack -= moved;
-      const chartered = blockaded ? 0 : Math.min(d.lack, surplus, charterBudget);
-      if (chartered > 0) {
-        surplus -= chartered;
-        charterBudget -= chartered;
-        charterSpent += chartered;
-        d.lack -= chartered;
+    const logi = foodLogistics(state, empire, (c) => perColony.get(c.id) ?? { foodNet: 0 });
+    for (const [colonyId, lack] of logi.lack) {
+      if (lack > 0) {
+        events.push({ visibleTo: empire.id, kind: 'starvation', payload: { colonyId, lack } });
       }
-      d.colony.foodLackPrev = d.lack;
-      if (d.lack > 0) {
-        events.push({
-          visibleTo: empire.id,
-          kind: 'starvation',
-          payload: { colonyId: d.colony.id, lack: d.lack },
-        });
-      }
-    }
-    if (charterSpent > 0) {
-      empireBC.set(empire.id, (empireBC.get(empire.id) ?? 0) - charterSpent);
-      events.push({ visibleTo: empire.id, kind: 'food_chartered', payload: { units: charterSpent, bc: charterSpent } });
     }
     // freighter maintenance: 0.5 BC per freighter IN USE this turn (one per
     // food unit hauled, five per colonist unit in transit); idle hulls are
     // free. Integer ledger: charge rounds up.
-    const freightersInUse = freighterFood + busyFreighters(state, empire.id);
-    if (freightersInUse > 0) {
-      const upkeep = ceilDiv(freightersInUse, 2);
-      empireBC.set(empire.id, (empireBC.get(empire.id) ?? 0) - upkeep);
-      events.push({ visibleTo: empire.id, kind: 'freighter_upkeep', payload: { inUse: freightersInUse, bc: upkeep } });
+    if (logi.freightersInUse > 0) {
+      empireBC.set(empire.id, (empireBC.get(empire.id) ?? 0) - logi.freighterUpkeep);
+      events.push({
+        visibleTo: empire.id,
+        kind: 'freighter_upkeep',
+        payload: { inUse: logi.freightersInUse, bc: logi.freighterUpkeep },
+      });
     }
     for (const c of mine) {
-      if (!deficits.some((d) => d.colony.id === c.id)) c.foodLackPrev = 0;
+      c.foodLackPrev = logi.lack.get(c.id) ?? 0;
       c.prodLackPrev = perColony.get(c.id)?.prodLack ?? 0;
     }
     // leftover surplus: fantastic traders turn it into BC (documented in racepicks)
-    if (surplus > 0 && traitsOf(empire).fantasticTraders) {
-      empireBC.set(empire.id, (empireBC.get(empire.id) ?? 0) + surplus);
+    if (logi.leftoverSurplus > 0 && traitsOf(empire).fantasticTraders) {
+      empireBC.set(empire.id, (empireBC.get(empire.id) ?? 0) + logi.leftoverSurplus);
     }
     empire.bc += (empireBC.get(empire.id) ?? 0) + leaderEmpireBonuses(empire).bcFlat;
     if (empire.bc < 0) {

@@ -5,11 +5,11 @@ import { advanceTurn } from '@engine/pipeline';
 const { colonyRow } = selectors;
 
 // Reported bug: a starving barren colony's growth appeared to DROP after
-// freighters were built. The engine's food redistribution treats freighters
-// and chartered civilian haulers interchangeably (both limited by the same
-// empire-wide surplus), so freighters must never make growth worse — these
-// tests pin that down, plus the new foodLack exposure on ColonyRow that lets
-// the UI show whether a deficit is actually covered.
+// freighters were built. Freighters are the ONLY way food moves between
+// colonies (0.27.0 — chartered haulers are gone), limited by the empire-wide
+// surplus, so freighters must never make growth worse — these tests pin that
+// down, plus the foodLack exposure on ColonyRow that lets the UI show whether
+// a deficit is actually covered.
 
 function makeState(freighters: number, homeFarmers = 6, bc = 1000): GameState {
   const barren: Colony = {

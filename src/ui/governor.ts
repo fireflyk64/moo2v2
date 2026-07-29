@@ -11,7 +11,7 @@
 //   colonyShips — colony_base + colony-ship pipeline depth (player sails them)
 //   military    — warship quota per colony + a transport lift at high values
 
-import { selectors } from '@engine/index';
+import { foodLogistics, selectors } from '@engine/index';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import type { GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
@@ -103,6 +103,20 @@ export function governColonies(
     myColonies.reduce((n, c) => n + c.queue.filter((q) => q.item === 'colony_ship').length, 0);
   const wantPipeline = Math.min(Math.ceil(w.colonyShips / 2), freePlanets);
 
+  // whichever ship quota the player weighted HIGHER wins the strongest yard:
+  // with military cranked past colonyShips, hulls come off the slipway before
+  // settlers (a military-6 mix used to field ZERO warships in 90 turns — the
+  // colony pipeline monopolized the only real yard, and every later branch
+  // starved)
+  const warFirst = w.military > w.colonyShips;
+  const canColonyShip = (row: selectors.ColonyRow): boolean =>
+    pipeline < wantPipeline && row.output.prodToQueue >= 5 && row.buildable.includes('colony_ship');
+  const canWarship = (row: selectors.ColonyRow, designs: string[]): boolean =>
+    row.output.prodToQueue >= 5 &&
+    warOrders < wantFleet &&
+    designs.length > 0 &&
+    (cpHeadroom > warOrders - myWarships || empire.bc > 500);
+
   // strongest yards decide first so the military/colony-ship quotas land on
   // the colonies that can actually deliver them (rows cached once — colonyRow
   // is a full economy pass, and a sort comparator would run it O(n log n))
@@ -110,6 +124,17 @@ export function governColonies(
   const ordered = [...myColonies].sort((a, b) => {
     return rows.get(b.id)!.output.prodToQueue - rows.get(a.id)!.output.prodToQueue || a.id - b.id;
   });
+
+  // freighters (0.27.0): food moves on owned freighter fleets or not at all —
+  // a colony can now starve forever next to a surplus world. Order ONE fleet
+  // whenever shipping would actually feed someone (uncovered lack AND surplus
+  // left over to ship) and none is already queued.
+  let needFreighters =
+    !myColonies.some((c) => c.queue.some((q) => q.item === 'freighter_fleet')) &&
+    (() => {
+      const logi = foodLogistics(planned, empire, (c) => rows.get(c.id)?.output ?? { foodNet: 0 });
+      return [...logi.lack.values()].some((l) => l > 0) && logi.leftoverSurplus > 0;
+    })();
 
   for (const colony of ordered) {
     const row = rows.get(colony.id)!;
@@ -212,19 +237,27 @@ export function governColonies(
     if (!realYard && w.pop > 0 && row.buildable.includes('housing') && row.popUnits < row.maxPop) {
       // no real industry yet: people first — everything else can wait
       item = 'housing';
+    } else if (needFreighters && realYard && row.buildable.includes('freighter_fleet')) {
+      // someone is starving next to a surplus world: freighters outrank
+      // everything a yard could otherwise lay down (0.27.0 — no charters)
+      item = 'freighter_fleet';
+      needFreighters = false;
     } else if (w.infra > 0 && colony.buildings.length < 4 && buildings.length) {
       // the human opening: factory/lab/farm before any hull — ship quotas
       // monopolized the only real yard in testing and nothing ever got built
       item = buildings[0];
-    } else if (pipeline < wantPipeline && realYard && row.buildable.includes('colony_ship')) {
+    } else if (canColonyShip(row) && !(warFirst && canWarship(row, designs))) {
       item = 'colony_ship';
       pipeline++;
-    } else if (realYard && warOrders < wantFleet && designs.length && (cpHeadroom > warOrders - myWarships || empire.bc > 500)) {
+    } else if (canWarship(row, designs)) {
       // biggest hull this yard can finish in ~12 turns (the solo bot's rule)
       const budget = (row.output.prodToQueue || 1) * 12;
       const affordable = designs.filter((d) => (itemCost(planned, me, d, colony) ?? Infinity) <= budget);
       item = affordable[affordable.length - 1] ?? designs[0];
       warOrders++;
+    } else if (canColonyShip(row)) {
+      item = 'colony_ship';
+      pipeline++;
     } else if (transports < wantTransports && row.buildable.includes('transport')) {
       item = 'transport';
       transports++;

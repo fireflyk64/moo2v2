@@ -46,6 +46,26 @@
   // bugs.md: glanceable enemy-ship count — 0 means scanners see no threats,
   // so players don't have to sweep the map to know they are safe
   const enemyDetected = $derived(gs ? selectors.detectedEnemyShips(gs, session().playerId) : 0);
+  // the whole per-turn cash ledger on hover: every line the pipeline will
+  // actually charge or credit, summing exactly to the displayed delta — so
+  // "+8 shown but +1 real" can never happen again (leader salaries used to
+  // be charged invisibly)
+  const bcTip = $derived.by(() => {
+    if (!summary) return '';
+    const b = summary.bcBreakdown;
+    const sign = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
+    const lines = [
+      `treasury ${summary.bc} BC, ${sign(summary.bcDelta)}/turn:`,
+      `  ${sign(b.colonyIncome)} colony income (taxes, specials, trade, empire tax − building upkeep)`,
+    ];
+    if (b.tradeSurplusBC > 0) lines.push(`  +${b.tradeSurplusBC} surplus food sold (fantastic traders)`);
+    if (b.megawealth > 0) lines.push(`  +${b.megawealth} megawealth officers`);
+    if (b.freighterUpkeep > 0) lines.push(`  −${b.freighterUpkeep} freighter upkeep (in use this turn)`);
+    if (b.leaderSalaries > 0) lines.push(`  −${b.leaderSalaries} leader salaries`);
+    if (b.cpOverage > 0) lines.push(`  −${b.cpOverage} command points over support (10 BC each)`);
+    if (lines.length === 2) lines.push('  no upkeep charges this turn');
+    return lines.join('\n');
+  });
   // map-view quick builds: when a new turn opens, drop pins that completed
   // (or were manually removed) so their yards return to autopilot
   let reconciledTurn = -1;
@@ -643,7 +663,7 @@
         ? `fast start: your preview runs ${fastAhead} turn${fastAhead > 1 ? 's' : ''} ahead of the synced (slowest-player) turn ${syncedTurn}`
         : 'current turn'}
     ><span class="lbl">Turn</span> {gs.turn}{#if fastActive && fastAhead > 0}<span class="dim syncmark">⚡</span>{/if}</span>
-    <span class="stat" data-testid="bc" title="treasury (change per turn)">💰 {summary.bc} <span class="delta" class:neg={summary.bcDelta < 0}>({summary.bcDelta >= 0 ? '+' : ''}{summary.bcDelta})</span></span>
+    <span class="stat" data-testid="bc" title={bcTip}>💰 {summary.bc} <span class="delta" class:neg={summary.bcDelta < 0}>({summary.bcDelta >= 0 ? '+' : ''}{summary.bcDelta})</span></span>
     <span class="stat" data-testid="food" title="empire food surplus" class:neg={summary.foodNet < 0}>🌾 {summary.foodNet >= 0 ? '+' : ''}{summary.foodNet}</span>
     <span
       class="stat"
@@ -979,7 +999,7 @@
       <ul>
         <li><b>Colonies</b> — the spreadsheet runs your empire: assign jobs (drag citizen icons onto another job or another colony), pick builds, buy with BC. Click headers to sort; tick rows for bulk builds; 🏛 lists buildings (sell for half price).</li>
         <li><b>Turns</b> are simultaneous: everything resolves when every player commits. Uncommit any time before the last player commits. In <b>⚡ fast start</b> games nobody waits: end turns at your own pace until two empires meet — CONTACT then pulls everyone back to the synced turn (max 10 turns ahead of the slowest player).</li>
-        <li><b>Food</b> feeds colonists (2 per unit ×½); shortages starve growth. Freighters move surplus between colonies at 0.5 BC per freighter in use (idle ones are free); civilian charters cover overflow at 1 BC per food. Blockades cut deliveries.</li>
+        <li><b>Food</b> feeds colonists (2 per unit ×½); shortages starve growth. Freighters move surplus between colonies at 0.5 BC per freighter in use (idle ones are free); without freighter capacity food cannot be shipped at all. Blockades cut deliveries.</li>
         <li><b>Research</b> works one field at a time; basic fields and Cold Fusion (marked ✦) grant <i>all</i> their applications — Cold Fusion delivers colony ships, outposts, transports and freighters together. Never leave research idle — points bank but nothing finishes.</li>
         <li><b>Ships</b> travel star-to-star within fuel range (unreachable stars are dashed red on the map). Move orders can be re-routed until you commit.</li>
         <li><b>Hotkeys</b> — <kbd>1</kbd>–<kbd>7</kbd> switch tabs, <kbd>E</kbd> ends/commits the turn, <kbd>Shift+E</kbd> = ⏩ auto-play until something needs a decision. On the map: select your star, <kbd>B</kbd> arms build mode, then <kbd>C</kbd>olony ship / <kbd>S</kbd>cout / <kbd>F</kbd>rigate / <kbd>D</kbd>estroyer / c<kbd>R</kbd>uiser / <kbd>B</kbd>attleship / <kbd>T</kbd>itan / <kbd>O</kbd>utpost ship / <kbd>H</kbd>ousing / f<kbd>A</kbd>ctory / <kbd>L</kbd>ab / supercomputer <kbd>K</kbd> queue at the best-suited colony (progress bars appear under the map; ✕ hands the yard back to autopilot). With a fleet selected: <kbd>C</kbd> colonize · <kbd>O</kbd> outpost · <kbd>L</kbd>/<kbd>U</kbd> load/unload transports · <kbd>A</kbd> select all · <kbd>⌫</kbd> cycle. In a battle dialog: arrows pick the stance, <kbd>T</kbd> targets, <kbd>B</kbd> toggles bombard, <kbd>Enter</kbd> locks in.</li>

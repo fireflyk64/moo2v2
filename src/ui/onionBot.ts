@@ -14,7 +14,7 @@
 // All tunables live in the tables at the top — the tournament improvement
 // loop edits weights, not control flow.
 
-import { HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, designMountMix, designStats, hullIndexOf, marinesOf, pickDoctrine, selectors, shipMarines, starDistance } from '@engine/index';
+import { foodLogistics, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, designMountMix, designStats, hullIndexOf, marinesOf, pickDoctrine, selectors, shipMarines, starDistance } from '@engine/index';
 import { generateTerrain, pickGroundAttack } from '@engine/groundTactics';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import { leaderById } from '@engine/leaders';
@@ -682,6 +682,17 @@ function runColonies(
   const wantMilitary = scores.military >= 25 || scores.defense >= 40 || intel.atWar;
 
   const settleable = intel.freeTargets.filter((t) => t.score >= bar && !t.guarded && t.reachable);
+  // freighters (0.27.0): food moves on owned freighter fleets or not at all.
+  // Order ONE fleet whenever shipping would actually feed someone (uncovered
+  // lack AND surplus left to ship) and none is already queued — starvation
+  // bleeds pop, and pop is the master resource (spec §Planets).
+  let needFreighters =
+    !intel.rows.some((r) => r.queue.includes('freighter_fleet')) &&
+    (() => {
+      const rowById = new Map(intel.rows.map((r) => [r.id, r]));
+      const logi = foodLogistics(planned, bot, (c) => rowById.get(c.id)?.output ?? { foodNet: 0 });
+      return [...logi.lack.values()].some((l) => l > 0) && logi.leftoverSurplus > 0;
+    })();
   let pipeline =
     planned.ships.filter((s) => s.owner === me && s.shipKind === 'colony_ship').length +
     intel.rows.reduce((n, r) => n + r.queue.filter((q) => q === 'colony_ship').length, 0);
@@ -782,8 +793,14 @@ function runColonies(
 
     let item: string | undefined;
 
+    // the food lift outranks anything else a yard could lay down: a starving
+    // colony bleeds the master resource every turn it waits
+    if (needFreighters && row.buildable.includes('freighter_fleet') && row.output.prodToQueue >= 5) {
+      item = 'freighter_fleet';
+      needFreighters = false;
+    }
     // colony ships ride the strongest yards while the expansion window is open
-    if (
+    else if (
       pipeline < wantPipeline &&
       yardRank < 2 &&
       row.buildable.includes('colony_ship') &&

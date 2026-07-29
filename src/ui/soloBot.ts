@@ -15,7 +15,7 @@
 // to parity, that bot built RANDOM items and never sailed the colony ships it
 // happened to build, so it sat on one system all game.)
 
-import { colonyPopUnits, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
+import { colonyPopUnits, foodLogistics, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
 import { generateTerrain, pickGroundDefense } from '@engine/groundTactics';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import type { Empire, GameState } from '@engine/types';
@@ -479,6 +479,16 @@ export class SoloBot {
       if ((bot.taxRatePct ?? 0) !== wantTax) this.submit('set_tax_rate', { pct: wantTax });
     }
     const rescueYards = v2 && bot.bc < 0 ? Math.min(3, 1 + Math.floor(-bot.bc / 500)) : 0;
+    // freighters (0.27.0): food moves on owned freighter fleets or not at
+    // all. Order ONE fleet whenever shipping would actually feed someone
+    // (uncovered lack AND surplus left to ship) and none is queued yet.
+    let needFreighters =
+      v2 &&
+      !planned.colonies.some((c) => c.owner === me && c.queue.some((q) => q.item === 'freighter_fleet')) &&
+      (() => {
+        const logi = foodLogistics(planned, bot, (c) => selectors.colonyRow(planned, c).output);
+        return [...logi.lack.values()].some((l) => l > 0) && logi.leftoverSurplus > 0;
+      })();
     let yardRank = 0;
     for (const colony of ordered) {
       if (colony.owner !== me || colony.outpost) continue;
@@ -547,7 +557,12 @@ export class SoloBot {
             .sort((a, b) => (itemCost(planned, me, a, colony) ?? 9999) - (itemCost(planned, me, b, colony) ?? 9999));
           const wantFleet = Math.ceil(myColonies * fleetRatio);
           let item: string | undefined;
-          if (warOrders < wantFleet && designs.length && (cpHeadroom > warOrders - myWarships || bot.bc > 500)) {
+          if (needFreighters && row.buildable.includes('freighter_fleet') && row.output.prodToQueue >= 5) {
+            // someone is starving next to a surplus world: the food lift
+            // outranks any hull or building this yard could lay down
+            item = 'freighter_fleet';
+            needFreighters = false;
+          } else if (warOrders < wantFleet && designs.length && (cpHeadroom > warOrders - myWarships || bot.bc > 500)) {
             // biggest hull this yard can finish in ~12 turns — cheapest-first
             // meant frigate spam forever while the human fielded titans
             const budget = (selectors.colonyRow(planned, colony).output.prodToQueue || 1) * 12;

@@ -34,6 +34,60 @@ export function freeFreighters(state: GameState, empire: Empire): number {
   return Math.max(0, empire.freighters - busyFreighters(state, empire.id));
 }
 
+/** One empire's food shipping for a turn, resolved. Food moves ONLY on owned
+ * freighter fleets (no freighters = no shipping — a deficit colony starves no
+ * matter how much food rots elsewhere); blockaded colonies receive nothing.
+ * This is THE food-logistics arithmetic: the turn pipeline charges from it and
+ * the UI projects from it, so the number on screen is the number that happens. */
+export interface FoodLogistics {
+  /** food units hauled colony-to-colony by owned freighters this turn */
+  freighterFood: number;
+  /** freighters in use: food hauls + colonists in transit (5 per unit) */
+  freightersInUse: number;
+  /** upkeep for freighters in use, 0.5 BC each rounded up (idle hulls free) */
+  freighterUpkeep: number;
+  /** colonyId -> food units still short after shipping (starvation applies) */
+  lack: Map<number, number>;
+  /** surplus left after shipping (fantastic traders mint it into BC) */
+  leftoverSurplus: number;
+}
+
+export function foodLogistics(
+  state: GameState,
+  empire: Empire,
+  outputOf: (colony: Colony) => { foodNet: number },
+): FoodLogistics {
+  const mine = state.colonies.filter((c) => c.owner === empire.id && !c.outpost);
+  let surplus = 0;
+  const deficits: Array<{ colony: Colony; lack: number }> = [];
+  for (const c of mine) {
+    const net = outputOf(c).foodNet;
+    if (net >= 0) surplus += net;
+    else deficits.push({ colony: c, lack: -net });
+  }
+  let capacity = freeFreighters(state, empire); // 1 food per freighter (5 per fleet)
+  let freighterFood = 0;
+  const lack = new Map<number, number>();
+  deficits.sort((a, b) => a.colony.id - b.colony.id);
+  for (const d of deficits) {
+    // blockaded colonies cannot receive deliveries at all
+    const moved = isBlockaded(state, d.colony) ? 0 : Math.min(d.lack, surplus, capacity);
+    surplus -= moved;
+    capacity -= moved;
+    freighterFood += moved;
+    d.lack -= moved;
+    lack.set(d.colony.id, d.lack);
+  }
+  const freightersInUse = freighterFood + busyFreighters(state, empire.id);
+  return {
+    freighterFood,
+    freightersInUse,
+    freighterUpkeep: freightersInUse > 0 ? ceilDiv(freightersInUse, 2) : 0,
+    lack,
+    leftoverSurplus: surplus,
+  };
+}
+
 export function planetOf(state: GameState, colony: Colony): Planet {
   const p = state.planets.find((x) => x.id === colony.planetId);
   if (!p) throw new Error(`colony ${colony.id} planet missing`);
