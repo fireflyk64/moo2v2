@@ -93,3 +93,27 @@ t100 is still far out of reach). A research-cap experiment (raising the
 constraint ceiling 80→90 so it can clear production's 70×1.15 hysteresis
 bar) bought +2 apps at the cost of −48 pop at t200 and was reverted — the
 next tech lever should be building/jobs based, not plan-selection based.
+
+## Round 2: the human's ladder, encoded (CORE_ORDER)
+
+The 45-colony command log shows a near-identical development order on every
+colony: factory → lab → supercomputer → pollution control → star base →
+atmospheric renewer → space port → robo miners → stock exchange → astro
+university → autolab. Now in onionBot as CORE_ORDER: scoreBuild pays the
+first missing rung +28 (second +12), maybeBuy buys the next rung above the
+reserve and buys hulls in wartime, the research wanted-lists follow the same
+ladder ('robominers' also fixed — the old 'robo_miner_plant' entry named a
+buildable and never matched a field), and production pressure fades as yards
+get their tools. Same-map benchmark, seat 1, t200:
+
+| bot | colonies | pop | apps | hulls | score |
+|-----|---------:|----:|-----:|------:|------:|
+| recorded (peace) | 24 | 109 | 38 | 22 | 955 |
+| round 1 (at war) | 26 | 156 | 31 | 25 | 1144 |
+| + CORE ladder (at war) | 31 | 173 | 29 | 33 | 1333 |
+| human (peace) | 31 | 267 | 56 | 0 | 1477 |
+
+Colony count now matches the human's at t200, with a 33-hull fleet the
+human never fielded, while fighting three rivals. The remaining distance is
+tech and the pop it compounds — research throughput (jobs/labs staffing),
+still the next frontier.

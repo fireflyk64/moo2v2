@@ -103,13 +103,40 @@ const SUBJECT_FIT: Record<Constraint, Record<string, number>> = {
 const WANTED_APPS: Record<Constraint, string[]> = {
   expansion: ['colony_ship', 'outpost_ship', 'deuterium_fuel_cells', 'iridium_fuel_cells', 'hydroponic_farm', 'automated_factory'],
   range: ['deuterium_fuel_cells', 'iridium_fuel_cells', 'uridium_fuel_cells', 'outpost_ship', 'fusion_drive', 'ion_drive'],
-  research: ['research_lab', 'supercomputer', 'holo_simulator', 'autolab'],
-  production: ['automated_factory', 'robo_miner_plant', 'pollution_processor', 'robotic_factory'],
+  // the research/production ladders follow the cptbio human's proven order:
+  // lab → supercomputer → university → autolab; factory → pollution control →
+  // atmospheric renewer → robominers ('robominers' is the APP id — the old
+  // 'robo_miner_plant' entry named the buildable and never matched a field)
+  research: ['research_lab', 'supercomputer', 'astro_university', 'autolab', 'holo_simulator'],
+  production: ['automated_factory', 'pollution_processor', 'atmospheric_renewer', 'robominers', 'robotic_factory'],
   food: ['hydroponic_farm', 'soil_enrichment', 'weather_controller', 'subterranean_farms'],
   treasury: ['space_port', 'stock_exchange', 'planetary_currency_exchange'],
   military: ['battle_pods', 'reinforced_hull', 'fusion_beam', 'mass_driver', 'tritanium_armor'],
   defense: ['star_base', 'class_i_shield', 'reinforced_hull', 'battle_pods'],
 };
+
+/** The benchmark human's proven colony development ladder, mined from the
+ * cptbio-turn233 command log (45 colonies, near-identical order on every
+ * one): factory → lab → supercomputer → pollution control → star base →
+ * atmospheric renewer → space port → robo miners → stock exchange → astro
+ * university → autolab, with housing/domes interleaved by pop and freighters
+ * as needed. scoreBuild pays a strong bonus for the FIRST missing rung (and
+ * a smaller one for the second), so colonies walk the ladder in the order
+ * that demonstrably stacks — while constraint pressure still cuts in for
+ * starvation, defense and war. */
+const CORE_ORDER = [
+  'automated_factory',
+  'research_lab',
+  'supercomputer',
+  'pollution_processor',
+  'star_base',
+  'atmospheric_renewer',
+  'space_port',
+  'robo_miner_plant',
+  'stock_exchange',
+  'astro_university',
+  'autolab',
+];
 
 /** building fit per constraint (spec §Planets: build choice = marginal
  * payoff). Values are the plan bonus; intrinsic colony-state terms and a
@@ -124,6 +151,10 @@ const BUILD_FIT: Record<string, Partial<Record<Constraint, number>>> = {
   automated_factory: { production: 9, expansion: 4, military: 3, research: 2 },
   robo_miner_plant: { production: 7 },
   pollution_processor: { production: 4 },
+  atmospheric_renewer: { production: 6 },
+  autolab: { research: 8 },
+  weather_controller: { food: 6 },
+  subterranean_farms: { food: 6 },
   hydroponic_farm: { food: 9, expansion: 3 },
   soil_enrichment: { food: 7 },
   space_port: { treasury: 9 },
@@ -443,11 +474,20 @@ function scoreConstraints(ctx: OnionCtx, intel: Intel): Record<Constraint, numbe
   }
   if (!selectors.researchChoices(planned, ctx.me).some((c) => c.apps.some((a) => !a.known))) s.research = 0;
 
-  // production: the middle yard cannot finish anything in reasonable time
+  // production: the middle yard cannot finish anything in reasonable time.
+  // But production pressure FADES once yards have their tools: with the
+  // CORE_ORDER ladder walking every colony through factory-first anyway, a
+  // permanently-pegged production score (fresh colonies keep the median low
+  // forever) locked the plan through the pivot and starved research for the
+  // whole game (cptbio bench: 29 apps at t200 vs the human's 56).
   const prods = rows.map((r) => r.output.prodToQueue).sort((a, b) => a - b);
   const median = prods.length ? prods[Math.floor(prods.length / 2)]! : 0;
   const prodPar = era === 'early' ? 6 : 10;
-  if (median < prodPar) s.production = Math.min(70, 35 + (prodPar - median) * 5);
+  if (median < prodPar) {
+    const missingFactory = rows.filter((r) => !r.buildings.includes('automated_factory')).length;
+    const toolShare = colonies > 0 ? missingFactory / colonies : 1;
+    s.production = Math.min(70, (35 + (prodPar - median) * 5) * (0.5 + 0.5 * toolShare));
+  }
 
   // food: farmer share strangling everything else (lithovores read 0)
   if (intel.farmerShare > 0.4) s.food = Math.min(70, 30 + (intel.farmerShare - 0.4) * 150);
@@ -675,6 +715,12 @@ function scoreBuild(
   if (item === 'research_lab' && row.popUnits >= 4) v += 8;
   if (item === 'hydroponic_farm' && row.foodLack > 0) v += 30;
   if (item === 'marine_barracks') v -= 15; // militia insurance, rarely the best use of a yard
+  // the proven development ladder (CORE_ORDER): pay for the next missing
+  // rung, and a little for the one after, so the human's stacking order is
+  // the default walk while urgent constraints can still preempt it
+  const nextRungs = CORE_ORDER.filter((b) => !row.buildings.includes(b));
+  if (item === nextRungs[0]) v += 28;
+  else if (item === nextRungs[1]) v += 12;
   // affordability: anything the yard cannot finish inside ~25 turns is a trap
   const cost = itemCost(planned, me, item, undefined) ?? 9999;
   const turns = cost / Math.max(1, row.output.prodToQueue);
@@ -932,7 +978,14 @@ function maybeBuy(
     // a hoard is a plan that never happened: when the treasury dwarfs the
     // reserve, buy anything with a real fit rather than bank a 3000-BC pile
     // at 2 colonies (the cptbio probe's exact endgame)
-    (fits >= 3 && after >= intel.reserve * 2)
+    (fits >= 3 && after >= intel.reserve * 2) ||
+    // the development ladder compounds: buying the next CORE_ORDER rung a
+    // few turns early pays for itself (the cptbio human's colonies ran the
+    // ladder ~10 buildings deep while the bots averaged two)
+    (CORE_ORDER.filter((b) => !row.buildings.includes(b))[0] === head && after >= intel.reserve) ||
+    // wartime hulls now, not in eight turns: a fleet that arrives after the
+    // siege is decoration
+    (head.startsWith('design:') && intel.atWar && after >= intel.reserve)
   ) {
     ctx.session.submit('buy_production', { colonyId: row.id });
   }
