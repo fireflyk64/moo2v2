@@ -738,17 +738,17 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
     // top half is authored; the bottom mirrors with light/shade swapped so
     // the hull stays top-lit.
     const HALF = [
-      '.......^^^^^^......................', // dy10  wing crest
-      '.....^^###xxxxxxxxA................', // dy9   wingtip nacelle pod
-      '....e#############+A...............', // dy8
-      '....+#######+##+###A...............', // dy7
-      '.....########++#+++##A.............', // dy6
-      '......+#########++#+###A...........', // dy5
-      '......+##########++++###A..........', // dy4
-      '.......############++++##^A........', // dy3
-      '.......######+#+#+#+#+#+.##^##A....', // dy2   ribbed deck, neck root
-      'e###^^^####################^####A..', // dy1   boom + neck
-      '#O####################O#O#O####O#O#', // dy0   spine: tail beacon, windows, eyes, beak
+      '................^^^^^^^^^^.........', // dy10  forward-swept tip sliver
+      '..........^^##xxxxxxxxxx##AO.......', // dy9   nacelle pod, lit tip FORWARD
+      '........e###############+A.........', // dy8   arm, rear nozzle
+      '......+#######+#######+A...........', // dy7
+      '.....+######+######+A..............', // dy6
+      '....+#####+#####+A.................', // dy5
+      '..+###########+A...................', // dy4
+      '.^##+#+#+#+#+A.....................', // dy3   ribbed deck
+      '^###+#+#+#+#.............##^##A....', // dy2   crescent mouth opens forward; head bulge
+      'e####^^^#######################A...', // dy1   tail drives, boom + neck through the mouth
+      '#O##################O#O#O######O#O#', // dy0   spine: beacon, windows, eyes, beak
     ];
     const ROLE: Record<string, number> = { '#': R_HULL, '+': R_SHADE, '^': R_LIGHT, A: R_ACCENT, O: R_GLOW, x: R_TRIM, e: R_NOZZLE };
     for (let dy = 0; dy <= 10; dy++) {
