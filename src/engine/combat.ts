@@ -830,6 +830,15 @@ export function runBattle(
   const ringY = (cy: number, r: number, a: number) => cy + roundDiv(TRIG[norm32(a)]![1] * r, 16384);
   /** map slot i of m onto [-span..+span] heading steps around an arc center */
   const arcOffset = (i: number, m: number, span: number) => (m > 1 ? roundDiv(span * (2 * i - (m - 1)), m - 1) : 0);
+  /** 0.26.3: a crescent slot's offset, oriented so slot order matches the
+   * deployment rank — the ship that formed up at the TOP of its line takes
+   * the TOP of the crescent. Bearings grow counterclockwise on screen and the
+   * two sides face each other, so "up" is +offset for the westward-standing
+   * side 0 and -offset for side 1; without the flip, side 0's wall crossed
+   * itself forming up (and a lumbering capital crossed the whole field for
+   * the far slot). */
+  const crescentOffset = (slot: PatternSlot, side: 0 | 1, span: number) =>
+    arcOffset(slot.i, slot.n, span) * (side === 0 ? -1 : 1);
   const bowTo = (fromX: number, fromY: number, toX: number, toY: number, fallback: number) =>
     toX === fromX && toY === fromY ? fallback : headingToward(toX - fromX, toY - fromY);
   const clampAnchor = (x: number, y: number, h: number) => ({
@@ -925,13 +934,31 @@ export function runBattle(
       const rx = focusesTarget(doc) && live ? live.x : E.x;
       const ry = focusesTarget(doc) && live ? live.y : E.y;
       const R = prof.standU * FP;
-      const out = bowTo(rx, ry, s.x, s.y, side === 0 ? DIRS / 2 : 0);
+      // 0.26.3: already at (or inside) the band — STAND. Hold the deck and
+      // work the bow round, exactly like a wall that has reached its station.
+      // An enveloped capital that set out for a tidy crescent slot walked
+      // through the enemy ring twice for nothing, and two capitals in the
+      // endgame knife fight chased each other's stations in circles.
+      if (idist(Math.abs(s.x - rx), Math.abs(s.y - ry)) <= R) {
+        return clampAnchor(s.x, s.y, bowTo(s.x, s.y, live ? live.x : rx, live ? live.y : ry, bow));
+      }
+      // 0.26.3: the ring bearing is the FLEET's, not the ship's own. A station
+      // computed from the ship's own bearing chases its own wake — any drift
+      // rotates the anchor the same way, so two locked capitals pursue each
+      // other's stations in a feedback loop that walks both along the ring
+      // and parks the pair on the field edge, a fleet away from the fight.
+      // The capital takes its crescent slot like everybody else and creeps
+      // to it by the shortest route, bows on. Its bow is judged from where
+      // the ship actually IS, not from the station it has yet to reach — a
+      // slow hull spends most of a battle en route, and guns bear from the
+      // deck, not from the destination.
+      const out = norm32(standDir[side]! + crescentOffset(slot, side, prof.span));
       const ax = ringX(rx, R, out);
       const ay = ringY(ry, R, out);
       const face =
         prof.giveGround && running[side]
           ? norm32(out + (slot.si % 2 === 0 ? -8 : 8))
-          : bowTo(ax, ay, live ? live.x : rx, live ? live.y : ry, bow);
+          : bowTo(s.x, s.y, live ? live.x : rx, live ? live.y : ry, bow);
       return clampAnchor(ax, ay, face);
     }
     // the fast strike element: stage off their beam, then dive on the REAR
@@ -992,7 +1019,7 @@ export function runBattle(
     }
     const a = isRing(doc)
       ? Math.floor((32 * slot.i) / Math.max(1, slot.n)) + roundDiv(tick * prof.spin16, 16)
-      : norm32(standDir[side]! + arcOffset(slot.i, slot.n, prof.span));
+      : norm32(standDir[side]! + crescentOffset(slot, side, prof.span));
     const ax = ringX(E.x, R, a);
     const ay = ringY(E.y, R, a);
     // A standoff that is actually being pressed runs — ABEAM, alternate ships
@@ -1416,7 +1443,25 @@ export function runBattle(
     for (const s of sims) {
       if (!active(s)) continue;
       const t = sims[s.targetIdx];
-      if (s.targetIdx >= 0 && t && active(t)) continue;
+      if (s.targetIdx >= 0 && t && active(t)) {
+        // 0.26.3: fire-discipline retargeting. Targets are sticky (focus fire
+        // needs that), but a gunner whose LOCKED target has sailed beyond the
+        // band its doctrine will actually fire in — while another enemy is
+        // standing inside it — switches to the enemy it is allowed to shoot.
+        // Sticky-since-deployment targeting otherwise held a wall's guns on
+        // whatever happened to be nearest at deployment (the opposite capital,
+        // a field away, dressed on the same rank) while the real fight
+        // streamed past in band and never took a shot.
+        if (tactics && !s.init.isBase && s.init.weapons.some((w) => w.classId === 0 || w.classId === 5)) {
+          const fb = DOCTRINE_PROFILE[docs[s.init.side]].fireBand;
+          const distTo = (i: number) => idist(Math.abs(sims[i]!.x - s.x), Math.abs(sims[i]!.y - s.y));
+          if (bandOf(distTo(s.targetIdx)) > fb) {
+            const alt = pickTarget(sims, s, (i) => bandOf(distTo(i)) <= fb);
+            if (alt >= 0 && bandOf(distTo(alt)) <= fb) s.targetIdx = alt;
+          }
+        }
+        continue;
+      }
       s.targetIdx = pickTarget(sims, s);
     }
 

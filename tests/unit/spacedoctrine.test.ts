@@ -474,10 +474,14 @@ describe('passthrough is a raid: cross and clear off, do not brawl', () => {
 // ---------- (d) the mechanics that make position and drives pay ----------
 
 describe('rear-arc hits', () => {
-  /** a turret ring closing on slow capitals: collect SHORT-band hits and split
-   * them by whether the shooter sat astern of the victim's beam. Damage is a
-   * fixed number and the short band does not scale it, so the two buckets
-   * differ by exactly the table multiplier. */
+  /** a turret ring around ONE pinned capital: collect SHORT-band hits and
+   * split them by whether the shooter sat astern of the victim's beam. Damage
+   * is a fixed number and the short band does not scale it, so the two buckets
+   * differ by exactly the table multiplier. The victim is speed 0 on purpose:
+   * it is a measurement dial, not a combatant — a mobile capital now stands
+   * and works its bow toward its target (0.26.3), which empties whichever
+   * bucket it turns away from; a pinned hull with the ring centred on it
+   * guarantees shooters on every bearing inside the short band. */
   function buckets(tactics: boolean): { bow: number[]; astern: number[] } {
     const base = 10;
     const input: BattleInput = {
@@ -495,20 +499,18 @@ describe('rear-arc hits', () => {
             ],
           }),
         ),
-        ...Array.from({ length: 3 }, (_, i) =>
-          ship(101 + i, 1, {
-            hullIdx: 5,
-            speed: 4,
-            structureHp: 4000,
-            startingStructure: 4000,
-            armorHp: 0,
-            startingArmor: 0,
-            beamAttack: 300,
-            weapons: [
-              { weaponId: 'graviton_beam', classId: 0, dmgMin: base, dmgMax: base, mods: [], ammo: -1, cooldown: 0, count: 1, arc: 'F' },
-            ],
-          }),
-        ),
+        ship(101, 1, {
+          hullIdx: 5,
+          speed: 0,
+          structureHp: 8000,
+          startingStructure: 8000,
+          armorHp: 0,
+          startingArmor: 0,
+          beamAttack: 300,
+          weapons: [
+            { weaponId: 'graviton_beam', classId: 0, dmgMin: base, dmgMax: base, mods: [], ammo: -1, cooldown: 0, count: 1, arc: 'F' },
+          ],
+        }),
       ],
       ordersA: { ...DEFAULT_ORDERS, retreatThresholdPct: 0, formation: 'envelop' },
       ordersD: { ...DEFAULT_ORDERS, retreatThresholdPct: 0, formation: 'line' },
@@ -557,37 +559,50 @@ describe('rear-arc hits', () => {
 });
 
 describe('strike-craft endurance', () => {
-  /** carriers on one side, unarmed targets on the other; count sorties landed */
-  function sorties(doc: Doctrine): number {
+  /** carriers on one side, unarmed targets on the other; count sorties landed.
+   * Sortie reach is STRIKE_CRAFT_TICKS x craft speed 8 = 224u, measured
+   * against the RELATIVE motion of the target: a pursuer who closes flies
+   * into the hornets and gets stung from far beyond 224u of separation, while
+   * a target that keeps the range open never sees one arrive. So the doctrine
+   * comparison must control who is closing on whom — that is the variable the
+   * fuel rule prices, not the doctrine label. */
+  function sorties(doc: Doctrine, speed = 8, hulkSpeed = 8, hulkDoc: Doctrine = 'line', carriers = 3): number {
     const input = inputOf(
       [
-        ...Array.from({ length: 3 }, (_, i) =>
+        ...Array.from({ length: carriers }, (_, i) =>
           ship(i + 1, 0, {
             hullIdx: 4,
-            speed: 8,
+            speed,
             structureHp: 300,
             startingStructure: 300,
             weapons: [{ weaponId: 'interceptor_bay', classId: 4, dmgMin: 6, dmgMax: 6, mods: [], ammo: 20, cooldown: 0, count: 2, arc: '360' }],
           }),
         ),
         ...Array.from({ length: 3 }, (_, i) =>
-          ship(101 + i, 1, { speed: 8, structureHp: 3000, startingStructure: 3000, armorHp: 0, startingArmor: 0, weapons: [] }),
+          ship(101 + i, 1, { speed: hulkSpeed, structureHp: 3000, startingStructure: 3000, armorHp: 0, startingArmor: 0, weapons: [] }),
         ),
       ],
-      `doc-sortie-${doc}`,
+      `doc-sortie-${doc}-${hulkDoc}`,
     );
-    const { frames } = runFrames(withDoctrines(input, doc, 'line'));
+    const { frames } = runFrames(withDoctrines(input, doc, hulkDoc));
     let landed = 0;
     for (const f of frames) for (const s of f.shots) if (s.classId === 4 && s.hit) landed++;
     return landed;
   }
 
-  it('sorties land from a charge and never from a standoff — carriers are a short-range weapon', () => {
+  it('sorties pay off in a charge, taper against a pursuer, and never arrive across a held range', () => {
     expect(STRIKE_CRAFT_TICKS).toBeGreaterThan(0);
     const close = sorties('charge');
-    const far = sorties('standoff');
+    // a chasing line flies INTO the sortie envelope: some land (the pursuer's
+    // own closure carries it to the hornets), but still fewer than a dive
+    const chased = sorties('standoff', 10, 6);
+    // the arithmetic pin: ONE carrier holding its 320u standoff band against
+    // targets that cannot move — every launch happens beyond the craft's
+    // 28-tick x 8u/tick = 224u of fuel, so not a single sortie ever arrives
+    const held = sorties('standoff', 8, 0, 'line', 1);
     expect(close).toBeGreaterThan(10);
-    expect(far * 3).toBeLessThan(close);
+    expect(chased).toBeLessThan(close);
+    expect(held).toBe(0);
   });
 });
 

@@ -15,6 +15,7 @@ import {
   type Empire,
   type GameState,
 } from '@engine/index';
+import { headingDelta, headingToward } from '@engine/index';
 import { APPLICATION_ROWS, FIELD_ROWS } from '@engine/data/index';
 import { rngFor } from '@engine/rng';
 import { LAB_SCENARIOS, type ScenarioGroup, type ScenarioSide } from '@ui/screens/battleLabScenarios';
@@ -157,5 +158,53 @@ describe('Battle Lab scenarios', () => {
     const spread = Math.abs(r.attackerDamagePct - r.defenderDamagePct);
     expect(r.attackerDamagePct + r.defenderDamagePct).toBeGreaterThan(60);
     expect(spread).toBeGreaterThan(0);
+  });
+
+  // 0.26.3 regression: the two titans deployed on the same rank used to lock
+  // each other as "nearest" at tick 0 and then crawl along the top field edge
+  // for the whole battle — one of them never inside a band its doctrine let it
+  // fire in ("the top ships turn up and only one side ever shoots"). Pin the
+  // fix: in the default matchup every capital keeps its bow on the fight and
+  // BOTH flagships actually work their guns.
+  it('the default scenario: both titans face the enemy and both fire', () => {
+    const input = inputFor(LAB_SCENARIOS[0]!.id);
+    const sideOf = new Map(input.ships.map((s) => [s.shipId, s.side]));
+    const titanIds = input.ships.filter((s) => s.hull === 'titan').map((s) => s.shipId);
+    expect(titanIds.length).toBe(2);
+    const away = new Map<number, number>();
+    const seen = new Map<number, number>();
+    const shots = new Map<number, number>();
+    runBattle(structuredClone(input), rngFor(SEED, ...input.seedLabel), (f) => {
+      const live = f.ships.filter((s) => s.alive && !s.retreated);
+      for (const s of live) {
+        if (!titanIds.includes(s.id)) continue;
+        let bd = Infinity;
+        let want = -1;
+        for (const o of live) {
+          if (sideOf.get(o.id) === sideOf.get(s.id)) continue;
+          const d = Math.hypot(o.x - s.x, o.y - s.y);
+          if (d < bd) {
+            bd = d;
+            want = headingToward(o.x - s.x, o.y - s.y);
+          }
+        }
+        if (want < 0) continue;
+        seen.set(s.id, (seen.get(s.id) ?? 0) + 1);
+        // "away" = bow more than 90° off the nearest live enemy
+        if (Math.abs(headingDelta(s.h, want)) > 8) away.set(s.id, (away.get(s.id) ?? 0) + 1);
+      }
+      for (const sh of f.shots) shots.set(sh.from, (shots.get(sh.from) ?? 0) + 1);
+    });
+    for (const id of titanIds) {
+      const n = seen.get(id) ?? 0;
+      expect(n, `titan ${id} never appeared`).toBeGreaterThan(50);
+      expect((away.get(id) ?? 0) / n, `titan ${id} spends the battle facing away`).toBeLessThan(0.15);
+      expect(shots.get(id) ?? 0, `titan ${id} never fired`).toBeGreaterThan(25);
+    }
+    // and each SIDE lands real fire — nobody watches the battle from the rail
+    const sideShots = [0, 0];
+    for (const [id, n] of shots) sideShots[sideOf.get(id)!]! += n;
+    expect(sideShots[0]).toBeGreaterThan(60);
+    expect(sideShots[1]).toBeGreaterThan(60);
   });
 });
