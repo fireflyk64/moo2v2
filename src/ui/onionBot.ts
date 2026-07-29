@@ -17,6 +17,7 @@
 import { foodLogistics, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, designMountMix, designStats, hullIndexOf, marinesOf, pickDoctrine, selectors, shipMarines, starDistance } from '@engine/index';
 import { generateTerrain, pickGroundAttack } from '@engine/groundTactics';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
+import { applicationsOfField, fieldByNum } from '@engine/data/index';
 import { leaderById } from '@engine/leaders';
 import type { Empire, GameState, Planet } from '@engine/types';
 import type { GameSession } from '@protocol/session';
@@ -412,6 +413,12 @@ function scoreConstraints(ctx: OnionCtx, intel: Intel): Record<Constraint, numbe
       Math.min(95, 35 + 14 * Math.min(reachableSettles.length, 4)) *
       Math.max(0.45, 1 - 0.05 * rows.length);
     if (pipeline >= Math.min(3, reachableSettles.length)) s.expansion *= 0.45; // being handled
+    // cptbio-turn233 lesson: a bot that cannot BUILD a colony ship is not
+    // expansion-constrained, it is expansion-BLOCKED — the t233 probe sat
+    // 100 turns at 2 colonies with 3000 BC banked and a reachable terran
+    // world, because the research plan's hysteresis never let the enabling
+    // tech through. Blocked-on-the-unlock outranks nearly everything.
+    if (!bot.knownApps.includes('colony_ship')) s.expansion = Math.max(s.expansion, 85);
   }
   // range: worthwhile planets exist but none reachable — or the war target is
   // out of the bubble with nothing left to settle
@@ -506,7 +513,7 @@ function isAtWarNow(ctx: OnionCtx): boolean {
 
 // ---------------------------------------------------------------- research
 
-function runResearch(ctx: OnionCtx, intel: Intel, plan: Constraint): void {
+function runResearch(ctx: OnionCtx, intel: Intel, plan: Constraint, scores: Record<Constraint, number>): void {
   const { planned, me } = ctx;
   const choices = selectors.researchChoices(planned, me);
   const open = choices.filter((c) => c.apps.some((a) => !a.known));
@@ -515,19 +522,48 @@ function runResearch(ctx: OnionCtx, intel: Intel, plan: Constraint): void {
   const stale =
     intel.bot.research.fieldNum === null || !current || !current.apps.some((a) => !a.known);
   const fit = SUBJECT_FIT[plan];
-  const wantedNow = WANTED_APPS[plan];
+  // The resolver hears EVERY loud constraint, not just the dominant plan:
+  // the wanted-apps union is ordered purely by constraint SCORE (the plan
+  // wins ties), so a research-locked bot still buys the colony-ship unlock
+  // when expansion is screaming (cptbio save: 100 turns of research plan,
+  // colony tech never picked, the game lost in the opening).
+  const wantedNow: string[] = [];
+  const rankedCs = (Object.entries(scores) as Array<[Constraint, number]>)
+    .filter(([c, v]) => c === plan || v >= 30)
+    .sort((a, b) => b[1] - a[1] || (a[0] === plan ? -1 : b[0] === plan ? 1 : a[0].localeCompare(b[0])));
+  for (const [c] of rankedCs) {
+    for (const app of WANTED_APPS[c]) if (!wantedNow.includes(app)) wantedNow.push(app);
+  }
   // research toward the RESOLVER first: a field offering an app the plan is
   // actually blocked on (e.g. expansion pre-warp → cold_fusion's colony_ship)
-  // outranks generic subject affinity
-  const resolves = (c: (typeof open)[number]): number => {
-    let best = 99;
-    for (const a of c.apps) {
-      if (a.known || a.dead) continue;
-      const ix = wantedNow.indexOf(a.id);
-      if (ix !== -1) best = Math.min(best, ix);
+  // outranks generic subject affinity. The rank sees THROUGH the ladder:
+  // depth 0 = this open field offers the app now, depth n = the app sits n
+  // rungs up the same subject ladder — cptbio lesson: colony_ship lived one
+  // cheap rung past an open field, and a resolver blind to the ladder ground
+  // battle_pods for fifty turns instead of ever climbing to it.
+  const known = new Set(intel.bot.knownApps);
+  const resolveRank = (c: (typeof open)[number]): [number, number] => {
+    let ix = 99;
+    let depth = 9;
+    const consider = (appId: string, d: number): void => {
+      if (known.has(appId)) return;
+      const i = wantedNow.indexOf(appId);
+      if (i === -1) return;
+      if (i < ix || (i === ix && d < depth)) {
+        ix = i;
+        depth = d;
+      }
+    };
+    for (const a of c.apps) if (!a.dead) consider(a.id, 0);
+    let f = fieldByNum.get(c.field.num);
+    for (let d = 1; d <= 3 && f && f.next; d++) {
+      f = fieldByNum.get(f.next);
+      if (!f) break;
+      for (const a of applicationsOfField(f.id)) consider(a.id, d);
     }
-    return best;
+    return [ix, depth];
   };
+  const resolves = (c: (typeof open)[number]): number => resolveRank(c)[0];
   // min commitment: research until the tech completes — EXCEPT when the plan
   // is blocked on an app another field offers and this one is barely started
   // (spec: pivot when something else resolves the constraint better; the 25%
@@ -546,19 +582,20 @@ function runResearch(ctx: OnionCtx, intel: Intel, plan: Constraint): void {
   // constraint tunnel is also a cost tunnel. Resolver picks stay absolute:
   // a blocked plan buys its unlock at any price.
   const pick = open.sort((a, b) => {
-    const r = resolves(a) - resolves(b);
-    if (r !== 0) return r;
+    const [ia, da] = resolveRank(a);
+    const [ib, db] = resolveRank(b);
+    if (ia !== ib) return ia - ib;
+    if (da !== db) return da - db;
     const va = (fit[a.subject] ?? 2) / Math.max(1, a.cost);
     const vb = (fit[b.subject] ?? 2) / Math.max(1, b.cost);
     return vb - va || a.cost - b.cost || a.field.num - b.field.num;
   })[0]!;
   const live = pick.apps.filter((a) => !a.known && !a.dead);
-  const wanted = WANTED_APPS[plan];
   const target = pick.grantsAll
     ? null
     : (live.sort((a, b) => {
-        const ia = wanted.indexOf(a.id);
-        const ib = wanted.indexOf(b.id);
+        const ia = wantedNow.indexOf(a.id);
+        const ib = wantedNow.indexOf(b.id);
         return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
       })[0]?.id ??
       pick.apps.find((a) => !a.known)?.id ??
@@ -724,7 +761,10 @@ function runColonies(
     const preset: selectors.JobPreset =
       developed && !buildingShips && (plan === 'research' || scores.research >= 40)
         ? 'research'
-        : row.buildings.length >= 4 && (plan === 'research' || plan === 'treasury')
+        : // a research-locked empire staffs SOME labs before its worlds are
+          // gold-plated: waiting for 4 buildings held the cptbio probe at
+          // 6-9 RP/turn for a hundred turns while "research" was the plan
+          row.buildings.length >= (plan === 'research' ? 2 : 4) && (plan === 'research' || plan === 'treasury')
           ? 'blend'
           : 'industry';
     const jobs = selectors.presetJobs(planned, row.id, preset);
@@ -888,7 +928,11 @@ function maybeBuy(
     (head === 'colony_ship' && after >= intel.reserve * 0.5) ||
     (defenseEmergency && after >= 0) ||
     (fits >= 6 && after >= intel.reserve) ||
-    (price <= 40 && after >= intel.reserve)
+    (price <= 40 && after >= intel.reserve) ||
+    // a hoard is a plan that never happened: when the treasury dwarfs the
+    // reserve, buy anything with a real fit rather than bank a 3000-BC pile
+    // at 2 colonies (the cptbio probe's exact endgame)
+    (fits >= 3 && after >= intel.reserve * 2)
   ) {
     ctx.session.submit('buy_production', { colonyId: row.id });
   }
@@ -1115,15 +1159,41 @@ function runMilitary(ctx: OnionCtx, intel: Intel, scores: Record<Constraint, num
         .sort((a, b) => a.id - b.id)
         .slice(0, Math.max(1, Math.floor(warships.length * 0.8)));
     }
-    const byStar = new Map<number, number[]>();
+    // muster-then-strike (cptbio t212-231): launching every stack at the
+    // target independently fed late-built hulls into the defended star one
+    // at a time, each a free kill. The strike assembles first: stacks pull
+    // toward the heaviest concentration, and only a stack that holds the
+    // assembly bar (the whole detachment for a lair clear — the 12-weight
+    // no-loss rule is per BATTLE — or 70% of the strike for a rival star)
+    // actually jumps the target.
+    const stacks = new Map<number, { ids: number[]; w: number }>();
+    let totalW = 0;
     for (const s of strike) {
       const from = (s.location as { starId: number }).starId;
-      if (from === memory.attackStar) continue;
-      (byStar.get(from) ?? byStar.set(from, []).get(from)!).push(s.id);
+      const st = stacks.get(from) ?? stacks.set(from, { ids: [], w: 0 }).get(from)!;
+      const w = Math.max(1, weightOf(s));
+      st.ids.push(s.id);
+      st.w += w;
+      totalW += w;
     }
-    for (const [from, ids] of byStar) {
-      const ok = selectors.moveOptions(planned, me, from).some((o) => o.reachable && o.starId === memory.attackStar);
-      if (ok) session.submit('move_ships', { shipIds: ids, destStarId: memory.attackStar });
+    const atTargetW = stacks.get(memory.attackStar)?.w ?? 0;
+    stacks.delete(memory.attackStar);
+    const barW = ordinaryLair ? totalW : Math.max(1, Math.ceil(totalW * 0.7));
+    // muster point: the heaviest stack (a contingent already fighting at the
+    // target counts — reinforcing an ongoing siege beats regrouping behind it)
+    let muster = memory.attackStar;
+    let musterW = atTargetW;
+    for (const [star, st] of stacks) {
+      if (st.w > musterW) {
+        musterW = st.w;
+        muster = star;
+      }
+    }
+    for (const [from, st] of stacks) {
+      const dest = st.w >= barW ? memory.attackStar : muster;
+      if (dest === from) continue;
+      const ok = selectors.moveOptions(planned, me, from).some((o) => o.reachable && o.starId === dest);
+      if (ok) session.submit('move_ships', { shipIds: st.ids, destStarId: dest });
     }
   }
 
@@ -1212,7 +1282,7 @@ export function onionTurn(ctx: OnionCtx): void {
   const plan = pickPlan(ctx, scores);
   ctx.memory.wasAtWar = intel.atWar;
 
-  runResearch(ctx, intel, plan);
+  runResearch(ctx, intel, plan, scores);
   runLeaders(ctx, intel, plan);
   runColonies(ctx, intel, plan, scores);
   runExpansionMoves(ctx, intel);
