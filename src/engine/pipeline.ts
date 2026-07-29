@@ -13,7 +13,7 @@ import { antaranUpkeep, hostileMonsterAt, randomEventsUpkeep } from './npc';
 import { allocId } from './ids';
 import { ANDROID_ITEMS, itemCost, parseDesignItem, parseRefitItem } from './items';
 import { commandPoints, inRange, supportStars } from './movement';
-import { availableHulls, defaultDesign, designLoadoutKey } from './shipdesign';
+import { availableHulls, defaultDesign, designLoadoutKey, rollModelIdx } from './shipdesign';
 import { ceilDiv } from './imath';
 import { applyTerraformStep, constructAsBarren, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
 import { colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, foodLogistics, groupGrowthK, MARINES_PER_TRANSPORT, marinesOf, maxPopulation, organicUnitsOf, traitsOf } from './economy';
@@ -130,13 +130,18 @@ function s11_defaultDesignRefresh(state: GameState, events: TurnEvent[]): void {
       const desired = defaultDesign(state, empire, hull);
       const current = empire.designs.find((d) => d.auto && !d.obsolete && d.hull === hull);
       if (current && designLoadoutKey(current) === designLoadoutKey(desired)) continue;
+      const id = allocId(state, empire.id);
       const design = {
-        id: allocId(state, empire.id),
+        id,
         ...desired,
         // a refresh keeps the name the player knows the class by
         ...(current ? { name: current.name } : {}),
         obsolete: false,
         auto: true,
+        // every refresh rolls a new model variant, guaranteed to render
+        // differently from the old mark — players recognize an upgraded
+        // default hull on sight (0.28.0)
+        modelIdx: rollModelIdx(`${empire.id}:${hull}:${id}`, current?.modelIdx),
       };
       empire.designs.push(design);
       if (current) {

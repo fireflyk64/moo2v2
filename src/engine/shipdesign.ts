@@ -522,6 +522,23 @@ export function defaultDesign(state: GameState, empire: Empire, hullId: string):
   return autoFitDesign(state, empire, hullId, DEFAULT_DESIGN_NAMES[hullId] ?? hullId);
 }
 
+/** Model-variant roll for engine-maintained default designs (0.28.0):
+ * pseudo-random from stable ids (deterministic in replays), and on a refresh
+ * ALWAYS visibly different from the replaced mark — warship art wraps model
+ * variants mod 4 (titans mod 3), so a stride that is nonzero mod 3 AND mod 4
+ * changes the rendered model under either wrap. A new mark should LOOK like
+ * a new mark. */
+const MODEL_STRIDES = [1, 2, 5, 7, 10, 11]; // each nonzero mod 3 and mod 4
+export function rollModelIdx(seedStr: string, prev?: number): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    h ^= seedStr.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  if (prev === undefined) return h % 12;
+  return (prev + MODEL_STRIDES[h % MODEL_STRIDES.length]!) % 12;
+}
+
 /** Canonical fingerprint of what a design is FITTED with (id/name/model are
  * ignored) — the refresh step replaces an auto design only when this changes. */
 export function designLoadoutKey(d: Pick<ShipDesign, 'hull' | 'computer' | 'shield' | 'specials' | 'weapons'>): string {

@@ -20,7 +20,7 @@ import { seedMonsters } from './npc';
 import { rngFor } from './rng';
 import { empireContactPairs } from './selectors';
 import { advanceTurn, resolveCombat } from './pipeline';
-import { availableHulls, defaultDesign } from './shipdesign';
+import { availableHulls, defaultDesign, rollModelIdx } from './shipdesign';
 import { resolveTraits, type RaceTraits } from './race';
 import type { Colony, GameState, GameStateSettings, PendingBattle, TurnEvent } from './types';
 
@@ -183,11 +183,15 @@ export function initGame(start: EngineGameStart): GameState {
   // doesn't gate on knowledge for this starter kit).
   for (const empire of state.empires) {
     for (const hull of availableHulls(empire)) {
+      const id = state.nextId++;
       empire.designs.push({
-        id: state.nextId++,
+        id,
         ...defaultDesign(state, empire, hull),
         obsolete: false,
         auto: true,
+        // starter marks roll a model variant too (0.28.0) — fleets stop all
+        // wearing model 1 out of the yard
+        modelIdx: rollModelIdx(`${empire.id}:${hull}:${id}`),
       });
     }
   }

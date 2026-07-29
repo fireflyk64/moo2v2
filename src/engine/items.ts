@@ -4,7 +4,13 @@
 
 import { ALWAYS_KNOWN_ITEMS, applicationById, buildableById, FIELD_ROWS, FIELD_SUBJECTS } from './data/index';
 import type { Colony, Empire, GameState, Planet } from './types';
-import { androidUnitsOf, MARINE_TRAIN_TURNS, MARINES_PER_TRANSPORT, marinesOf, planetOf } from './economy';
+import { androidUnitsOf, colonyGravityPenalized, MARINE_TRAIN_TURNS, MARINES_PER_TRANSPORT, marinesOf, planetOf } from './economy';
+import { resolveTraits } from './race';
+
+/** buildings whose ONLY effect is colony morale — a unification empire's
+ * colonists are immune (economy.moralePct returns 0), so these can never do
+ * anything for it */
+const MORALE_ONLY_BUILDINGS = new Set(['holo_simulator', 'virtual_reality_network', 'pleasure_dome']);
 import { designStats } from './shipdesign';
 import { canTerraform, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
 
@@ -208,6 +214,14 @@ export function canQueue(state: GameState, colony: Colony, itemId: string): stri
   }
   const planet = planetOf(state, colony);
   if (!climateAllows(itemId, planet)) return `${itemId} cannot operate on ${planet.climate}`;
+  // useless-tech gates (0.28.0): a build that can never do anything here is
+  // not offered — it would only burn production and maintenance
+  if (itemId === 'gravity_generator' && !colonyGravityPenalized(state, colony, planet)) {
+    return `nobody here suffers a gravity penalty on this ${planet.gravity}-gravity world`;
+  }
+  if (MORALE_ONLY_BUILDINGS.has(itemId) && resolveTraits(empire.picks).government === 'unification') {
+    return 'unification colonists are immune to morale';
+  }
   if (itemId === 'terraforming') {
     const queuedSteps = colony.queue.filter((q) => q.item === 'terraforming').length;
     const blocked = canTerraform(planet, queuedSteps);

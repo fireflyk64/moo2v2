@@ -635,6 +635,20 @@ function planetHasGravityFix(colony: Colony): boolean {
   return colony.buildings.includes('gravity_generator');
 }
 
+/** Would a gravity generator DO anything here? True when any organic resident
+ * group (or the owner race — the colonists new settlers would be) suffers a
+ * gravity penalty on this planet. Androids and natives are gravity-neutral. */
+export function colonyGravityPenalized(state: GameState, colony: Colony, planet: Planet): boolean {
+  const ownerTraits = traitsOf(empireOf(state, colony.owner));
+  if (gravitySteps(ownerTraits.gravityPref, planet.gravity) > 0) return true;
+  for (const g of colony.groups) {
+    if (g.race === ANDROID_RACE || g.race === NATIVE_RACE) continue;
+    const t = g.race === colony.owner ? ownerTraits : groupTraits(state, g.race, ownerTraits);
+    if (gravitySteps(t.gravityPref, planet.gravity) > 0) return true;
+  }
+  return false;
+}
+
 export function maintenanceOf(buildingId: string): number {
   return buildableById.get(buildingId)?.maintenance ?? 0;
 }
