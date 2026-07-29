@@ -731,40 +731,47 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
     return;
   }
   if (cls === 'titan' && variant === 2) {
-    // Model 3 of the Crescent titan: the WARBIRD — transcribed from the
-    // player's own pixel sheet (round 10 review: the wings were flipped and
-    // the front too wide), mirrored to engine orientation (bow = +x) and
-    // given the slim protruding neck-and-beak the sheet left off. Only the
-    // top half is authored; the bottom mirrors with light/shade swapped so
-    // the hull stays top-lit.
-    const HALF = [
-      '................^^^^^^^^^^.........', // dy10  forward-swept tip sliver
-      '..........^^##xxxxxxxxxx##AO.......', // dy9   nacelle pod, lit tip FORWARD
-      '........e###############+A.........', // dy8   arm, rear nozzle
-      '......+#######+#######+A...........', // dy7
-      '.....+######+######+A..............', // dy6
-      '....+#####+#####+A.................', // dy5
-      '..+###########+A...................', // dy4
-      '.^##+#+#+#+#+A.....................', // dy3   ribbed deck
-      '^###+#+#+#+#.............##^##A....', // dy2   crescent mouth opens forward; head bulge
-      'e####^^^#######################A...', // dy1   tail drives, boom + neck through the mouth
-      '#O##################O#O#O######O#O#', // dy0   spine: beacon, windows, eyes, beak
+    // Model 3 of the Crescent titan: the WARBIRD — the player's own pixel
+    // sheet (round 10, third revision), used verbatim — it is already in
+    // engine orientation (bow = +x): the A trim marks the BACK edges and the
+    // O#### beak is the front tip. getShipModel gives this model its native
+    // 38-wide canvas and pxScale keeps the field footprint at the shared
+    // titan size. All 21 rows are authored, so the sheet's own shading
+    // survives untouched.
+    const SHEET = [
+      '...........^^^^^^^^^^^^^^^............',
+      '...............Axxxxxxxx##^^..........',
+      '..............A+############e.........',
+      '..............A###+##+######+.........',
+      '............A##+++#++#######..........',
+      '..........A###+#++########+...........',
+      '.........A###++++#########+...........',
+      '.......A^##++++###########............',
+      '....A#^## +#+#+#+#+#+#####............',
+      '..A###^###################^^^^####ee..',
+      'AO#O###O#O#O###################O#O####',
+      '..A###+###################++++####ee..',
+      '....A#+## +#+#+#+#+#+#####............',
+      '.......A+##++++###########............',
+      '.........A###+#++#########+...........',
+      '.........A##+++#++########+...........',
+      '............A#++++#++#######..........',
+      '..............A###+##+######^.........',
+      '..............A+############e.........',
+      '...............Axxxxxxxx##++..........',
+      '...........+++++++++++++++............',
     ];
     const ROLE: Record<string, number> = { '#': R_HULL, '+': R_SHADE, '^': R_LIGHT, A: R_ACCENT, O: R_GLOW, x: R_TRIM, e: R_NOZZLE };
-    for (let dy = 0; dy <= 10; dy++) {
-      const row = HALF[10 - dy]!;
-      for (let x = 0; x < Math.min(L, row.length); x++) {
+    for (let y = 0; y < Math.min(g.h, SHEET.length); y++) {
+      const row = SHEET[y]!;
+      for (let x = 0; x < Math.min(g.w, row.length); x++) {
         const v = ROLE[row[x]!];
         if (v === undefined) continue;
-        g.set(x, g.cy - dy, v);
-        if (dy > 0) g.set(x, g.cy + dy, v === R_LIGHT ? R_SHADE : v === R_SHADE ? R_LIGHT : v);
-        if (v === R_NOZZLE) {
-          g.engines.push({ x, y: g.cy - dy });
-          if (dy > 0) g.engines.push({ x, y: g.cy + dy });
-        }
+        g.set(x, y, v);
+        if (v === R_NOZZLE) g.engines.push({ x, y });
       }
     }
-    g.gun(L - 1, 0); // the beak
+    g.gunAuto(0); // the beak
     g.gunAuto(6); // wing batteries
     g.hullTint = '#57795b'; // warbird green war-metal
     return;
@@ -2013,9 +2020,16 @@ export function getShipModel(req: ModelRequest): ShipModel {
   const hit = modelCache.get(key);
   if (hit) return hit;
   const spec = CLASS_SPECS[req.cls];
-  // imported hi-res art draws at its native grid size
+  // imported hi-res art draws at its native grid size; so do the hand-drawn
+  // in-plan sheets (pxScale normalizes the field footprint either way)
+  const HAND_CANVAS: Record<string, readonly [number, number]> = { 'crescent|titan|2': [38, 21] };
+  const hand = HAND_CANVAS[`${req.style}|${req.cls}|${variant}`];
   const imported = importedSpriteFor(req.style, req.cls, variant);
-  const g = imported ? new G(imported.rows[0]!.length, imported.rows.length) : new G(spec.w, spec.h);
+  const g = imported
+    ? new G(imported.rows[0]!.length, imported.rows.length)
+    : hand
+      ? new G(hand[0], hand[1])
+      : new G(spec.w, spec.h);
   const r = new Rnd(`${req.style}/${req.cls}/${variant}`);
   const plan = PLANS[req.style] ?? planRaptor;
   if (req.cls === 'doomstar') planDoomstar(g, req.style, r);
