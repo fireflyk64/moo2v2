@@ -732,34 +732,35 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
   }
   if (cls === 'titan' && variant === 2) {
     // Model 3 of the Crescent titan: the WARBIRD — the player's own pixel
-    // sheet (round 10, third revision), used verbatim — it is already in
-    // engine orientation (bow = +x): the A trim marks the BACK edges and the
-    // O#### beak is the front tip. getShipModel gives this model its native
-    // 38-wide canvas and pxScale keeps the field footprint at the shared
-    // titan size. All 21 rows are authored, so the sheet's own shading
-    // survives untouched.
+    // sheet (round 10), reproportioned against the reference top view: the
+    // wing compressed a little and the slim neck stretched into an elongated
+    // head bulb (neck+head ~40% of length — the sheet's own front was too
+    // stubby), with the twin engine stubs moved to the REAR trailing edge
+    // like the reference's nacelle prongs. Bow = +x: A trim marks the back
+    // edges, the O-lit bulb is the head. Native 38-wide canvas; pxScale
+    // keeps the field footprint at the shared titan size.
     const SHEET = [
-      '...........^^^^^^^^^^^^^^^............',
-      '...............Axxxxxxxx##^^..........',
-      '..............A+############e.........',
-      '..............A###+##+######+.........',
-      '............A##+++#++#######..........',
-      '..........A###+#++########+...........',
-      '.........A###++++#########+...........',
-      '.......A^##++++###########............',
-      '....A#^## +#+#+#+#+#+#####............',
-      '..A###^###################^^^^####ee..',
-      'AO#O###O#O#O###################O#O####',
-      '..A###+###################++++####ee..',
-      '....A#+## +#+#+#+#+#+#####............',
-      '.......A+##++++###########............',
-      '.........A###+#++#########+...........',
-      '.........A##+++#++########+...........',
-      '............A#++++#++#######..........',
-      '..............A###+##+######^.........',
-      '..............A+############e.........',
-      '...............Axxxxxxxx##++..........',
-      '...........+++++++++++++++............',
+      '........^^^^^^^^^.....................',
+      '......A^xxxxxxxx##^...................',
+      '.....A+##########+....................',
+      '....A###+##+######+...................',
+      '...A##+++#++########..................',
+      '..A###+#++##########+.................',
+      'e##A##++++##########+.................',
+      '...A^##++++#########..................',
+      '....A#^##.+#+#+#+#+#.........A##^##...',
+      '..A###^^^^##########^###############A.',
+      'AO#O###O#O#O#####################O##O#',
+      '..A###++++##########+###############A.',
+      '....A#+##.+#+#+#+#+#.........A##+##...',
+      '...A+##++++#########..................',
+      'e##A##++++##########+.................',
+      '..A###+#++##########+.................',
+      '...A##+++#++########..................',
+      '....A###+##+######+...................',
+      '.....A+##########+....................',
+      '......A+xxxxxxxx##+...................',
+      '........+++++++++.....................',
     ];
     const ROLE: Record<string, number> = { '#': R_HULL, '+': R_SHADE, '^': R_LIGHT, A: R_ACCENT, O: R_GLOW, x: R_TRIM, e: R_NOZZLE };
     for (let y = 0; y < Math.min(g.h, SHEET.length); y++) {
