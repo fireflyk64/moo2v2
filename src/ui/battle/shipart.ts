@@ -730,6 +730,63 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
     g.gun(c, 2);
     return;
   }
+  // Model 3 warbird ESCORTS (round 10): the titan's family language scaled
+  // down for battleship/cruiser/destroyer — A back-edge trim, forward-swept
+  // wing with crest and pod, rib deck, shade-tapered slim neck, lit head,
+  // rear prong + pod nozzles. Only the top half is authored; the bottom
+  // mirrors with light/shade swapped so the hull stays top-lit.
+  const WARBIRD_HALVES: Partial<Record<ArtClass, readonly string[]>> = {
+    battleship: [
+      '......^^^^^^^^..................',
+      '....eA^xxxxxx##^................',
+      '....A+#########+................',
+      '...A##+#+#######+...............',
+      'e#A##++++#######+...............',
+      '..A^#++++#######................',
+      '...A#^#.+#+#+#+.......A##^#.....',
+      '.A###^^^########+++++#######O#A.',
+      'AO#O##O#O###################O#O#',
+    ],
+    cruiser: [
+      '.....^^^^^^^..............',
+      '...eA^xxxx##^.............',
+      '...A+########+............',
+      'e#A##+++#####+............',
+      '..A^#.+#+#+#......A##^....',
+      '.A##^^^######++++######O#A',
+      'AO#O##O#O#############O#O#',
+    ],
+    destroyer: [
+      '....^^^^^............',
+      '..eA^xxx##^..........',
+      '..A+#######+.........',
+      'e#A#+#+#####.........',
+      '.A#^^#####+++####O#A.',
+      'AO#O#O###########O#O#',
+    ],
+  };
+  const escortHalf = variant === 2 ? WARBIRD_HALVES[cls] : undefined;
+  if (escortHalf) {
+    const ROLE: Record<string, number> = { '#': R_HULL, '+': R_SHADE, '^': R_LIGHT, A: R_ACCENT, O: R_GLOW, x: R_TRIM, e: R_NOZZLE };
+    const hh = escortHalf.length - 1; // rows dyMax..dy0
+    for (let dy = 0; dy <= hh; dy++) {
+      const row = escortHalf[hh - dy]!;
+      for (let x = 0; x < Math.min(g.w, row.length); x++) {
+        const v = ROLE[row[x]!];
+        if (v === undefined) continue;
+        g.set(x, g.cy - dy, v);
+        if (dy > 0) g.set(x, g.cy + dy, v === R_LIGHT ? R_SHADE : v === R_SHADE ? R_LIGHT : v);
+        if (v === R_NOZZLE) {
+          g.engines.push({ x, y: g.cy - dy });
+          if (dy > 0) g.engines.push({ x, y: g.cy + dy });
+        }
+      }
+    }
+    g.gunAuto(0); // the beak
+    g.gunAuto(Math.max(2, hh - 4)); // wing battery
+    g.hullTint = '#57795b'; // family green war-metal
+    return;
+  }
   if (cls === 'titan' && variant === 2) {
     // Model 3 of the Crescent titan: the WARBIRD — the player's own pixel
     // sheet (round 10), reproportioned against the reference top view: the
@@ -2023,7 +2080,12 @@ export function getShipModel(req: ModelRequest): ShipModel {
   const spec = CLASS_SPECS[req.cls];
   // imported hi-res art draws at its native grid size; so do the hand-drawn
   // in-plan sheets (pxScale normalizes the field footprint either way)
-  const HAND_CANVAS: Record<string, readonly [number, number]> = { 'crescent|titan|2': [38, 21] };
+  const HAND_CANVAS: Record<string, readonly [number, number]> = {
+    'crescent|titan|2': [38, 21],
+    'crescent|battleship|2': [32, 17],
+    'crescent|cruiser|2': [26, 13],
+    'crescent|destroyer|2': [21, 11],
+  };
   const hand = HAND_CANVAS[`${req.style}|${req.cls}|${variant}`];
   const imported = importedSpriteFor(req.style, req.cls, variant);
   const g = imported
