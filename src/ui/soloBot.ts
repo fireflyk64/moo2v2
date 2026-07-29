@@ -15,7 +15,7 @@
 // to parity, that bot built RANDOM items and never sailed the colony ships it
 // happened to build, so it sat on one system all game.)
 
-import { colonyPopUnits, foodLogistics, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, shipMarines, starDistance } from '@engine/index';
+import { colonyPopUnits, foodLogistics, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, marinesOf, selectors, SHIP_STYLES, shipMarines, starDistance } from '@engine/index';
 import { generateTerrain, pickGroundDefense } from '@engine/groundTactics';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import type { Empire, GameState } from '@engine/types';
@@ -292,10 +292,22 @@ export class SoloBot {
       this.requestedPersonality = this.personality; // resolved once
     }
     // chosen fleet look: one ordinary set_ship_style, same as a human would
-    // send from the Empires screen (cosmetic only — no engine special case)
-    if (this.shipStyle && !this.styleSubmitted) {
+    // send from the Empires screen (cosmetic only — no engine special case).
+    // A bot with no chosen style ROLLS one from the game seed: fleets vary
+    // game to game (and stay distinct per seat), while replays — which log
+    // the command like any other — remain deterministic.
+    if (!this.styleSubmitted) {
       this.styleSubmitted = true;
-      this.submit('set_ship_style', { style: this.shipStyle });
+      let style = this.shipStyle;
+      if (!style) {
+        let h = 2166136261 >>> 0;
+        for (let i = 0; i < state.seed.length; i++) {
+          h ^= state.seed.charCodeAt(i);
+          h = Math.imul(h, 16777619) >>> 0;
+        }
+        style = SHIP_STYLES[(h + me) % SHIP_STYLES.length]!.id;
+      }
+      this.submit('set_ship_style', { style });
     }
     const prof = this.profile;
     const alwaysWar = this.aggressive || prof.warlike;

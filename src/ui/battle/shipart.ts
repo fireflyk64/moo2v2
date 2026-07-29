@@ -41,6 +41,9 @@ export interface ShipModel {
    * draws on a larger canvas; the viewer multiplies its pixel size by this so
    * every style's cruiser occupies the same field footprint). Default 1. */
   pxScale?: number;
+  /** per-model base-metal override (e.g. the warbird's green war-metal);
+   * absent = the style's material, then the shared neutral gunmetal */
+  hull?: string;
 }
 
 // ---- deterministic tiny RNG (UI-side; never touches the sim) ----
@@ -94,6 +97,7 @@ class G {
   px: Uint8Array;
   engines: Mount[] = [];
   guns: Mount[] = [];
+  hullTint: string | undefined;
   constructor(w: number, h: number) {
     this.w = w;
     this.h = h;
@@ -251,6 +255,7 @@ class G {
       engines: this.engines,
       guns: this.guns.length ? this.guns : [{ x: this.w - 1, y: this.cy }],
       radius: Math.max(this.w, this.h) / 2,
+      ...(this.hullTint ? { hull: this.hullTint } : {}),
     };
   }
 }
@@ -723,6 +728,68 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
     g.sym(c + 1, Math.round(HH * 0.5), R_GLOW);
     bridgeComponents(g);
     g.gun(c, 2);
+    return;
+  }
+  if (cls === 'titan' && variant === 2) {
+    // Model 3 of the Crescent titan: the WARBIRD (round 10 request) — a
+    // pixel take on the classic green predator's top view. Bow to +x: a
+    // beaked head on a slim neck, a broad shield wing behind it whose
+    // trailing edges sweep concave into a rear-center tail block, nacelle
+    // pods riding the wingtips, ribbed plating fanning from the neck root.
+    const cy = g.cy;
+    // tail block between the trailing edges
+    g.box(0, 3, 0, 2, R_HULL);
+    // tail fins raking aft-out
+    g.linePair(3, 3, 0, 5, R_HULL);
+    g.linePair(4, 3, 1, 5, R_HULL);
+    // shield wing: outer edge swells 8→10 then tapers to the neck; the
+    // inner (trailing) edge opens a concave notch astride the tail
+    for (let x = 4; x <= 27; x++) {
+      const outer = x <= 8 ? 8 + (x - 4) * 0.5 : x <= 12 ? 10 : 10 - ((x - 12) * 9) / 15;
+      const inner = x <= 8 ? Math.max(0, 7 - (x - 4) * 1.6) : 0;
+      g.band(x, inner, outer, R_HULL);
+    }
+    // spine boom: the tail runs forward into the body, so the trailing
+    // notches are pockets BETWEEN boom and wingtips, not a severed tail
+    g.box(3, 12, 0, 1, R_HULL);
+    // neck and beak head
+    g.box(22, 28, 0, 1, R_HULL);
+    for (let x = 28; x <= 34; x++) {
+      const hw = x === 28 ? 1 : x === 29 ? 2 : x <= 32 ? 3 : x === 33 ? 2 : 1;
+      g.band(x, 0, hw, R_HULL);
+    }
+    // wingtip nacelle pods (they protrude past the wing edge)
+    g.boxPair(9, 19, 8, 9, R_HULL);
+    g.bevel();
+    // pod dressing: dark spine line + lit forward tips
+    g.linePair(10, 9, 18, 9, R_TRIM);
+    g.sym(19, 8, R_GLOW);
+    g.sym(19, 9, R_GLOW);
+    // ribbed plating fanning from the neck root toward the wing edge
+    g.linePair(21, 2, 12, 7, R_SHADE);
+    g.linePair(23, 2, 15, 7, R_SHADE);
+    g.linePair(25, 2, 18, 7, R_SHADE);
+    // luminous leading edge — the family signature, kept
+    for (let d = 1; d <= HH - 1; d++) {
+      for (let x = L - 1; x >= 0; x--) {
+        if (g.get(x, g.cy - d) !== R_EMPTY) {
+          g.sym(x, d, R_ACCENT);
+          break;
+        }
+      }
+    }
+    // lit central spine, head eye, neck collar, tail beacon
+    for (let x = 22; x <= 27; x += 2) g.set(x, cy, R_GLOW);
+    g.set(31, cy, R_GLOW);
+    g.set(33, cy, R_GLOW);
+    g.sym(28, 1, R_ACCENT);
+    g.set(1, cy, R_GLOW);
+    bridgeComponents(g);
+    g.engAuto(1); // tail drives
+    g.engAuto(8); // wingtip trailing-edge drives
+    g.gun(L - 1, 0); // the beak
+    g.gunAuto(6); // wing batteries
+    g.hullTint = '#57795b'; // warbird green war-metal
     return;
   }
   // main blade: ellipse with a carve -> swept crescent. Variants 0/2 carve
@@ -1332,9 +1399,21 @@ const LATTICE_SPRITES: Partial<Record<ArtClass, ImportedSprite>> = {
   },
 };
 
+/** Bulwark models 1 and 2 traded places (round 10 request): remap the wrapped
+ * variant everywhere the bulwark pipeline consumes it, so the swap carries
+ * the sprite sheet AND the per-variant structural remixes/decals together.
+ * Classes with fewer than two variants (doomstar, stations) keep their look. */
+function bulwarkVariant(cls: ArtClass, variant: number): number {
+  if (variantsFor(cls) < 2) return variant;
+  return variant === 0 ? 1 : variant === 1 ? 0 : variant;
+}
+
 /** hand-drawn sheet for a (style, class, variant), if one exists */
 function importedSpriteFor(style: string, cls: ArtClass, variant: number): ImportedSprite | undefined {
-  if (style === 'bulwark') return variant === 0 ? (BULWARK_MK2_SPRITES[cls] ?? BULWARK_SPRITES[cls]) : BULWARK_SPRITES[cls];
+  if (style === 'bulwark') {
+    const v = bulwarkVariant(cls, variant);
+    return v === 0 ? (BULWARK_MK2_SPRITES[cls] ?? BULWARK_SPRITES[cls]) : BULWARK_SPRITES[cls];
+  }
   if (style === 'lattice' && variant === 0) return LATTICE_SPRITES[cls];
   return undefined;
 }
@@ -1373,8 +1452,11 @@ function stampImported(g: G, spr: ImportedSprite): void {
   }
 }
 
-const planBulwark: Plan = (g, cls, k, r, variant) => {
-  const spr = importedSpriteFor('bulwark', cls, variant);
+const planBulwark: Plan = (g, cls, k, r, variant0) => {
+  // the 1↔2 swap: importedSpriteFor applies the same remap internally, so
+  // sheet choice and the variant-keyed remixes below always travel together
+  const variant = bulwarkVariant(cls, variant0);
+  const spr = importedSpriteFor('bulwark', cls, variant0);
   if (spr) {
     stampImported(g, spr);
     const spine = spr.spine;

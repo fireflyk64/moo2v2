@@ -41,13 +41,16 @@ export function cssToNum(hex: string): number {
   return parseInt(hex.replace('#', ''), 16);
 }
 
-/** hull palette for a (style, player color) pair; NPCs tint far harder */
-export function paletteFor(styleId: string, playerHex: string, npc = false): Palette {
+/** hull palette for a (style, player color) pair; NPCs tint far harder.
+ * A model may override the base metal (ShipModel.hull — e.g. the crescent
+ * warbird's green war-metal); it still blends the player color for team
+ * readability. */
+export function paletteFor(styleId: string, playerHex: string, npc = false, modelHull?: string): Palette {
   const art = STYLE_ART[styleId] ?? NPC_ART;
   // Each style may set its own base metal (chrome, war-steel, …); the default
   // is the neutral gunmetal. The player color is then blended in so hulls stay
   // team-readable without losing the style's material identity.
-  const baseMetal = (STYLE_ART[styleId]?.hull) ?? '#8d96ad';
+  const baseMetal = modelHull ?? (STYLE_ART[styleId]?.hull) ?? '#8d96ad';
   const base = mix(baseMetal, playerHex, npc ? 0.5 : 0.22);
   return {
     hull: base,

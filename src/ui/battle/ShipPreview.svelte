@@ -41,7 +41,7 @@
     // hi-res imported art (pxScale < 1) draws with proportionally smaller —
     // but still integer, so still crisp — pixels to keep footprints aligned
     const drawPx = Math.max(1, Math.round(px * (model.pxScale ?? 1)));
-    const canvas = renderModelToCanvas(model, paletteFor(style, color), drawPx);
+    const canvas = renderModelToCanvas(model, paletteFor(style, color, false, model.hull), drawPx);
     canvas.style.imageRendering = 'pixelated';
     canvas.title = title || `${style} ${cls} — model ${wrapVariant(cls, variant) + 1}/${variantsFor(cls)}`;
     host.replaceChildren(canvas);

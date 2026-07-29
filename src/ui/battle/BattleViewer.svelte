@@ -122,7 +122,7 @@
     const model = monster
       ? getMonsterModel(cls)
       : getShipModel({ style, cls: cls as never, variant: init.modelIdx ?? 0, specials: init.specials, heavyBeams, missileTubes });
-    const pal = paletteFor(style, colorHex, npc);
+    const pal = paletteFor(style, colorHex, npc, model.hull);
     const specialsKey = (init.specials ?? []).slice().sort().join(',');
     const tex = textureForModel(`${monster ? 'npc' : style}|${cls}|${init.modelIdx ?? 0}|${colorHex}|${specialsKey}|${heavyBeams ? 1 : 0}|${Math.min(9, missileTubes)}`, model, pal);
     const sprite = new Sprite(tex);
