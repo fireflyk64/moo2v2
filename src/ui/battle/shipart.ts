@@ -731,62 +731,39 @@ const planCrescent: Plan = (g, cls, k, r, variant) => {
     return;
   }
   if (cls === 'titan' && variant === 2) {
-    // Model 3 of the Crescent titan: the WARBIRD (round 10 request) — a
-    // pixel take on the classic green predator's top view. Bow to +x: a
-    // beaked head on a slim neck, a broad shield wing behind it whose
-    // trailing edges sweep concave into a rear-center tail block, nacelle
-    // pods riding the wingtips, ribbed plating fanning from the neck root.
-    const cy = g.cy;
-    // tail block between the trailing edges
-    g.box(0, 3, 0, 2, R_HULL);
-    // tail fins raking aft-out
-    g.linePair(3, 3, 0, 5, R_HULL);
-    g.linePair(4, 3, 1, 5, R_HULL);
-    // shield wing: outer edge swells 8→10 then tapers to the neck; the
-    // inner (trailing) edge opens a concave notch astride the tail
-    for (let x = 4; x <= 27; x++) {
-      const outer = x <= 8 ? 8 + (x - 4) * 0.5 : x <= 12 ? 10 : 10 - ((x - 12) * 9) / 15;
-      const inner = x <= 8 ? Math.max(0, 7 - (x - 4) * 1.6) : 0;
-      g.band(x, inner, outer, R_HULL);
-    }
-    // spine boom: the tail runs forward into the body, so the trailing
-    // notches are pockets BETWEEN boom and wingtips, not a severed tail
-    g.box(3, 12, 0, 1, R_HULL);
-    // neck and beak head
-    g.box(22, 28, 0, 1, R_HULL);
-    for (let x = 28; x <= 34; x++) {
-      const hw = x === 28 ? 1 : x === 29 ? 2 : x <= 32 ? 3 : x === 33 ? 2 : 1;
-      g.band(x, 0, hw, R_HULL);
-    }
-    // wingtip nacelle pods (they protrude past the wing edge)
-    g.boxPair(9, 19, 8, 9, R_HULL);
-    g.bevel();
-    // pod dressing: dark spine line + lit forward tips
-    g.linePair(10, 9, 18, 9, R_TRIM);
-    g.sym(19, 8, R_GLOW);
-    g.sym(19, 9, R_GLOW);
-    // ribbed plating fanning from the neck root toward the wing edge
-    g.linePair(21, 2, 12, 7, R_SHADE);
-    g.linePair(23, 2, 15, 7, R_SHADE);
-    g.linePair(25, 2, 18, 7, R_SHADE);
-    // luminous leading edge — the family signature, kept
-    for (let d = 1; d <= HH - 1; d++) {
-      for (let x = L - 1; x >= 0; x--) {
-        if (g.get(x, g.cy - d) !== R_EMPTY) {
-          g.sym(x, d, R_ACCENT);
-          break;
+    // Model 3 of the Crescent titan: the WARBIRD — transcribed from the
+    // player's own pixel sheet (round 10 review: the wings were flipped and
+    // the front too wide), mirrored to engine orientation (bow = +x) and
+    // given the slim protruding neck-and-beak the sheet left off. Only the
+    // top half is authored; the bottom mirrors with light/shade swapped so
+    // the hull stays top-lit.
+    const HALF = [
+      '.......^^^^^^......................', // dy10  wing crest
+      '.....^^###xxxxxxxxA................', // dy9   wingtip nacelle pod
+      '....e#############+A...............', // dy8
+      '....+#######+##+###A...............', // dy7
+      '.....########++#+++##A.............', // dy6
+      '......+#########++#+###A...........', // dy5
+      '......+##########++++###A..........', // dy4
+      '.......############++++##^A........', // dy3
+      '.......######+#+#+#+#+#+.##^##A....', // dy2   ribbed deck, neck root
+      'e###^^^####################^####A..', // dy1   boom + neck
+      '#O####################O#O#O####O#O#', // dy0   spine: tail beacon, windows, eyes, beak
+    ];
+    const ROLE: Record<string, number> = { '#': R_HULL, '+': R_SHADE, '^': R_LIGHT, A: R_ACCENT, O: R_GLOW, x: R_TRIM, e: R_NOZZLE };
+    for (let dy = 0; dy <= 10; dy++) {
+      const row = HALF[10 - dy]!;
+      for (let x = 0; x < Math.min(L, row.length); x++) {
+        const v = ROLE[row[x]!];
+        if (v === undefined) continue;
+        g.set(x, g.cy - dy, v);
+        if (dy > 0) g.set(x, g.cy + dy, v === R_LIGHT ? R_SHADE : v === R_SHADE ? R_LIGHT : v);
+        if (v === R_NOZZLE) {
+          g.engines.push({ x, y: g.cy - dy });
+          if (dy > 0) g.engines.push({ x, y: g.cy + dy });
         }
       }
     }
-    // lit central spine, head eye, neck collar, tail beacon
-    for (let x = 22; x <= 27; x += 2) g.set(x, cy, R_GLOW);
-    g.set(31, cy, R_GLOW);
-    g.set(33, cy, R_GLOW);
-    g.sym(28, 1, R_ACCENT);
-    g.set(1, cy, R_GLOW);
-    bridgeComponents(g);
-    g.engAuto(1); // tail drives
-    g.engAuto(8); // wingtip trailing-edge drives
     g.gun(L - 1, 0); // the beak
     g.gunAuto(6); // wing batteries
     g.hullTint = '#57795b'; // warbird green war-metal
