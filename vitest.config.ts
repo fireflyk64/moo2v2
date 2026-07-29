@@ -28,5 +28,11 @@ export default defineConfig({
     ],
     // The sandbox has 2 CPUs; keep contention low.
     maxWorkers: 2,
+    // Full game-protocol loops (MemoryHub multi-seat games) measure ~1.6s in
+    // isolation but stretch 3-4x under 2-core worker contention — the default
+    // 5s cap turned pure wall-clock variance into "flaky" failures that could
+    // mask real bugs (multibot timed out at 5s while behaviorally identical
+    // across runs). 60s means only a genuine hang fails, and it still fails.
+    testTimeout: 60_000,
   },
 });
