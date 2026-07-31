@@ -666,3 +666,155 @@ worst-case seat0 vs own twin 472 vs 498 (0.95, soft gate 0.85).
 
 Guardrails at close: 398 unit+determinism tests green (bombard-repro
 excluded: pre-existing missing-save ENOENT), svelte-check 0 errors.
+
+## 2026-07-31 — MincedOnion round 1 (`results-minced-r1*`, ENGINE 0.29.0)
+
+**New brain: `minced` (src/ui/mincedOnion.ts)** — the onion's constraint
+engine plus a sanctioned-scouting reactive layer (rival research field /
+industry / RP / fleet weight+distribution, deterministic race projection,
+counter-strike retargeting, forward defense, weight-based strike math).
+Self-contained per the onion/v2 doctrine; SoloBot delegates on
+brain==='minced'. New phase `minced` (minced vs onion AND vs v2, mirror
+personalities, both seatings) + `analyze_minced.py`; viability gate
+tests/determinism/minced.test.ts.
+
+**Round 1** (600t, SOLO seed, 24 matches): minced vs v2 **24-0 pts,
+12/12 wins, all eliminations**. minced vs onion **9-12 pts** (4 wins /
+5 losses / 3 draws; 9 of 12 mirrors ended in elimination — first decisive
+war takes all). Minced led techer/rusher/industrialist/militarist mirrors,
+onion led balanced/expander. No stalls, no t200 underdevelopment.
+
+**Diagnosed failure modes** → round 2 levers, one per brain:
+- minced: 5 mirror eliminations from near-parity "desperate" strikes
+  (1.05× weight) into defended stars + forward-defense front re-picked
+  every turn (fleet permanently in transit). → STRIKE_ADV_DESPERATE 1.12,
+  STRIKE_SOFTNESS 1.25 gate (never commit into a garrison 80% of the
+  fleet cannot outweigh), FRONT_HOLD_TURNS 8 commitment.
+- onion: every lost mirror had its 80% strike parked away while the
+  homeland burned. → home-fire recall (enemyAtMyStars≥2 breaks the
+  attack commitment) + home-defense response (throw the navy at the
+  biggest raid when it wins the count, else mass).
+- v2: 12/12 conquests opened with v2 disarmed under a visibly massing
+  rival navy. → `shadowed` peacetime fleet floor (rival >1.5×+2 hulls
+  applies the outgunned 1.25 fleetRatio floor one war earlier).
+
+## 2026-07-31 — MincedOnion round 2 (`results-minced-r2*`)
+
+**Round 2** (600t, 24 minced-phase + 12 onion-phase matches): the
+co-evolution cut both ways. minced vs v2 still **24-0 / 12 eliminations**;
+onion vs v2 **24-0 / 12 eliminations** (the shadowed floor never fired —
+most v2 games replayed r1 byte-identical; v2's gap is economic). The
+mirror went **8-12** (was 9-12): onion's home-fire recall was worth more
+than minced's strike discipline — minced's balanced s0 elimination loss
+flipped to an elimination WIN (t573, 72c/3355pts) and no minced mirror
+ended underdeveloped, but onion now recalls its 80% strike the moment
+minced's counter-raid lands, crushes it, and counter-invades. Persistent
+minced killers across both rounds: industrialist s0, techer s1, rusher s1,
+expander s1. Root cause found in review: r2 gave ONION a home-defense
+fleet response but not minced — a raid on minced's stars during minced's
+own committed strike went entirely unanswered. Sanity note: two
+brain-vs-v2 games (rusher s1, militarist s0) byte-matched r1's minced
+games — vs a passive rival the reactive layer is fully dormant and minced
+degenerates to exactly the onion, confirming a faithful copy.
+
+**Round 3 levers** (one per brain):
+- minced: weight-aware home-fire override (HOME_FIRE_WEIGHT 4 breaks the
+  commitment; answer the biggest raid at ≥1.2× weight, else mass),
+  muster-break (jump the rival's telegraphed assembling muster while it
+  is ≤0.7× our weight — defeat in detail), RETARGET_EVERY 6→4.
+- onion: `scores.military >= 80` joins the plan-pivot emergencies (r2
+  techer mirrors died holding a research plan through a 1.5× hull
+  deficit; 80 not 85 because the techer ×0.9 mult lands at 81).
+- v2: BUILD_ORDER completed with space_port / atmospheric_renewer /
+  autolab (ranked 99 before; the source save ran all three everywhere —
+  v2's t297 economy sat at half the other brains' average).
+
+## 2026-07-31 — MincedOnion round 3 (`results-minced-r3*`)
+
+**Round 3** (600t, 24+12): minced vs v2 still 24-0 (12 elims); onion vs
+v2 24-0 even with v2's ladder additions — and v2's t297 avg fell −100:
+space_port at rank 7 (pre-supercomputer) starved the research core, the
+lever backfired. The mirror REGRESSED to **5-17** (8 minced elims vs 2):
+onion's rearm emergency paid (+141 techer at t297) while both r3 minced
+levers were flawed in review — the flat home-fire bar (any 2 hulls / 4
+weight) let onion disarm minced's whole offense with a two-frigate pin,
+and muster-break priced the muster WITHOUT its orbital works, jumping
+"beatable" stacks straight into home-yard star bases. Minced still owns
+balanced (leads both seatings) + techer s0/militarist s1 conquests.
+
+**Round 4 levers**: minced — home-fire bar scales with own fleet
+(max(6, 25% weight), no count trigger), muster-break prices bases×4 like
+every other target, RETARGET_EVERY back to 6. v2 — ladder additions moved
+late (after stock_exchange) where the source save actually built them.
+onion — stands pat (mirror leader; keep the baseline stable).
+
+## 2026-07-31 — MincedOnion round 4 + probes (`results-minced-r4*`, minced-probe.test.ts)
+
+**Round 4** (600t, 24+12): minced vs v2 24-0, onion vs v2 24-0 (v2's
+re-ordered ladder recovered +99 at t297). Mirror **5-18** — and the four
+persistent losing personalities replayed r3 byte-identical: the r4 levers
+never fired in those games. Stopped guessing; added
+tests/balance/minced-probe.test.ts (MOO2_MPROBE=1, per-turn trace of one
+mirror: plans, colonies, hulls, weight, bc, war state, battles).
+
+**Probe findings** (the whole story in two traces):
+- rusher s1 (minced dies t373): minced DECLARES at t42 with 2 colonies,
+  then a 330-turn war with ZERO battles — at-war threat sizing builds 16
+  hulls on an 8-colony economy, insolvency by t241, expansion stalls at
+  8c while the onion doubles to 21c. A phony war, self-declared.
+- balanced s0 (onion dies t582): symmetric — war at t204, no battles for
+  200 turns, and this time the ONION spirals (−1355 BC at 32c chasing a
+  65-hull quota) while minced outscales it.
+- v2: attack() declared war UNCONDITIONALLY on turn 1 every game and
+  split 75% of the fleet across up to 4 targets — every one of its 24
+  conquests opened with a premature war it declared itself.
+
+**Round 5 levers — war discipline for all three, each in its own idiom:**
+- minced: declare only with an immediately winnable soft opening target
+  (pickAttackStar + softness) and ≥4 colonies; phony-war garrison cap
+  (no committed op + no home threat → want ≤ colonies×1.2+1).
+- onion: the same garrison cap (own-info only, doctrine-neutral).
+- v2: declare only from strength (≥4 colonies, count ≥ 1.25×+1).
+
+## 2026-07-31 — MincedOnion round 5 (`results-minced-r5*`)
+
+**Round 5** (600t, 24+12): war discipline landed. Mirror **8-13** (from
+5-18): rusher — minced's death seat for four straight rounds — flipped to
+its best mirror (1393 vs 589, elim win), militarist held, and every t297
+delta went positive (minced +35 mirror / +77 vs v2, v2 +24). But the
+symmetric discipline ceded INITIATIVE: onion still declares on bare count
+advantage while minced waited for a perfect soft opening — balanced s0
+(minced's r4 conquest) flipped back to an onion elimination win, and
+techer s0 became a peace race minced led 3434-1722 (88 apps) without
+converting. Sweeps unchanged: minced 24-0 v2, onion 24-0 v2.
+
+**Round 6 levers**: minced — declare at the strike bar itself (drop the
++0.1), accept a beatable enemy muster as a war opener (defeat in detail),
+deterrence from theirWar≥2. v2 — raid response: a raided colony without
+orbital works jumps star_base to the queue head. onion — frozen this
+round (leader stands pat; the round measures challenger levers against a
+fixed baseline).
+
+## 2026-07-31 — MincedOnion rounds 6 + final state (`results-minced-r6*`)
+
+**Round 6** (600t, minced initiative levers + v2 raid response, onion
+frozen): mirror **6-13** — the initiative package netted NEGATIVE
+(industrialist collapsed to two eliminations; balanced s0 unchanged;
+militarist improved to 2504/750). v2 raid response neutral-positive (+3
+t297). Verdict across six rounds (r1 9-12, r2 8-12, r3 5-17, r4 5-18,
+r5 8-13, r6 6-13): **r5 is the measured optimum for minced** — its
+declare shape and deterrence reverted to r5; v2's raid response kept;
+the r6 declare gate relaxed to RELATIVE strength only (myWar ≥ 1.25×
+theirWar, no colony minimum) so aggressive mode keeps its turn-one
+menace vs humans (solobot.test contract) while still refusing to declare
+into a stronger navy.
+
+**Final state.** minced vs v2: **72-0 over six rounds, every game an
+elimination win**. onion vs v2: 24-0 per round throughout. minced vs
+onion at the final config: 8-13 pts (3W/6L/3D) — near-parity against an
+onion that this same co-evolution hardened four times (home-fire recall
++ home-defense response, rearm emergency, phony-war garrison). The
+war-discipline levers (declare-with-a-first-move, garrison caps) came
+out of the minced probes and now protect ALL three brains vs humans too.
+Full suite green: 688 passed. Probe harness: MOO2_MPROBE=1
+tests/balance/minced-probe.test.ts (per-turn mirror traces).

@@ -9,6 +9,10 @@
 //           own seed/map (pre-warp, medium) to the SOLO game's 297 turns.
 //   rr    — personality round-robin (balanced/techer/rusher/industrialist/
 //           expander/militarist), both seatings, same map.
+//   minced — MincedOnion vs each rival brain (TOURNEY_MINCED_VS, default
+//           onion,v2), mirror personalities/races, both seatings; knobs
+//           TOURNEY_MINCED_PERS / TOURNEY_MINCED_RACE; analyzer
+//           bugs/tournament/analyze_minced.py.
 //
 // Every match appends a JSON line to bugs/tournament/results-<runid>.jsonl as
 // it finishes (a killed run still leaves data), and a human-readable report
@@ -265,6 +269,28 @@ describe.runIf(enabled)('AI tournament', () => {
           }
         }
       }
+      if (PHASES.includes('minced')) {
+        // MincedOnion vs each rival brain (default onion AND v2): mirror
+        // personalities and races so the BRAIN is the only variable; both
+        // seatings cancel seat bias
+        const pers = (process.env['TOURNEY_MINCED_PERS'] ?? PERSONALITIES.join(','))
+          .split(',')
+          .filter((p): p is BotPersonality => (PERSONALITIES as string[]).includes(p));
+        const race = process.env['TOURNEY_MINCED_RACE'] ?? 'solari';
+        const rivals = (process.env['TOURNEY_MINCED_VS'] ?? 'onion,v2')
+          .split(',')
+          .filter((b): b is BotBrain => ['v1', 'v2', 'onion'].includes(b));
+        for (const seed of SEEDS) {
+          for (const p of pers) {
+            for (const rb of rivals) {
+              const minced: SeatCfg = { personality: p, race, brain: 'minced' };
+              const other: SeatCfg = { personality: p, race, brain: rb };
+              await play('minced', seed, minced, other);
+              if (SEATINGS > 1) await play('minced', seed, other, minced);
+            }
+          }
+        }
+      }
       if (PHASES.includes('rr')) {
         for (const seed of SEEDS) {
           for (let i = 0; i < PERSONALITIES.length; i++) {
@@ -356,6 +382,53 @@ describe.runIf(enabled)('AI tournament', () => {
           }
         }
         for (const [brain, s] of Object.entries(tally)) {
+          lines.push('');
+          lines.push(`**${brain}**: ${s.pts} pts, ${s.wins} wins over ${s.games} games, avg score ${Math.round(s.score / Math.max(1, s.games))}`);
+        }
+        lines.push('');
+      }
+      if (PHASES.includes('minced')) {
+        lines.push('## MincedOnion vs rival brains (mirror personalities)', '');
+        lines.push('| personality | rival | seat | minced | rival | winner | map |', '|---|---|---|---|---|---|---|');
+        const tally = new Map<string, { pts: number; wins: number; games: number; score: number }>();
+        const row = (k: string) => tally.get(k) ?? tally.set(k, { pts: 0, wins: 0, games: 0, score: 0 }).get(k)!;
+        for (const r of results.filter((x) => x.phase === 'minced')) {
+          const mincedSeat = r.a.brain === 'minced' ? 0 : 1;
+          const mFin = r.final[mincedSeat as 0 | 1];
+          const oFin = r.final[(1 - mincedSeat) as 0 | 1];
+          const rivalBrain = (mincedSeat === 0 ? r.b.brain : r.a.brain) ?? 'v2';
+          const winner =
+            r.winner === null
+              ? mFin.score >= oFin.score
+                ? 'minced (pts)'
+                : `${rivalBrain} (pts)`
+              : r.winner === mincedSeat
+                ? 'MINCED'
+                : rivalBrain.toUpperCase();
+          lines.push(
+            `| ${r.a.personality} | ${rivalBrain} | minced=${mincedSeat} | ${fmt(mFin)} | ${fmt(oFin)} | ${winner} | ${r.mapFullPct}% |`,
+          );
+          for (const [brain, fin, other, won] of [
+            ['minced', mFin, oFin, r.winner === mincedSeat],
+            [`${rivalBrain}(vs minced)`, oFin, mFin, r.winner !== null && r.winner !== mincedSeat],
+          ] as const) {
+            const t = row(brain);
+            t.games++;
+            t.score += fin.score;
+            if (won) {
+              t.wins++;
+              t.pts += 2;
+            } else if (r.winner === null) {
+              t.pts += fin.score >= other.score ? 1 : 0;
+            }
+          }
+          if (r.stalled) violations.push(`minced: ${r.a.personality} vs ${rivalBrain} stalled at t${r.finalTurn}`);
+          const mid = r.checkpoints[200]?.[mincedSeat as 0 | 1];
+          if (mid && (mid.colonies < 3 || mid.apps < 20)) {
+            violations.push(`minced: MincedOnion (${r.a.personality}) underdeveloped at t200: ${fmt(mid)}`);
+          }
+        }
+        for (const [brain, s] of [...tally.entries()].sort()) {
           lines.push('');
           lines.push(`**${brain}**: ${s.pts} pts, ${s.wins} wins over ${s.games} games, avg score ${Math.round(s.score / Math.max(1, s.games))}`);
         }

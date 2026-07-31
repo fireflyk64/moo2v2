@@ -22,12 +22,14 @@ import type { Empire, GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 import { botRaceById, botRacePicks } from './botRaces';
 import { freshOnionMemory, onionBattleOrders, onionTurn, pickAssaultPlanet, pickFormation, pickInvadeTactic, planetScore, type OnionMemory } from './onionBot';
+import { freshMincedMemory, mincedBattleOrders, mincedTurn, type MincedMemory } from './mincedOnion';
 
 export type BotMode = 'parity' | 'fair';
 /** fair-bot strategy generation: v1 = the original random-build brain (kept
  * as the self-play benchmark), v2 = the tuned brain that beats it, onion =
- * the constraint-driven Tech Fortress doctrine (onionBot.ts, bugs/ai_plan.md) */
-export type BotBrain = 'v1' | 'v2' | 'onion';
+ * the constraint-driven Tech Fortress doctrine (onionBot.ts, bugs/ai_plan.md),
+ * minced = the onion core plus a reactive rival-reading layer (mincedOnion.ts) */
+export type BotBrain = 'v1' | 'v2' | 'onion' | 'minced';
 /** deterministic play-style profiles so the bots don't all play the same */
 export type BotPersonality = 'balanced' | 'techer' | 'rusher' | 'industrialist' | 'expander' | 'militarist';
 
@@ -95,7 +97,16 @@ export const BUILD_ORDER = [
   'pollution_processor',
   'robo_miner_plant',
   'stock_exchange',
+  'space_port',
+  'atmospheric_renewer',
   'astro_university',
+  'autolab',
+  // space_port/atmospheric_renewer/autolab added in the minced rounds:
+  // they ranked 99 (cost-ordered afterthoughts) while the same human save
+  // this list was mined from ran all three on every developed world. r3
+  // tried space_port at rank 7 (pre-supercomputer) — t297 avg fell 100pts
+  // (early ports starved the research core on small worlds); they now sit
+  // late-ladder where the human actually built them.
 ];
 
 export interface SoloBotOptions {
@@ -157,6 +168,8 @@ export class SoloBot {
   mirrorSettlersGranted = 0;
   /** cross-turn plan/commitment state for the onion brain */
   private onionMemory: OnionMemory = freshOnionMemory();
+  /** cross-turn plan/commitment/observation state for the minced brain */
+  private mincedMemory: MincedMemory = freshMincedMemory();
 
   constructor(opts: SoloBotOptions) {
     this.session = opts.session;
@@ -232,8 +245,9 @@ export class SoloBot {
     return this.aggressive;
   }
 
-  /** diagnostic peek for probes/tests: the onion brain's current plan */
+  /** diagnostic peek for probes/tests: the onion/minced brain's current plan */
   get onionPlan(): string | null {
+    if (this.brain === 'minced') return this.mincedMemory.plan;
     return this.brain === 'onion' ? this.onionMemory.plan : null;
   }
 
@@ -330,7 +344,12 @@ export class SoloBot {
     const myWarCount = state.ships.filter((s) => s.owner === me && s.shipKind === 'design').length;
     const theirWarCount = state.ships.filter((s) => s.owner === human.id && s.shipKind === 'design').length;
     const outgunned = atWar && theirWarCount > myWarCount * 1.2 + 2;
-    const fleetRatio = outgunned ? Math.max(this.profile.fleetRatio, 1.25) : this.profile.fleetRatio;
+    // shadowed: PEACETIME rival navy already past 1.5×+2 is a countdown, not
+    // scenery — the minced round 1 killed v2 in all 12 games and every one
+    // opened with v2 disarmed under a visibly massing rival fleet. Same
+    // ratio floor as outgunned, applied one war earlier.
+    const shadowed = !atWar && theirWarCount > myWarCount * 1.5 + 2;
+    const fleetRatio = outgunned || shadowed ? Math.max(this.profile.fleetRatio, 1.25) : this.profile.fleetRatio;
 
     // ---- concession: wars must be able to END. Bombard spares the last pop
     // unit and invasions grind, so a truly beaten empire offers formal
@@ -397,6 +416,20 @@ export class SoloBot {
         personality: this.personality,
         alwaysWar,
         memory: this.onionMemory,
+      });
+      return;
+    }
+    // ---- minced brain: the onion core plus the reactive rival-reading
+    // layer (mincedOnion.ts) — same shared-shell contract as the onion ----
+    if (this.brain === 'minced') {
+      mincedTurn({
+        session: this.session,
+        state,
+        planned: this.session.getPlanned() ?? state,
+        me,
+        personality: this.personality,
+        alwaysWar,
+        memory: this.mincedMemory,
       });
       return;
     }
@@ -547,6 +580,22 @@ export class SoloBot {
         }
       }
       if (v2 && head0 === 'trade_goods' && bot.bc <= 50) continue; // still digging out
+      // raid response (minced r5): enemy hulls over this colony and no
+      // orbital works yet — the star base jumps the queue (list-driven,
+      // v2's idiom; the ordinary buy branch purchases it when affordable)
+      if (v2 && !colony.buildings.includes('star_base') && head0 !== 'star_base') {
+        const starId = planned.planets.find((p) => p.id === colony.planetId)?.starId;
+        const raided =
+          starId !== undefined &&
+          planned.ships.some(
+            (s) =>
+              s.owner === human.id && s.shipKind === 'design' && s.location.kind === 'star' && s.location.starId === starId,
+          );
+        if (raided && selectors.colonyRow(planned, colony).buildable.includes('star_base')) {
+          this.submit('set_build_queue', { colonyId: colony.id, items: ['star_base'] });
+          continue;
+        }
+      }
       if (colony.queue.length === 0 || (v2 && colony.queue[0]?.item === 'trade_goods' && bot.bc > 50)) {
         const row = selectors.colonyRow(planned, colony);
         const options = row.buildable.filter((b) => b !== 'housing' && b !== 'trade_goods' && b !== 'spy');
@@ -1153,11 +1202,20 @@ export class SoloBot {
   }
 
   private attack(state: GameState, me: number, humanId: number): void {
-    // declare war first (no-op if already at war)
     const rel = state.relations.find(
       (r) => (r.a === Math.min(me, humanId) && r.b === Math.max(me, humanId)),
     );
-    if (!rel || rel.status !== 'war') this.submit('declare_war', { target: humanId });
+    if (!rel || rel.status !== 'war') {
+      // pick fights only from RELATIVE strength (minced r4: the old
+      // unconditional declaration bought premature wars v2 lost 24/24).
+      // The gate is relative, not absolute — two fleetless empires still
+      // declare (aggressive mode keeps its menace, solobot.test contract);
+      // declaring into a stronger navy is what gets refused.
+      const myWar = state.ships.filter((s) => s.owner === me && s.shipKind === 'design').length;
+      const theirWar = state.ships.filter((s) => s.owner === humanId && s.shipKind === 'design').length;
+      if (myWar < theirWar * 1.25) return;
+      this.submit('declare_war', { target: humanId });
+    }
 
     const warships = state.ships.filter(
       (s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star' && !this.lairStrike.has(s.id),
@@ -1230,6 +1288,13 @@ export class SoloBot {
         this.submit('battle_orders', {
           battleId: b.id,
           orders: onionBattleOrders(state, me, b, this.personality),
+        });
+        continue;
+      }
+      if (this.brain === 'minced') {
+        this.submit('battle_orders', {
+          battleId: b.id,
+          orders: mincedBattleOrders(state, me, b, this.personality),
         });
         continue;
       }

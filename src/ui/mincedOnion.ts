@@ -1,15 +1,33 @@
-// Masters of Onions CPU — the constraint-driven "Tech Fortress Doctrine" bot
-// (spec: bugs/ai_plan.md). Core loop: find the dominant constraint → spend the
-// turn removing it → re-evaluate. Research is the default tool, not the goal;
-// every subsystem (research field choice, per-colony builds, leaders, fleet
-// sizing, strikes) keys off the same dominant-constraint verdict, with
-// hysteresis and minimum commitments so the empire never thrashes.
+// MincedOnion CPU — the OnionAI's constraint engine with a REACTIVE layer on
+// top: the onion, finely chopped. It keeps the Tech Fortress core (dominant
+// constraint → remove it → re-evaluate, hysteresis, CORE_ORDER ladder) and
+// adds what the onion deliberately abstains from — reading the rival.
 //
-// Deliberately SELF-CONTAINED: the OnionAI and the v2 brain are tournament
-// rivals — tuning one must never nudge the other. SoloBot stays the shared
-// session shell (commit timing, lobby echo, surrender hygiene) and delegates
-// all strategy here when brain === 'onion'. Everything below issues ordinary
-// logged commands through the session; the sim never special-cases it.
+// The reactive layer (all deterministic, no wall clock, no randomness):
+//   1. Rival intel: their current research field/target (what is coming),
+//      total industry, research rate, fleet weight and its growth, and where
+//      that fleet actually sits (home, mustering, or committed away).
+//   2. Counter-posture: weapons research + industry to build them raises our
+//      military/defense pressure BEFORE the hulls exist; an out-teching rival
+//      raises research pressure; a muster near our stars raises defense.
+//   3. Deterrence: peacetime fleet floor tracks the rival's real fleet so
+//      their attack-threshold arithmetic never clears (strategy mined from
+//      the tournament rivals: the onion strikes at 1.25×, v2 at its ratio).
+//   4. Windows: a bounded forward projection of both economies decides
+//      whether time is on our side — outscaled → force the war early;
+//      outscaling → deter, decline risk, and win on growth.
+//   5. Counter-strike: a rival strike fleet committed away from home leaves
+//      it soft — retarget the committed attack at their weakest valuable
+//      star (budgeted target search, weight- and travel-aware).
+//
+// Deliberately SELF-CONTAINED, same doctrine as the onion/v2 split: the
+// MincedOnion, OnionAI and v2 brains are tournament rivals — tuning one must
+// never nudge another. SoloBot stays the shared session shell and delegates
+// the whole turn here when brain === 'minced'. Everything below issues
+// ordinary logged commands through the session; the sim never special-cases
+// it. Reading rival state is sanctioned for this brain: there is no protocol
+// fog, the onion's abstinence was a design choice, and the minced brain's
+// design choice is scouting-by-ledger.
 //
 // All tunables live in the tables at the top — the tournament improvement
 // loop edits weights, not control flow.
@@ -17,7 +35,7 @@
 import { foodLogistics, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, designMountMix, designStats, hullIndexOf, marinesOf, pickDoctrine, selectors, shipMarines, starDistance } from '@engine/index';
 import { generateTerrain, pickGroundAttack } from '@engine/groundTactics';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
-import { applicationsOfField, fieldByNum } from '@engine/data/index';
+import { applicationsOfField, fieldByNum, subjectOfField } from '@engine/data/index';
 import { leaderById } from '@engine/leaders';
 import type { Empire, GameState, Planet } from '@engine/types';
 import type { GameSession } from '@protocol/session';
@@ -33,9 +51,21 @@ export type Constraint =
   | 'military' // cannot beat the threat/target class
   | 'defense'; // enemy at the gates
 
+/** one sampled observation of the two-empire race (rolling, capped) */
+interface RaceSample {
+  turn: number;
+  myW: number; // my fleet weight (frigate equivalents)
+  theirW: number;
+  myInd: number; // total prodToQueue
+  theirInd: number;
+  myRP: number;
+  theirRP: number;
+}
+
 /** cross-turn state (per bot instance): the hysteresis + min-commitment
- * memory the spec's anti-thrash section requires */
-export interface OnionMemory {
+ * memory the spec's anti-thrash section requires, plus the minced brain's
+ * rolling rival observations */
+export interface MincedMemory {
   plan: Constraint | null;
   planSince: number;
   /** committed strike star (enemy colony or guarded prize) — held until it
@@ -43,17 +73,28 @@ export interface OnionMemory {
   attackStar: number | null;
   attackSince: number;
   wasAtWar: boolean;
+  /** rolling race samples, one per played turn (capped at HIST_CAP) */
+  hist: RaceSample[];
+  /** last turn the committed attack was allowed to retarget (anti-thrash) */
+  retargetTurn: number;
+  /** committed forward-defense star + when it was chosen (anti-thrash) */
+  frontStar: number | null;
+  frontSince: number;
 }
 
-export const freshOnionMemory = (): OnionMemory => ({
+export const freshMincedMemory = (): MincedMemory => ({
   plan: null,
   planSince: 0,
   attackStar: null,
   attackSince: 0,
   wasAtWar: false,
+  hist: [],
+  retargetTurn: -99,
+  frontStar: null,
+  frontSince: 0,
 });
 
-export interface OnionCtx {
+export interface MincedCtx {
   session: GameSession<GameState>;
   state: GameState;
   planned: GameState;
@@ -62,7 +103,7 @@ export interface OnionCtx {
   /** aggression toggle or warlike personality — permission to fight, not an
    * order to attack regardless of odds */
   alwaysWar: boolean;
-  memory: OnionMemory;
+  memory: MincedMemory;
 }
 
 // ---------------------------------------------------------------- tunables
@@ -246,6 +287,67 @@ const SKILL_FIT: Record<string, Partial<Record<Constraint, number>>> = {
   assassin: { defense: 2 },
 };
 
+// ------------------------------------------------- minced reactive tunables
+
+/** rolling-history cap and the projection window (turns) for the
+ * outscaled/outscaling verdict — deterministic "time-boxed planning": the
+ * budget is counted in samples and candidate evaluations, never wall-clock
+ * (wall-clock reads are a replay/flake hazard, see d68aa6f) */
+const HIST_CAP = 40;
+const PROJECT_BACK = 10; // compare now vs ~10 turns ago
+const PROJECT_AHEAD = 30; // extrapolate the race this far out
+/** economy proxy: industry + RP×this (RP compounds; weigh it heavier) */
+const RP_VALUE = 1.5;
+/** projected-race verdicts: below LOSING force the war window open, above
+ * WINNING decline risk and win on growth */
+const RACE_LOSING = 0.9;
+const RACE_WINNING = 1.15;
+/** strike-advantage (fleet WEIGHT ratio) thresholds per race verdict.
+ * Desperate was 1.05 in round 1 — near-parity attacks into defended stars
+ * fed the fleet piecemeal (5 mirror eliminations); a forced window still
+ * needs real superiority. */
+const STRIKE_ADV_DESPERATE = 1.12;
+const STRIKE_ADV_NORMAL = 1.15;
+const STRIKE_ADV_COMFORTABLE = 1.35;
+/** a strike only commits when 80% of the fleet outweighs the target's
+ * priced garrison (stacks + orbital works) by this ratio — never attack
+ * into strength (r1: the balanced mirror died doing exactly that) */
+const STRIKE_SOFTNESS = 1.25;
+/** forward-defense front commitment: hold the chosen border star this many
+ * turns before re-picking (r1: a front that chases the muster every turn
+ * arrives nowhere — ships fed piecemeal from transit) */
+const FRONT_HOLD_TURNS = 8;
+/** peacetime deterrence: keep own hull count ≥ rival × this while their
+ * fleet grows — the onion declares at 1.25× advantage and strikes at 1.15×;
+ * staying above 1/1.25 of their count keeps both bars permanently shut */
+const DETER_RATIO = 0.85;
+/** counter-strike: rival fleet share away from their stars that counts as
+ * "committed elsewhere", and the local superiority required to raid */
+const RAID_AWAY_SHARE = 0.55;
+const RAID_SUPERIORITY = 1.8;
+/** retarget hysteresis (turns) and the reinforcement ratio that abandons a
+ * committed attack star (they massed there faster than we can win).
+ * (r3 tried 4: with the home-fire recall in the same round the offense
+ * never stayed committed long enough to take anything — reverted) */
+const RETARGET_EVERY = 6;
+const ABANDON_DEFENSE_RATIO = 1.3;
+/** home-fire: rival weight over our colonies that breaks a committed strike
+ * and pulls the navy home. Round 3 lesson: a FLAT low bar (4, or any 2
+ * hulls) let the rival disarm our whole offense with a two-frigate pin —
+ * the bar now scales with our own fleet so only a raid we should actually
+ * turn around for triggers the recall. */
+const HOME_FIRE_WEIGHT = 6;
+const HOME_FIRE_MY_SHARE = 0.25;
+/** muster-break: jump the rival's ASSEMBLING strike fleet while it is still
+ * below this share of our weight (their doctrine telegraphs the muster —
+ * it holds until 70% assembled; a partial muster is beatable in detail) */
+const MUSTER_BREAK_RATIO = 0.7;
+/** budget for scored candidate evaluations in the raid/attack target search */
+const TARGET_SEARCH_BUDGET = 96;
+/** research subjects that read as a weapons program when the rival's current
+ * field belongs to them */
+const THREAT_SUBJECTS = new Set(['physics', 'force_fields']);
+
 // ------------------------------------------------------------------ intel
 
 interface FreeTarget {
@@ -255,6 +357,36 @@ interface FreeTarget {
   reachable: boolean;
   atMyStar: boolean;
   guarded: boolean;
+}
+
+/** what the ledger says about the rival right now (the minced brain's
+ * sanctioned scouting — see the header) */
+interface RivalIntel {
+  /** fleet weight in frigate equivalents, both sides */
+  weight: number;
+  myWeight: number;
+  /** total prodToQueue across real colonies, both sides */
+  industry: number;
+  myIndustry: number;
+  /** research per turn, both sides */
+  rp: number;
+  myRp: number;
+  /** subject of the rival's current research field (null = idle labs) */
+  researchSubject: string | null;
+  /** rival is visibly running a weapons program (field subject or target) */
+  techThreat: boolean;
+  /** rival fleet-weight delta over the PROJECT_BACK window */
+  growth: number;
+  /** share of rival fleet weight NOT sitting at their own stars */
+  awayShare: number;
+  /** heaviest rival stack (star id + weight); null when they have no fleet */
+  musterStar: number | null;
+  musterWeight: number;
+  /** rival fleet weight per star (design hulls only) */
+  stacks: Map<number, number>;
+  /** bounded forward projection of the economy race: my projected economy /
+   * theirs, PROJECT_AHEAD turns out. <RACE_LOSING = they outscale us. */
+  raceRatio: number;
 }
 
 interface Intel {
@@ -275,10 +407,12 @@ interface Intel {
   enemyAtMyStars: number;
   farmerShare: number;
   cpHeadroom: number;
+  /** rival observations (null before contact / after their elimination) */
+  spy: RivalIntel | null;
 }
 
 /** acquisition score 0..100 (spec §Planets) */
-export function planetScore(planet: Planet, atMyStar: boolean, guarded: boolean): number {
+function planetScore(planet: Planet, atMyStar: boolean, guarded: boolean): number {
   let s =
     CLIMATE_SCORE[planet.climate] +
     MINERAL_SCORE[planet.minerals] +
@@ -291,7 +425,7 @@ export function planetScore(planet: Planet, atMyStar: boolean, guarded: boolean)
   return Math.max(0, Math.min(100, s));
 }
 
-function gatherIntel(ctx: OnionCtx): Intel | null {
+function gatherIntel(ctx: MincedCtx): Intel | null {
   const { planned, me } = ctx;
   const bot = planned.empires.find((e) => e.id === me);
   if (!bot || bot.eliminated) return null;
@@ -341,15 +475,37 @@ function gatherIntel(ctx: OnionCtx): Intel | null {
     : undefined;
   const atWar = warRel?.status === 'war';
 
+  // one pass over the ships: counts, frigate-equivalent weights, and where
+  // the rival's weight actually sits (per-star stacks, home vs away)
+  const designWeights = (e: Empire | null): Map<number, number> => {
+    const m = new Map<number, number>();
+    if (e) for (const d of e.designs) m.set(d.id, HULL_WEIGHT[d.hull] ?? 1);
+    return m;
+  };
+  const myDW = designWeights(bot);
+  const rivalDW = designWeights(rival);
   let myWar = 0;
   let theirWar = 0;
   let enemyAtMyStars = 0;
+  let myWeight = 0;
+  let theirWeight = 0;
+  let theirHomeWeight = 0;
+  const stacks = new Map<number, number>();
   for (const s of planned.ships) {
     if (s.shipKind !== 'design') continue;
-    if (s.owner === me) myWar++;
+    if (s.owner === me) {
+      myWar++;
+      myWeight += Math.max(1, myDW.get(s.designId ?? -1) ?? 1);
+    }
     if (rival && s.owner === rival.id) {
       theirWar++;
-      if (s.location.kind === 'star' && myStars.has(s.location.starId)) enemyAtMyStars++;
+      const w = Math.max(1, rivalDW.get(s.designId ?? -1) ?? 1);
+      theirWeight += w;
+      if (s.location.kind === 'star') {
+        stacks.set(s.location.starId, (stacks.get(s.location.starId) ?? 0) + w);
+        if (myStars.has(s.location.starId)) enemyAtMyStars++;
+        if (rivalStars.has(s.location.starId)) theirHomeWeight += w;
+      }
     }
   }
 
@@ -384,9 +540,79 @@ function gatherIntel(ctx: OnionCtx): Intel | null {
 
   let farmers = 0;
   let units = 0;
+  let myIndustry = 0;
   for (const r of rows) {
     farmers += r.jobs.farmers;
     units += r.popUnits;
+    myIndustry += r.output.prodToQueue;
+  }
+
+  // ---- rival observations (the minced brain's reactive layer) ----
+  let spy: RivalIntel | null = null;
+  if (rival) {
+    let rivalIndustry = 0;
+    for (const c of planned.colonies) {
+      if (c.owner !== rival.id || c.outpost) continue;
+      rivalIndustry += selectors.colonyRow(planned, c).output.prodToQueue;
+    }
+    const rivalSummary = selectors.empireSummary(planned, rival.id);
+    let researchSubject: string | null = null;
+    if (rival.research.fieldNum !== null) {
+      const f = fieldByNum.get(rival.research.fieldNum);
+      if (f) researchSubject = subjectOfField(f.id);
+    }
+    const threatApps = new Set([...WANTED_APPS.military, ...WANTED_APPS.defense]);
+    const techThreat =
+      (researchSubject !== null && THREAT_SUBJECTS.has(researchSubject)) ||
+      (rival.research.targetApp !== null && threatApps.has(rival.research.targetApp));
+
+    // sample the race once per turn, then read growth + projection off it
+    const mem = ctx.memory;
+    if (!mem.hist.length || mem.hist[mem.hist.length - 1]!.turn !== planned.turn) {
+      mem.hist.push({
+        turn: planned.turn,
+        myW: myWeight,
+        theirW: theirWeight,
+        myInd: myIndustry,
+        theirInd: rivalIndustry,
+        myRP: summary.researchPerTurn,
+        theirRP: rivalSummary.researchPerTurn,
+      });
+      if (mem.hist.length > HIST_CAP) mem.hist.shift();
+    }
+    const h = mem.hist;
+    const now = h[h.length - 1]!;
+    const past = h[Math.max(0, h.length - 1 - PROJECT_BACK)]!;
+    const dt = Math.max(1, now.turn - past.turn);
+    const proj = (nowV: number, pastV: number): number => nowV + ((nowV - pastV) * PROJECT_AHEAD) / dt;
+    const mine = proj(now.myInd + now.myRP * RP_VALUE, past.myInd + past.myRP * RP_VALUE);
+    const theirs = proj(now.theirInd + now.theirRP * RP_VALUE, past.theirInd + past.theirRP * RP_VALUE);
+
+    let musterStar: number | null = null;
+    let musterWeight = 0;
+    for (const [star, w] of [...stacks.entries()].sort((a, b) => a[0] - b[0])) {
+      if (w > musterWeight) {
+        musterWeight = w;
+        musterStar = star;
+      }
+    }
+
+    spy = {
+      weight: theirWeight,
+      myWeight,
+      industry: rivalIndustry,
+      myIndustry,
+      rp: rivalSummary.researchPerTurn,
+      myRp: summary.researchPerTurn,
+      researchSubject,
+      techThreat,
+      growth: now.theirW - past.theirW,
+      awayShare: theirWeight > 0 ? 1 - theirHomeWeight / theirWeight : 0,
+      musterStar,
+      musterWeight,
+      stacks,
+      raceRatio: h.length >= 5 ? mine / Math.max(1, theirs) : 1,
+    };
   }
 
   return {
@@ -407,12 +633,13 @@ function gatherIntel(ctx: OnionCtx): Intel | null {
     enemyAtMyStars,
     farmerShare: units > 0 ? farmers / units : 0,
     cpHeadroom: summary.cpSources - summary.cpUsage,
+    spy,
   };
 }
 
 // ------------------------------------------------------------- constraints
 
-function scoreConstraints(ctx: OnionCtx, intel: Intel): Record<Constraint, number> {
+function scoreConstraints(ctx: MincedCtx, intel: Intel): Record<Constraint, number> {
   const { planned } = ctx;
   const { rows, summary, freeTargets, atWar, myWar, theirWar, era, reserve, bot } = intel;
   const colonies = rows.length || 1;
@@ -512,6 +739,35 @@ function scoreConstraints(ctx: OnionCtx, intel: Intel): Record<Constraint, numbe
   if (intel.enemyAtMyStars > 0) s.defense = 85;
   else if (atWar && theirWar > myWar * 2 + 2) s.defense = 60;
 
+  // ---- reactive layer (minced): score off what the rival is DOING ----
+  const spy = intel.spy;
+  if (spy) {
+    // a visible weapons program plus the industry to build it: arm before
+    // their hulls exist, harder when they already out-produce us
+    if (spy.techThreat) {
+      s.military = Math.max(s.military, spy.industry > spy.myIndustry ? 55 : 40);
+    }
+    // their fleet is growing and already near parity: deterrence pressure
+    if (spy.growth > 0 && spy.weight > spy.myWeight * 0.9) {
+      s.military = Math.max(s.military, 55);
+    }
+    // they out-research us hard: they will outscale — answer in kind
+    if (spy.rp > spy.myRp * 1.25 && spy.rp > 5) {
+      s.research = Math.max(s.research, 50);
+    }
+    // a heavy rival muster within jump range of our space reads as an
+    // incoming strike even before a single hull crosses the border
+    if (
+      spy.musterStar !== null &&
+      spy.musterWeight >= spy.weight * 0.5 &&
+      spy.weight > spy.myWeight * 0.6 &&
+      intel.reach.has(spy.musterStar) &&
+      !intel.rivalStars.has(spy.musterStar)
+    ) {
+      s.defense = Math.max(s.defense, 70);
+    }
+  }
+
   // personality deltas (spec §Personality modifiers)
   const mult = PERSONALITY_MULT[ctx.personality];
   for (const k of Object.keys(s) as Constraint[]) {
@@ -521,7 +777,7 @@ function scoreConstraints(ctx: OnionCtx, intel: Intel): Record<Constraint, numbe
 }
 
 /** hysteresis + emergency overrides (spec §Anti-thrash) */
-function pickPlan(ctx: OnionCtx, scores: Record<Constraint, number>): Constraint {
+function pickPlan(ctx: MincedCtx, scores: Record<Constraint, number>): Constraint {
   const mem = ctx.memory;
   const ranked = (Object.entries(scores) as Array<[Constraint, number]>).sort(
     (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
@@ -531,10 +787,6 @@ function pickPlan(ctx: OnionCtx, scores: Record<Constraint, number>): Constraint
   const emergency =
     scores.defense >= 80 ||
     scores.treasury >= 90 ||
-    // at war and badly outnumbered: rearm NOW — round 2's techer mirrors
-    // died holding a research plan through a 1.5× hull deficit (the ×0.9
-    // techer military mult keeps this at 81, hence the 80 line)
-    scores.military >= 80 ||
     (ctx.state.turn > 1 && !mem.wasAtWar && isAtWarNow(ctx)); // war just broke out
   if (
     current === null ||
@@ -550,14 +802,14 @@ function pickPlan(ctx: OnionCtx, scores: Record<Constraint, number>): Constraint
   return mem.plan ?? best[0];
 }
 
-function isAtWarNow(ctx: OnionCtx): boolean {
+function isAtWarNow(ctx: MincedCtx): boolean {
   const me = ctx.me;
   return ctx.planned.relations.some((r) => (r.a === me || r.b === me) && r.status === 'war');
 }
 
 // ---------------------------------------------------------------- research
 
-function runResearch(ctx: OnionCtx, intel: Intel, plan: Constraint, scores: Record<Constraint, number>): void {
+function runResearch(ctx: MincedCtx, intel: Intel, plan: Constraint, scores: Record<Constraint, number>): void {
   const { planned, me } = ctx;
   const choices = selectors.researchChoices(planned, me);
   const open = choices.filter((c) => c.apps.some((a) => !a.known));
@@ -649,7 +901,7 @@ function runResearch(ctx: OnionCtx, intel: Intel, plan: Constraint, scores: Reco
 
 // ----------------------------------------------------------------- leaders
 
-function runLeaders(ctx: OnionCtx, intel: Intel, plan: Constraint): void {
+function runLeaders(ctx: MincedCtx, intel: Intel, plan: Constraint): void {
   const { planned, me } = ctx;
   const offers = planned.leaderOffers.filter((o) => o.empireId === me && o.expiresTurn > planned.turn);
   for (const offer of offers) {
@@ -681,7 +933,7 @@ function runLeaders(ctx: OnionCtx, intel: Intel, plan: Constraint): void {
 
 // ---------------------------------------------------- colonies: jobs+builds
 
-function wantFleet(ctx: OnionCtx, intel: Intel): number {
+function wantFleet(ctx: MincedCtx, intel: Intel): number {
   // smallest fleet that reliably crosses the required threshold (spec §Ships)
   const colonies = intel.rows.length;
   let want: number;
@@ -691,12 +943,22 @@ function wantFleet(ctx: OnionCtx, intel: Intel): number {
   else want = Math.min(2, colonies); // nobody met: token patrol only
   if (ctx.personality === 'militarist') want = Math.ceil(want * 1.25);
   if (ctx.personality === 'techer') want = Math.max(2, Math.floor(want * 0.8));
-  // phony-war garrison (minced r4 probes): a war with no committed strike
-  // and no enemy at home must not tax the economy at full mobilization —
-  // the balanced-s0 probe watched this brain spiral to −1355 BC at 32
-  // colonies chasing a 65-hull threat quota through a battle-less war
+  // phony-war garrison (r4 rusher probe): a declared war with NO committed
+  // operation and NO home threat must not tax the economy at full
+  // mobilization — the probe watched 16 hulls on an 8-colony economy
+  // spiral to −100 BC over a 330-turn war with ZERO battles while the
+  // rival doubled its colonies. Garrison until a real operation exists;
+  // committing a strike (or getting raided) restores threat sizing.
   if (intel.atWar && ctx.memory.attackStar === null && intel.enemyAtMyStars === 0) {
     want = Math.min(want, Math.ceil(colonies * 1.2) + 1);
+  }
+  // deterrence (minced): while the rival's fleet is real and growing, keep
+  // our count above the ratio that keeps THEIR attack arithmetic shut —
+  // the tournament rivals declare/strike on count advantage, so denying the
+  // count denies the war. Only a floor: threat sizing above still wins.
+  const spy = intel.spy;
+  if (spy && !intel.atWar && spy.growth >= 0 && intel.theirWar >= 3) {
+    want = Math.max(want, Math.ceil(intel.theirWar * DETER_RATIO));
   }
   // a 2-colony economy cannot pay for a 6-hull navy: the probe watched that
   // exact fleet bleed −16 BC/turn into a −2700 BC death spiral. Threat sizing
@@ -740,7 +1002,7 @@ function scoreBuild(
 }
 
 function runColonies(
-  ctx: OnionCtx,
+  ctx: MincedCtx,
   intel: Intel,
   plan: Constraint,
   scores: Record<Constraint, number>,
@@ -967,7 +1229,7 @@ function runColonies(
 /** rush-buy rules (spec §Planets): windows, defense, short paybacks — never
  * below the emergency reserve except to save a colony */
 function maybeBuy(
-  ctx: OnionCtx,
+  ctx: MincedCtx,
   intel: Intel,
   row: selectors.ColonyRow,
   plan: Constraint,
@@ -1005,7 +1267,7 @@ function maybeBuy(
 
 // ------------------------------------------------------- expansion + range
 
-function runExpansionMoves(ctx: OnionCtx, intel: Intel): void {
+function runExpansionMoves(ctx: MincedCtx, intel: Intel): void {
   const { planned, me, session } = ctx;
   const bar = COLONIZE_BAR[ctx.personality];
 
@@ -1051,7 +1313,7 @@ function runExpansionMoves(ctx: OnionCtx, intel: Intel): void {
   runOutpostChain(ctx, intel);
 }
 
-function runOutpostChain(ctx: OnionCtx, intel: Intel): void {
+function runOutpostChain(ctx: MincedCtx, intel: Intel): void {
   const { planned, me, session } = ctx;
   const bar = COLONIZE_BAR[ctx.personality];
   const settleable = intel.freeTargets.filter((t) => t.score >= bar && !t.guarded);
@@ -1113,7 +1375,7 @@ function runOutpostChain(ctx: OnionCtx, intel: Intel): void {
 
 // -------------------------------------------------------------- military
 
-function runMilitary(ctx: OnionCtx, intel: Intel, scores: Record<Constraint, number>): void {
+function runMilitary(ctx: MincedCtx, intel: Intel, scores: Record<Constraint, number>): void {
   const { planned, me, session, memory } = ctx;
   const rival = intel.rival;
   const warships = planned.ships.filter(
@@ -1139,18 +1401,63 @@ function runMilitary(ctx: OnionCtx, intel: Intel, scores: Record<Constraint, num
     .filter((g) => g.prize >= 55 && intel.reach.has(g.starId))
     .sort((a, b) => b.prize - a.prize || a.starId - b.starId);
 
-  const outgunned = intel.atWar && rival && intel.theirWar > intel.myWar * 1.5 + 2;
+  const spy = intel.spy;
+  const theirWeight = spy?.weight ?? 0;
+  // outgunned by WEIGHT, not count (a battleship is not a frigate)
+  const outgunned = intel.atWar && rival && spy !== null && theirWeight > myWeight * 1.5 + 4;
+
+  // home fire: rival weight sitting over OUR colonies (weight-aware). The
+  // bar scales with our own fleet — a token pin never recalls the offense.
+  const raidAt = new Map<number, number>();
+  if (spy) {
+    for (const [star, w] of spy.stacks) if (intel.myStars.has(star)) raidAt.set(star, w);
+  }
+  const homeFireW = [...raidAt.values()].reduce((a, b) => a + b, 0);
+  const homeFire = homeFireW >= Math.max(HOME_FIRE_WEIGHT, myWeight * HOME_FIRE_MY_SHARE);
 
   // -------- commitment bookkeeping: hold the strike until resolved --------
-  // home fire outranks the away siege (minced round 1: every mirror the
-  // onion lost, its 80% strike was parked at a rival star while the rival's
-  // counter-strike burned the emptied homeland — the commitment never broke)
-  const homeFire = intel.enemyAtMyStars >= 2;
+  // home fire outranks the away siege: a strike parked at a rival star while
+  // the homeland burns trades colonies for a prize that no longer matters
   if (memory.attackStar !== null) {
-    const stillRival = rival && intel.rivalStars.has(memory.attackStar);
+    const stillRival =
+      rival && (intel.rivalStars.has(memory.attackStar) || (spy?.stacks.get(memory.attackStar) ?? 0) > 0);
     const stillGuarded = planned.monsters.some((m) => m.starId === memory.attackStar);
     const lapsed = planned.turn - memory.attackSince > 25;
-    if ((!stillRival && !stillGuarded) || lapsed || outgunned || homeFire) memory.attackStar = null;
+    if ((!stillRival && !stillGuarded) || lapsed || outgunned || (homeFire && !stillGuarded)) memory.attackStar = null;
+  }
+
+  // minced: a committed strike is re-priced every few turns — walk away from
+  // a target the rival has since fortified past what we bring, and swing the
+  // strike onto a soft valuable star while their fleet sits committed away
+  // from home (the counter to any 80%-fleet strike doctrine: hit the house
+  // the army marched out of)
+  const starById = new Map(planned.stars.map((s) => [s.id, s]));
+  if (
+    memory.attackStar !== null &&
+    rival &&
+    intel.atWar &&
+    spy &&
+    !planned.monsters.some((m) => m.starId === memory.attackStar) &&
+    planned.turn - memory.retargetTurn >= RETARGET_EVERY
+  ) {
+    const strikeW = myWeight * 0.8;
+    const defW = spy.stacks.get(memory.attackStar) ?? 0;
+    if (defW > strikeW * ABANDON_DEFENSE_RATIO) {
+      memory.attackStar = null;
+      memory.retargetTurn = planned.turn;
+    } else if (spy.awayShare >= RAID_AWAY_SHARE) {
+      const soft = pickAttackStar(ctx, intel, warships, spy);
+      if (
+        soft !== null &&
+        soft.starId !== memory.attackStar &&
+        soft.guard * RAID_SUPERIORITY <= strikeW &&
+        soft.guard < defW
+      ) {
+        memory.attackStar = soft.starId;
+        memory.attackSince = planned.turn;
+        memory.retargetTurn = planned.turn;
+      }
+    }
   }
 
   if (outgunned) {
@@ -1161,24 +1468,12 @@ function runMilitary(ctx: OnionCtx, intel: Intel, scores: Record<Constraint, num
     return;
   }
 
-  // home-fire response: enemy hulls over our colonies and no committed
-  // strike — throw the navy AT the biggest raid when it wins the count,
-  // otherwise mass first (piecemeal defense is the round-11 grinder)
-  if (homeFire && memory.attackStar === null && intel.atWar) {
-    const raidAt = new Map<number, number>();
-    for (const s of planned.ships) {
-      if (
-        rival &&
-        s.owner === rival.id &&
-        s.shipKind === 'design' &&
-        s.location.kind === 'star' &&
-        intel.myStars.has(s.location.starId)
-      ) {
-        raidAt.set(s.location.starId, (raidAt.get(s.location.starId) ?? 0) + 1);
-      }
-    }
+  // minced: home-fire response — throw the navy AT the biggest raid when
+  // our whole weight beats it with margin, otherwise mass first (piecemeal
+  // defense is the round-11 grinder; weight-aware unlike the onion's count)
+  if (homeFire && memory.attackStar === null && intel.atWar && warships.length) {
     const biggest = [...raidAt.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
-    if (biggest && warships.length >= biggest[1] * 1.2 + 1) {
+    if (biggest && myWeight >= biggest[1] * 1.2 + 2) {
       const byStar = new Map<number, number[]>();
       for (const s of warships) {
         const from = (s.location as { starId: number }).starId;
@@ -1196,43 +1491,120 @@ function runMilitary(ctx: OnionCtx, intel: Intel, scores: Record<Constraint, num
     return;
   }
 
-  const fleetReady = intel.myWar >= wantFleet(ctx, intel);
-  const advantage = rival ? intel.myWar / (intel.theirWar + 1) : 99;
+  // minced: forward defense — a heavy rival muster inside jump range of our
+  // space gets met at the border colony it threatens, before it lands. The
+  // chosen front is COMMITTED for FRONT_HOLD_TURNS: re-picking every turn
+  // as the muster drifts left the fleet permanently in transit (r1).
+  const musterThreat =
+    memory.attackStar === null &&
+    spy !== null &&
+    rival !== null &&
+    spy.musterStar !== null &&
+    !intel.rivalStars.has(spy.musterStar) &&
+    spy.musterWeight >= spy.weight * 0.5 &&
+    spy.weight > myWeight * 0.6 &&
+    (intel.reach.has(spy.musterStar) || intel.myStars.has(spy.musterStar));
+  if (!musterThreat) memory.frontStar = null;
+  if (musterThreat && spy) {
+    const held =
+      memory.frontStar !== null &&
+      planned.turn - memory.frontSince < FRONT_HOLD_TURNS &&
+      intel.myStars.has(memory.frontStar);
+    let front = held ? memory.frontStar! : undefined;
+    if (front === undefined) {
+      const musterObj = starById.get(spy.musterStar!);
+      front = musterObj
+        ? [...intel.myStars].sort(
+            (a, b) => starDistance(starById.get(a)!, musterObj) - starDistance(starById.get(b)!, musterObj) || a - b,
+          )[0]
+        : undefined;
+      if (front !== undefined) {
+        memory.frontStar = front;
+        memory.frontSince = planned.turn;
+      }
+    }
+    if (front !== undefined && warships.length) {
+      const byStar = new Map<number, number[]>();
+      for (const s of warships) {
+        const from = (s.location as { starId: number }).starId;
+        if (from === front) continue;
+        (byStar.get(from) ?? byStar.set(from, []).get(from)!).push(s.id);
+      }
+      for (const [from, ids] of byStar) {
+        const ok = selectors.moveOptions(planned, me, from).some((o) => o.reachable && o.starId === front);
+        if (ok) session.submit('move_ships', { shipIds: ids, destStarId: front });
+      }
+      runInvasions(ctx, intel);
+      return;
+    }
+  }
 
-  // declare + strike only past the threshold (spec §Aggression: 85-100
-  // attack; 70-84 attack when the window closes; below — prepare)
-  if (ctx.alwaysWar && rival && !intel.atWar && fleetReady && advantage >= 1.25) {
-    session.submit('declare_war', { target: rival.id });
+  const fleetReady = intel.myWar >= wantFleet(ctx, intel);
+  // weight-based advantage, with the strike bar set by the projected race:
+  // outscaled → force the window open now; outscaling → decline risk and
+  // win on growth (spec §Aggression, sharpened by the race verdict)
+  const advantage = rival ? (spy ? myWeight / (theirWeight + 1) : intel.myWar / (intel.theirWar + 1)) : 99;
+  const strikeAdv = !spy
+    ? STRIKE_ADV_NORMAL
+    : spy.raceRatio < RACE_LOSING
+      ? STRIKE_ADV_DESPERATE
+      : spy.raceRatio > RACE_WINNING
+        ? STRIKE_ADV_COMFORTABLE
+        : STRIKE_ADV_NORMAL;
+
+  // declare only a war with a first move: an immediately winnable soft
+  // target and a real (4+ colony) economy behind it. The r4 rusher probe
+  // watched a t42 declaration at 2 colonies buy a 330-turn phony war with
+  // zero battles and a wrecked economy. (r6 tried trading the +0.1 margin
+  // and accepting a beatable muster as the opener to win initiative — the
+  // round netted NEGATIVE, industrialist collapsed to two eliminations;
+  // the r5 declare shape below is the measured optimum.)
+  if (ctx.alwaysWar && rival && !intel.atWar && fleetReady && advantage >= strikeAdv + 0.1 && intel.rows.length >= 4) {
+    const opening = pickAttackStar(ctx, intel, warships, spy);
+    if (opening !== null && (opening.guard === 0 || myWeight * 0.8 >= opening.guard * STRIKE_SOFTNESS)) {
+      session.submit('declare_war', { target: rival.id });
+    }
   }
 
   if (memory.attackStar === null) {
-    if (intel.atWar && rival && fleetReady && advantage >= 1.15) {
-      // pick ONE target: weakest defended, valuable, reachable
-      const enemyAt = new Map<number, number>();
-      for (const s of planned.ships) {
-        if (s.owner === rival.id && s.shipKind === 'design' && s.location.kind === 'star') {
-          enemyAt.set(s.location.starId, (enemyAt.get(s.location.starId) ?? 0) + 1);
-        }
-      }
-      const starOf = new Map(planned.planets.map((p) => [p.id, p.starId]));
-      const value = new Map<number, number>();
-      for (const c of planned.colonies) {
-        if (c.owner !== rival.id || c.outpost) continue;
-        const sid = starOf.get(c.planetId);
-        if (sid === undefined) continue;
-        const pop = c.groups.reduce((n, g) => n + Math.floor(g.popK / 1000), 0);
-        value.set(sid, (value.get(sid) ?? 0) + pop);
-      }
-      const target = [...value.entries()]
-        .filter(([sid]) => intel.reach.has(sid) || warships.some((s) => s.location.kind === 'star' && s.location.starId === sid))
-        .sort((a, b) => {
-          const da = enemyAt.get(a[0]) ?? 0;
-          const db = enemyAt.get(b[0]) ?? 0;
-          return da - db || b[1] - a[1] || a[0] - b[0];
-        })[0];
-      if (target) {
-        memory.attackStar = target[0];
+    if (intel.atWar && rival && fleetReady && advantage >= strikeAdv) {
+      // defeat in detail: the rival's strike doctrine telegraphs its muster
+      // (it assembles toward a bar before jumping) — while the assembly sits
+      // within reach and well under our weight, THAT is the target, not a
+      // colony. Breaking the fleet wins the war; the colonies follow.
+      // The muster is priced WITH its orbital works (r3 lesson: musters
+      // assemble at home yards, and a "beatable" stack under star bases
+      // was a donation — same bases×4 pricing as pickAttackStar).
+      const musterBases =
+        spy && spy.musterStar !== null
+          ? planned.colonies
+              .filter(
+                (c) =>
+                  c.owner === rival.id &&
+                  planned.planets.some((p) => p.id === c.planetId && p.starId === spy.musterStar),
+              )
+              .reduce((n, c) => n + c.buildings.filter((b) => ORBITAL_DEFENSES.includes(b)).length, 0)
+          : 0;
+      if (
+        spy &&
+        spy.musterStar !== null &&
+        intel.reach.has(spy.musterStar) &&
+        spy.musterWeight >= 3 &&
+        spy.musterWeight + musterBases * 4 <= myWeight * MUSTER_BREAK_RATIO &&
+        !planned.monsters.some((m) => m.starId === spy.musterStar)
+      ) {
+        memory.attackStar = spy.musterStar;
         memory.attackSince = planned.turn;
+        memory.retargetTurn = planned.turn;
+      } else {
+        const target = pickAttackStar(ctx, intel, warships, spy);
+        // softness gate: 80% of the fleet must outweigh the priced garrison —
+        // an attack into strength is a donation, not a strike (r1 lesson)
+        if (target !== null && (target.guard === 0 || myWeight * 0.8 >= target.guard * STRIKE_SOFTNESS)) {
+          memory.attackStar = target.starId;
+          memory.attackSince = planned.turn;
+          memory.retargetTurn = planned.turn;
+        }
       }
     } else if (!intel.atWar && guardTargets.length && myWeight >= guardTargets[0]!.need && intel.myWar >= wantFleet(ctx, intel) + 1) {
       memory.attackStar = guardTargets[0]!.starId;
@@ -1304,7 +1676,62 @@ function runMilitary(ctx: OnionCtx, intel: Intel, scores: Record<Constraint, num
   void scores;
 }
 
-function rally(ctx: OnionCtx, intel: Intel, warships: GameState['ships']): void {
+/** budgeted attack-target search (minced): every reachable rival star is
+ * priced as population value − garrison weight − travel, best price wins.
+ * The garrison term reads the rival's ACTUAL stacks and orbital works, so a
+ * strike fleet that marched away automatically turns its home stars into
+ * bargains. Deterministic budget (TARGET_SEARCH_BUDGET candidate evals),
+ * never wall clock. */
+function pickAttackStar(
+  ctx: MincedCtx,
+  intel: Intel,
+  warships: GameState['ships'],
+  spy: RivalIntel | null,
+): { starId: number; guard: number } | null {
+  const { planned } = ctx;
+  const rival = intel.rival;
+  if (!rival) return null;
+  const starOf = new Map(planned.planets.map((p) => [p.id, p.starId]));
+  const starById = new Map(planned.stars.map((s) => [s.id, s]));
+  const value = new Map<number, number>();
+  const bases = new Map<number, number>();
+  for (const c of planned.colonies) {
+    if (c.owner !== rival.id || c.outpost) continue;
+    const sid = starOf.get(c.planetId);
+    if (sid === undefined) continue;
+    const pop = c.groups.reduce((n, g) => n + Math.floor(g.popK / 1000), 0);
+    value.set(sid, (value.get(sid) ?? 0) + pop);
+    bases.set(sid, (bases.get(sid) ?? 0) + c.buildings.filter((b) => ORBITAL_DEFENSES.includes(b)).length);
+  }
+  // launch point: my heaviest concentration (travel is paid from there)
+  const mineAt = new Map<number, number>();
+  for (const s of warships) {
+    if (s.location.kind !== 'star') continue;
+    mineAt.set(s.location.starId, (mineAt.get(s.location.starId) ?? 0) + 1);
+  }
+  const origin = [...mineAt.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? intel.anchorStarId;
+  const originObj = origin !== null && origin !== undefined ? starById.get(origin) : undefined;
+  let best: { starId: number; guard: number } | null = null;
+  let bestScore = -Infinity;
+  let evals = 0;
+  for (const [sid, pop] of [...value.entries()].sort((a, b) => a[0] - b[0])) {
+    if (evals++ >= TARGET_SEARCH_BUDGET) break;
+    const reachableNow =
+      intel.reach.has(sid) || warships.some((s) => s.location.kind === 'star' && s.location.starId === sid);
+    if (!reachableNow) continue;
+    const guard = (spy?.stacks.get(sid) ?? 0) + (bases.get(sid) ?? 0) * 4;
+    const target = starById.get(sid);
+    const dist = originObj && target ? starDistance(originObj, target) : 0;
+    const score = pop - guard * 1.2 - dist * 0.15;
+    if (score > bestScore) {
+      bestScore = score;
+      best = { starId: sid, guard };
+    }
+  }
+  return best;
+}
+
+function rally(ctx: MincedCtx, intel: Intel, warships: GameState['ships']): void {
   const { planned, me, session } = ctx;
   if (!warships.length || !intel.myStars.size) return;
   const enemyAt = new Map<number, number>();
@@ -1332,7 +1759,7 @@ function rally(ctx: OnionCtx, intel: Intel, warships: GameState['ships']): void 
 
 /** ground war: single decisive waves at cleared skies (doctrine shared with
  * v2 because it is physics, not preference: piecemeal drops get repelled) */
-function runInvasions(ctx: OnionCtx, intel: Intel): void {
+function runInvasions(ctx: MincedCtx, intel: Intel): void {
   const { planned, me, session } = ctx;
   const rival = intel.rival;
   if (!rival || !intel.atWar) return;
@@ -1377,8 +1804,8 @@ function runInvasions(ctx: OnionCtx, intel: Intel): void {
 
 // ------------------------------------------------------------ entry points
 
-/** one full planning turn (SoloBot delegates here when brain === 'onion') */
-export function onionTurn(ctx: OnionCtx): void {
+/** one full planning turn (SoloBot delegates here when brain === 'minced') */
+export function mincedTurn(ctx: MincedCtx): void {
   const intel = gatherIntel(ctx);
   if (!intel) return;
   const scores = scoreConstraints(ctx, intel);
@@ -1397,7 +1824,7 @@ export function onionTurn(ctx: OnionCtx): void {
  * defended colony at the star (fewest defensive structures; populated
  * colonies before outposts), or null when the defender holds no colony there
  * — a pure deep-space fleet hunt. */
-export function pickAssaultPlanet(state: GameState, defenderId: number, starId: number): number | null {
+function pickAssaultPlanet(state: GameState, defenderId: number, starId: number): number | null {
   if (defenderId < 0) return null;
   const DEFENSES = ORBITAL_DEFENSES;
   const holdings = state.colonies.filter(
@@ -1433,7 +1860,7 @@ const defendsStar = (state: GameState, owner: number, starId: number): boolean =
  * (Before 0.26 this was a coin between flank and envelop for big attacking
  * fleets, which is exactly as much thought as the old engine rewarded.)
  */
-export function pickFormation(
+function pickFormation(
   state: GameState,
   me: number,
   battle: { id: string; starId: number; attacker: number; defender: number },
@@ -1490,14 +1917,14 @@ export function pickFormation(
  * bounding overwatch, open → a charge/flank). Fair by construction — it
  * reads the map, not the defender's standing doctrine.
  */
-export function pickInvadeTactic(state: GameState, planetId: number | null): string | undefined {
+function pickInvadeTactic(state: GameState, planetId: number | null): string | undefined {
   if (planetId == null) return undefined;
   const planet = state.planets.find((p) => p.id === planetId);
   if (!planet) return undefined;
   return pickGroundAttack(generateTerrain(planet.id, planet.climate));
 }
 
-export function onionBattleOrders(
+export function mincedBattleOrders(
   state: GameState,
   me: number,
   battle: { id: string; starId: number; attacker: number; defender: number },
