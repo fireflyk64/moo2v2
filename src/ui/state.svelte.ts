@@ -62,6 +62,11 @@ export const app = $state({
   viewingGround: null as GroundBattleEntry | null,
   /** turn-event feed visible to this player (newest last) */
   reports: [] as ReportEntry[],
+  /** total reports EVER ingested this game — monotonic, unlike reports.length,
+   * which pins at the 300 cap. Every "what's new since I looked" cursor must
+   * diff against THIS (bug: at 300 reports the research celebration, arrival
+   * pings and unread badge all silently died because length stopped moving) */
+  reportsSeq: 0,
   /** host peer connectivity (clients only; host is always true) */
   hostConnected: true,
   /** transient note when the host rejects a command that passed optimistic
@@ -322,6 +327,7 @@ function ingestTurnEvents(
         continue;
       }
       app.reports.push({ turn, kind: e.kind, payload: e.payload as Record<string, unknown> });
+      app.reportsSeq++;
       if (app.reports.length > 300) app.reports.shift();
     }
   }
@@ -334,6 +340,7 @@ export function resetGameUiState(): void {
   app.replays = [];
   app.groundBattles = [];
   app.reports = [];
+  app.reportsSeq = 0;
   app.viewing = null;
   app.viewingGround = null;
   app.rejectedNote = '';

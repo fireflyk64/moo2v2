@@ -317,13 +317,16 @@
               <p class="all" title="Basic fields deliver every application at once">✦ researches all applications</p>
               <ul class="applist">
                 {#each choice.apps as appRow (appRow.id)}
-                  <li class:known={appRow.known} title={appTitle(appRow.id)}>{appRow.name}{appRow.known ? ' ✓' : ''}</li>
+                  <li class:known={appRow.known}>
+                    {appRow.name}{appRow.known ? ' ✓' : ''}
+                    <span class="desc">{appTitle(appRow.id)}</span>
+                  </li>
                 {/each}
               </ul>
             {:else}
               <!-- dead picks (morale tech under Unification) stay off the list -->
               {#each choice.apps.filter((a) => !a.dead) as appRow (appRow.id)}
-                <label class:known={appRow.known} title={appTitle(appRow.id)}>
+                <label class:known={appRow.known}>
                   <input
                     type="radio"
                     name="target-{choice.field.num}"
@@ -333,6 +336,7 @@
                     onchange={() => (pendingTarget = { ...pendingTarget, [choice.field.num]: appRow.id })}
                   />
                   {appRow.name}{appRow.known ? ' ✓' : ''}
+                  <span class="desc">{appTitle(appRow.id)}</span>
                 </label>
               {/each}
             {/if}
@@ -662,6 +666,18 @@
     margin: 0.15rem 0 0.3rem;
     padding-left: 1.1rem;
     font-size: 0.85rem;
+  }
+  /* per-application effect text, inline where the research decision is made
+     (hover-only tooltips hid it — "we need a description of each tech") */
+  .desc {
+    display: block;
+    font-size: 0.72rem;
+    line-height: 1.25;
+    color: var(--accent-soft);
+    margin: 0.05rem 0 0.25rem;
+  }
+  label .desc {
+    margin-left: 1.35rem;
   }
   .applist li.known {
     opacity: 0.5;

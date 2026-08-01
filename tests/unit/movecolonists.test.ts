@@ -146,6 +146,53 @@ describe('move_colonists (bug: no transports needed for in-system movement)', ()
   });
 });
 
+describe('organic movers keep their job (0.30.0 bug fix: arrivals were dumped into production)', () => {
+  it('in-system: a dragged farmer steps off as a farmer', () => {
+    const state = newGame();
+    const { home, second } = withSecondColony(state);
+    const src = home.groups[0]!;
+    src.farmers = 2;
+    src.workers = Math.floor(src.popK / 1000) - 2;
+    src.scientists = 0;
+    const c = cmd(state, { fromColonyId: home.id, toColonyId: second.id, race: 0, count: 1, fromJob: 'farmers' });
+    expect(validateCommand(state, c)).toBeNull();
+    applyCommand(state, c);
+    expect(src.farmers).toBe(1); // the farmer left the farming job
+    const dst = second.groups[0]!;
+    expect(dst.farmers).toBe(1); // ...and is still farming on arrival
+    expect(dst.workers).toBe(2); // the residents were not reshuffled
+  });
+
+  it('between systems: the vacated job rides the freighter and lands', () => {
+    const state = newGame();
+    const { home } = withSecondColony(state);
+    const other = state.colonies.find((c) => c.owner === 1)!;
+    other.owner = 0;
+    const homeStar = state.stars.find((s) => s.id === state.planets.find((p) => p.id === home.planetId)!.starId)!;
+    const otherStar = state.stars.find((s) => s.id === state.planets.find((p) => p.id === other.planetId)!.starId)!;
+    homeStar.wormholeTo = otherStar.id;
+    otherStar.wormholeTo = homeStar.id;
+    state.empires[0]!.freighters = 5;
+    const src = home.groups[0]!;
+    src.scientists = 1;
+    src.farmers = Math.floor(src.popK / 1000) - 1;
+    src.workers = 0;
+    const move = cmd(state, { fromColonyId: home.id, toColonyId: other.id, race: 0, count: 1, fromJob: 'scientists' });
+    expect(validateCommand(state, move)).toBeNull();
+    applyCommand(state, move);
+    expect(state.popTransits![0]!.job).toBe('scientists');
+    const after = gameEngine.apply(state, { turn: state.turn, playerId: -1, kind: 'advance_turn', payload: {} });
+    const final = after.phase === 'battle_orders'
+      ? gameEngine.apply(after, { turn: after.turn, playerId: -1, kind: 'resolve_combat', payload: {} })
+      : after;
+    // the mover founds a race-0 group at the (race-1 resident) destination —
+    // and steps off still a scientist, not a production worker
+    const landed = final.colonies.find((c) => c.id === other.id)!.groups.find((g) => g.race === 0)!;
+    expect(landed.scientists).toBe(1);
+    expect(landed.workers).toBe(0);
+  });
+});
+
 describe('android relocation (0.29.0: hardwired job travels with them)', () => {
   const withAndroids = (colony: Colony, split: { farmers?: number; workers?: number; scientists?: number }) => {
     const units = (split.farmers ?? 0) + (split.workers ?? 0) + (split.scientists ?? 0);

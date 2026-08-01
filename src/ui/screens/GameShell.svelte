@@ -418,16 +418,24 @@
     return gs.ships.filter((s) => s.owner === me && s.location.kind === 'transit').length;
   });
 
-  // ---- research breakthrough + colony-ship arrival celebrations ----
+  // ---- research breakthrough + ship/colony-ship arrival celebrations ----
   let celebration = $state<{ field: string; granted: string[] } | null>(null);
   let celebrationTimer: ReturnType<typeof setTimeout> | null = null;
   let arrival = $state<{ starId: number; planetId: number } | null>(null);
   let arrivalTimer: ReturnType<typeof setTimeout> | null = null;
-  let processedReports = 0;
+  /** fleet-arrival ping: one line per destination star, this boundary only */
+  let fleetArrivals = $state<Array<{ starId: number; ships: number }> | null>(null);
+  let fleetArrivalTimer: ReturnType<typeof setTimeout> | null = null;
+  // cursor over reportsSeq, NOT reports.length: the feed caps at 300 by
+  // shifting, so length freezes there and a length-based cursor never saw
+  // another report — research celebrations and arrival pings died late-game
+  let processedSeq = 0;
   $effect(() => {
+    const seq = app.reportsSeq;
     const reports = app.reports;
-    if (reports.length < processedReports) processedReports = 0; // cleared
-    for (let i = processedReports; i < reports.length; i++) {
+    if (seq < processedSeq) processedSeq = 0; // new game
+    const shipsByStar = new Map<number, number>();
+    for (let i = Math.max(0, reports.length - (seq - processedSeq)); i < reports.length; i++) {
       const r = reports[i]!;
       if (r.kind === 'research_complete') {
         celebration = {
@@ -443,9 +451,17 @@
         };
         if (arrivalTimer) clearTimeout(arrivalTimer);
         arrivalTimer = setTimeout(() => (arrival = null), 12000);
+      } else if (r.kind === 'ship_arrived') {
+        const starId = Number(r.payload['starId'] ?? 0);
+        shipsByStar.set(starId, (shipsByStar.get(starId) ?? 0) + 1);
       }
     }
-    processedReports = reports.length;
+    if (shipsByStar.size > 0) {
+      fleetArrivals = [...shipsByStar.entries()].map(([starId, ships]) => ({ starId, ships }));
+      if (fleetArrivalTimer) clearTimeout(fleetArrivalTimer);
+      fleetArrivalTimer = setTimeout(() => (fleetArrivals = null), 12000);
+    }
+    processedSeq = seq;
   });
   const pretty = (id: string) => id.replaceAll('_', ' ');
   const starName = (id: number) => gs?.stars.find((s) => s.id === id)?.name ?? `star ${id}`;
@@ -541,7 +557,7 @@
     if (e.key.length === 1 && e.key >= '1' && e.key <= '7') {
       e.preventDefault();
       tab = TAB_KEYS[Number(e.key) - 1]!;
-      if (tab === 'reports') seenReports = app.reports.length;
+      if (tab === 'reports') seenReports = app.reportsSeq;
     } else if (e.shiftKey && (e.key === 'E' || e.key === 'e')) {
       e.preventDefault();
       toggleFF();
@@ -686,7 +702,7 @@
         ? `${enemyDetected} enemy ship${enemyDetected > 1 ? 's' : ''} on your scanners — check the map`
         : 'enemy ships on your scanners: none detected — no known threats in scanner range'}
     >📡 {enemyDetected}</span>
-    <label class="tax" title="empire tax: converts this % of every colony's queue production into BC (2 prod → 1 BC)">
+    <label class="tax" title="empire tax: converts this % of every colony's queue production into BC (1 prod → 1 BC)">
       🏛 tax
       <select
         data-testid="tax-rate"
@@ -854,9 +870,9 @@
       data-testid="tab-reports"
       onclick={() => {
         tab = 'reports';
-        seenReports = app.reports.length;
+        seenReports = app.reportsSeq;
       }}
-    >Reports{app.reports.length > seenReports ? ` (${app.reports.length - seenReports})` : ''}</button>
+    >Reports{app.reportsSeq > seenReports ? ` (${app.reportsSeq - seenReports})` : ''}</button>
     {#if leaderOfferCount > 0 && tab !== 'empires'}
       <button
         class="offers"
@@ -920,6 +936,21 @@
         <button class="next" onclick={() => { app.focusStarId = arrival!.starId; tab = 'map'; arrival = null; }}>View on map →</button>
       </div>
       <button class="x" onclick={() => (arrival = null)}>✕</button>
+    </div>
+  {/if}
+  {#if fleetArrivals && !arrival}
+    <div class="celebration arrival" data-testid="fleet-arrival" role="status">
+      <div class="burst">🛬</div>
+      <div>
+        <b>Fleet{fleetArrivals.length > 1 ? 's' : ''} arrived</b>
+        {#each fleetArrivals as fa (fa.starId)}
+          <div class="apps">
+            {fa.ships} ship{fa.ships > 1 ? 's' : ''} at {starName(fa.starId)}
+            <button class="next" onclick={() => { app.focusStarId = fa.starId; tab = 'map'; fleetArrivals = null; }}>View →</button>
+          </div>
+        {/each}
+      </div>
+      <button class="x" onclick={() => (fleetArrivals = null)}>✕</button>
     </div>
   {/if}
   {#if app.contactFlash}

@@ -11,7 +11,7 @@ import { assimilate, landInvasion, resolveInvasions, trainMarines } from './grou
 import { leaderEmpireBonuses, leadersUpkeep } from './leaders';
 import { antaranUpkeep, hostileMonsterAt, randomEventsUpkeep } from './npc';
 import { allocId } from './ids';
-import { ANDROID_ITEMS, androidCap, itemCost, parseDesignItem, parseRefitItem } from './items';
+import { ANDROID_ITEMS, androidCap, canQueue, itemCost, parseDesignItem, parseRefitItem } from './items';
 import { commandPoints, inRange, supportStars } from './movement';
 import { availableHulls, defaultDesign, designLoadoutKey, rollModelIdx } from './shipdesign';
 import { ceilDiv } from './imath';
@@ -379,8 +379,14 @@ function s3_buildAdvance(state: GameState, outputs: TurnOutputs, events: TurnEve
       }
       if (colony.storedProd < cost) break;
       colony.storedProd -= cost;
-      colony.queue.shift();
+      const entry = colony.queue.shift()!;
       completeItem(state, colony, active, events);
+      // repeat build (0.30.0): the finished entry rejoins the head for the
+      // next copy — until the colony can no longer take one (compartments
+      // full, terraform chain topped out, roster full, ...), when it retires
+      if (entry.repeat && canQueue(state, { ...colony, queue: [] }, active) === null) {
+        colony.queue.unshift(entry);
+      }
     }
     // production stored on a queue that was empty ALL turn evaporates
     // (classic behavior) — banking it indefinitely lets an idle colony buy a

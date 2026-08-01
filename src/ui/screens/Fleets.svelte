@@ -144,7 +144,7 @@
                     const colony = gs!.colonies.find((c) => c.id === refit.colonyId)!;
                     submit('set_build_queue', {
                       colonyId: refit.colonyId,
-                      items: [...colony.queue.map((q) => q.item), `refit:${f.ship.id}:${designId}`],
+                      items: [...colony.queue.map((q) => ({ ...q })), `refit:${f.ship.id}:${designId}`],
                     });
                   }}
                 >

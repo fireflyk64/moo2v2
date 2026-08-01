@@ -18,7 +18,7 @@ import { anyEmpireContact, metEmpireIds } from './contact';
 import { androidUnitsOf, buyCost, colonyMaxPop, colonyPopUnits as popUnitsOf, empireOf, farmingViable, freeFreighters, organicUnitsOf, traitsOf } from './economy';
 import { allocId, allocWorldId } from './ids';
 import { constructAsBarren } from './terraform';
-import { androidCap, canQueue, itemCost, parseRefitItem } from './items';
+import { androidCap, canQueue, itemCost, itemMayRepeat, parseRefitItem } from './items';
 import { inRange, settlerTravelTurns, shipStar, supportStars, travelTurns } from './movement';
 import { starDistance } from './galaxy';
 import { appPickableBy, availableFields, fieldGrantsAll } from './research';
@@ -26,7 +26,7 @@ import { availableHulls, designStats, knownWeapons } from './shipdesign';
 import { isShipStyle } from './shipstyles';
 import type { BattleOrders, Formation, Stance, TargetPriority } from './combat';
 import { ANDROID_RACE, NATIVE_RACE } from './types';
-import type { Colony, GameState, Planet, PopGroup, Ship, ShipKind, Star, TurnEvent } from './types';
+import type { Colony, GameState, Planet, PopGroup, QueueItem, Ship, ShipKind, Star, TurnEvent } from './types';
 
 export interface EngineCommand {
   turn: number;
@@ -122,24 +122,36 @@ const applySetJobs: Applier = (state, cmd) => {
 
 interface SetQueuePayload {
   colonyId: number;
-  items: string[];
+  /** plain string = build once (classic); object form may set repeat (0.30.0) */
+  items: Array<string | { item: string; repeat?: boolean }>;
 }
+
+/** normalize a payload entry to a QueueItem (repeat key only when true, so
+ * string-only commands produce byte-identical queues to pre-0.30) */
+const queueEntry = (i: string | { item: string; repeat?: boolean }): QueueItem =>
+  typeof i === 'string' ? { item: i } : { item: i.item, ...(i.repeat === true ? { repeat: true } : {}) };
 
 const validateSetQueue: Validator = (state, cmd) => {
   const p = cmd.payload as SetQueuePayload;
   const c = ownColony(state, cmd, p?.colonyId);
   if (typeof c === 'string') return c;
   if (!Array.isArray(p.items) || p.items.length > 12) return 'items must be a list (max 12)';
-  if (p.items.some((i) => typeof i !== 'string')) return 'items must be strings';
+  if (p.items.some((i) => typeof i !== 'string' && (typeof i?.item !== 'string' || (i.repeat !== undefined && typeof i.repeat !== 'boolean')))) {
+    return 'items must be strings or {item, repeat} entries';
+  }
+  const entries = p.items.map(queueEntry);
   // buying locks the active item for the turn (no buy-then-switch exploit)
-  if (c.boughtThisTurn && c.queue[0] && p.items[0] !== c.queue[0].item) {
+  if (c.boughtThisTurn && c.queue[0] && entries[0]?.item !== c.queue[0].item) {
     return 'production was bought this turn — the active item is locked until next turn';
   }
   const probe: Colony = { ...c, queue: [] };
-  for (const item of p.items) {
-    const err = canQueue(state, probe, item);
+  for (const entry of entries) {
+    const err = canQueue(state, probe, entry.item);
     if (err) return err;
-    probe.queue = [...probe.queue, { item }];
+    if (entry.repeat && !itemMayRepeat(entry.item)) {
+      return `${entry.item} cannot repeat (only ships and repeatable projects)`;
+    }
+    probe.queue = [...probe.queue, { item: entry.item }];
   }
   return null;
 };
@@ -148,7 +160,7 @@ const applySetQueue: Applier = (state, cmd) => {
   const p = cmd.payload as SetQueuePayload;
   const c = colony(state, p.colonyId)!;
   const oldActive = c.queue[0]?.item;
-  c.queue = p.items.map((item) => ({ item }));
+  c.queue = p.items.map(queueEntry);
   const newActive = c.queue[0]?.item;
   if (oldActive && oldActive !== newActive) {
     if (state.settings.modes.stickyBuild) {
@@ -1245,10 +1257,10 @@ const applyMoveColonists: Applier = (state, cmd) => {
       to.groups.sort((a, b) => a.race - b.race);
     }
     dst.popK += moveK;
-    // androids disembark into the job they were built for; organic arrivals
-    // pick up tools first — reassign as you like
-    if (p.race === ANDROID_RACE) dst[p.fromJob!] += p.count;
-    else dst.workers += p.count;
+    // everyone disembarks into the job they left — androids because they are
+    // hardwired to it, organics because a dragged farmer should still be a
+    // farmer on the other side (workers only when the command names no job)
+    dst[p.fromJob ?? 'workers'] += p.count;
     return;
   }
   // between systems: colonists board freighters and sail
@@ -1263,9 +1275,10 @@ const applyMoveColonists: Applier = (state, cmd) => {
     fromColonyId: from.id,
     toColonyId: to.id,
     units: p.count,
-    // the hardwired job rides along; key absent on organic transits so
-    // pre-0.29 saves and organic-only games hash identically
-    ...(p.race === ANDROID_RACE ? { job: p.fromJob } : {}),
+    // the vacated job rides along (androids: hardwired; organics: they land
+    // doing what they left doing); key absent only when the command named no
+    // job, which keeps pre-0.30 jobless commands hashing as before
+    ...(p.fromJob ? { job: p.fromJob } : {}),
     departedTurn: state.turn,
     arrivalTurn: state.turn + turns,
   });

@@ -40,6 +40,9 @@ export interface ColonyRow {
   output: ColonyOutput;
   activeItem: string | null;
   queue: string[];
+  /** the queue with per-entry flags (repeat); queue mutations should be built
+   * from THIS so a resubmitted list never drops another entry's repeat flag */
+  queueEntries: Array<{ item: string; repeat?: boolean }>;
   storedProd: number;
   activeCost: number;
   turnsLeft: number | null;
@@ -169,6 +172,7 @@ export function colonyRow(state: GameState, colony: Colony, projectedFoodLack?: 
     activeItem: active,
     stickyInvested: colony.stickyInvested,
     queue: colony.queue.map((q) => q.item),
+    queueEntries: colony.queue.map((q) => ({ item: q.item, ...(q.repeat ? { repeat: true } : {}) })),
     storedProd: colony.storedProd,
     activeCost,
     turnsLeft,

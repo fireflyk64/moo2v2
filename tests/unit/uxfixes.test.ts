@@ -113,7 +113,7 @@ describe('buy-then-switch lockout (bug: switching items after buying)', () => {
 });
 
 describe('empire tax rate (bug: need a tax when losing money)', () => {
-  it('set_tax_rate converts queue production into BC at 2:1', () => {
+  it('set_tax_rate converts queue production into BC at par (1 prod -> 1 BC)', () => {
     const state = newGame();
     const colony = state.colonies.find((c) => c.owner === 0)!;
     colony.queue = [{ item: 'star_base' }];
@@ -122,7 +122,7 @@ describe('empire tax rate (bug: need a tax when losing money)', () => {
     applyCommand(state, { turn: state.turn, playerId: 0, kind: 'set_tax_rate', payload: { pct: 50 } });
     const after = colonyOutput(state, colony);
     expect(after.prodToQueue).toBeLessThan(before.prodToQueue);
-    expect(after.taxBC).toBe(Math.floor(Math.floor((before.prodToQueue * 50) / 100) / 2));
+    expect(after.taxBC).toBe(Math.floor((before.prodToQueue * 50) / 100));
     expect(after.bcIncome).toBe(before.bcIncome + after.taxBC);
     expect(validateCommand(state, { turn: state.turn, playerId: 0, kind: 'set_tax_rate', payload: { pct: 60 } })).toMatch(/0-50/);
   });

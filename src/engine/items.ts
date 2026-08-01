@@ -60,6 +60,14 @@ export function androidCap(planet: Planet): number {
   return 2 * planet.sizeClass;
 }
 
+/** 0.30.0 repeat build: ships and repeatable projects may carry the repeat
+ * flag. Buildings are unique, refits target one specific hull, and
+ * housing/trade_goods never complete, so repeat means nothing on them. */
+export function itemMayRepeat(itemId: string): boolean {
+  if (itemId === 'housing' || itemId === 'trade_goods') return false;
+  return parseDesignItem(itemId) !== null || SHIP_BUILDABLES.has(itemId) || PROJECT_BUILDABLES.has(itemId);
+}
+
 /** the three buildable android units; the item id doubles as the job name
  * (android_farmers → farmers) — pipeline completion relies on that */
 export const ANDROID_ITEMS = ['android_farmers', 'android_workers', 'android_scientists'] as const;

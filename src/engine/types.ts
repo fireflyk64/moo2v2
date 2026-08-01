@@ -83,6 +83,11 @@ export interface PopGroup {
 
 export interface QueueItem {
   item: string; // buildable id or ship kind
+  /** 0.30.0 repeat build: when this entry completes it stays at the head and
+   * builds again (ships and repeatable projects only), until the colony can
+   * no longer take another copy or the player clears the flag. Key absent
+   * when off, so pre-0.30 saves hash unchanged. */
+  repeat?: boolean;
 }
 
 export interface Colony {
@@ -404,10 +409,11 @@ export interface PopTransit {
   fromColonyId: number;
   toColonyId: number;
   units: number;
-  /** androids only: the job they were hardwired for at the factory rides the
-   * freighter with them and they disembark into it (organic arrivals pick up
-   * tools as workers instead). Key present only on android transits, so
-   * organic-only saves hash unchanged. */
+  /** the job the movers vacated rides the freighter with them and they
+   * disembark into it — androids because they are hardwired to it, organics
+   * so a shipped farmer is still a farmer on arrival (0.30.0; before that
+   * organics always landed as workers). Key absent only when the command
+   * named no fromJob (legacy/bot commands), which then lands as workers. */
   job?: 'farmers' | 'workers' | 'scientists';
   departedTurn: number;
   arrivalTurn: number;

@@ -575,7 +575,10 @@ export class GameSession<S> {
         // hold the pre-combat events (research done, buildings, battle_pending
         // ...) for the boundary flush resolve_combat will trigger
         this.stashedEvents = events;
-      } else if (events.length) {
+      } else {
+        // unconditionally, INCLUDING empty: keeping the previous boundary's
+        // list on a quiet turn re-ingested last turn's events under the new
+        // turn number (phantom duplicate reports, mislabeled turns)
         this.lastTurnEvents = events;
       }
       if (newTurn > this.lastReportedTurn) {

@@ -7,7 +7,7 @@
 
 import { selectors, availableHulls } from '@engine/index';
 import { canQueue, itemCost, itemLabel } from '@engine/items';
-import type { Colony, GameState } from '@engine/types';
+import type { Colony, GameState, QueueItem } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 
 /** hotkey → what to queue. Hull keys resolve to the empire's newest design of
@@ -104,6 +104,18 @@ export function unpinnedTail(queue: string[], pinned: string[]): string[] {
   return tail;
 }
 
+/** Rebuild the pin ids over the colony's ACTUAL queue entries, so per-entry
+ * flags (repeat, 0.30.0) survive a pin edit: each pinned id claims its first
+ * unclaimed queue entry; the rest is the autopilot/manual tail. */
+function claimEntries(colony: Colony, ids: string[]): { claimed: Array<QueueItem | string>; rest: QueueItem[] } {
+  const remaining = colony.queue.map((q) => ({ ...q }));
+  const claimed = ids.map((id) => {
+    const i = remaining.findIndex((q) => q.item === id);
+    return i >= 0 ? remaining.splice(i, 1)[0]! : id;
+  });
+  return { claimed, rest: remaining };
+}
+
 /** Queue `item` at the colony as a pinned (player-ordered) build: it lands
  * right after the existing pinned items and ahead of any autopilot filler. */
 export function pinBuild(
@@ -113,8 +125,8 @@ export function pinBuild(
   item: string,
 ): { error?: string } {
   const pinned = pins[colony.id] ?? [];
-  const queue = colony.queue.map((q) => q.item);
-  const items = [...pinned, item, ...unpinnedTail(queue, pinned)].slice(0, 12);
+  const { claimed, rest } = claimEntries(colony, pinned);
+  const items = [...claimed, item, ...rest].slice(0, 12);
   const res = session.submit('set_build_queue', { colonyId: colony.id, items });
   if (res.error) return { error: res.error };
   pins[colony.id] = [...pinned, item];
@@ -127,11 +139,11 @@ export function cancelPin(session: GameSession<GameState>, pins: Pins, colony: C
   const pinned = pins[colony.id] ?? [];
   if (pinIndex < 0 || pinIndex >= pinned.length) return {};
   const remaining = pinned.filter((_, i) => i !== pinIndex);
-  const tail = unpinnedTail(
-    colony.queue.map((q) => q.item),
-    pinned,
-  );
-  const res = session.submit('set_build_queue', { colonyId: colony.id, items: [...remaining, ...tail] });
+  const { claimed, rest } = claimEntries(colony, pinned);
+  const res = session.submit('set_build_queue', {
+    colonyId: colony.id,
+    items: [...claimed.filter((_, i) => i !== pinIndex), ...rest],
+  });
   if (res.error) return { error: res.error };
   if (remaining.length) pins[colony.id] = remaining;
   else delete pins[colony.id];

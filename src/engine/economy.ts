@@ -281,7 +281,7 @@ export interface ColonyOutput {
   housingPP: number;
   /** BC from trade goods diversion */
   tradeBC: number;
-  /** BC minted by the empire tax rate (2 taxed prod -> 1 BC) */
+  /** BC minted by the empire tax rate (1 taxed prod -> 1 BC) */
   taxBC: number;
   /** whether prod goes to the build queue (false when housing/trade goods active) */
   prodToQueue: number;
@@ -497,13 +497,15 @@ function computeOutput(state: GameState, colony: Colony, planet: Planet): Colony
     prodToQueue = 0;
   }
 
-  // empire tax: a slice of queue production is minted into BC (2 prod -> 1 BC)
+  // empire tax: a slice of queue production is minted into BC at par (1 prod
+  // -> 1 BC). Trade goods' 2:1 discount is the price of converting the WHOLE
+  // queue on demand; the tax skims at full value.
   const taxRate = owner.taxRatePct ?? 0;
   let taxBC = 0;
   if (taxRate > 0 && prodToQueue > 0) {
     const taxedProd = floorDiv(prodToQueue * taxRate, 100);
     prodToQueue -= taxedProd;
-    taxBC = floorDiv(taxedProd, 2);
+    taxBC = taxedProd;
   }
 
   return {
@@ -605,7 +607,13 @@ export function explainOutput(state: GameState, colony: Colony): OutputExplain {
   const o = colonyOutput(state, colony);
   if (o.pollution > 0) out.prod.push(`−${o.pollution} pollution`);
   if (o.prodConsumed > 0) out.prod.push(`−${o.prodConsumed} cybernetic/android upkeep`);
+  if (o.taxBC > 0) out.prod.push(`−${o.taxBC} empire tax (${owner.taxRatePct ?? 0}% → BC)`);
   out.farm.push(`− ${o.foodConsumed} eaten = net ${o.foodNet >= 0 ? '+' : ''}${o.foodNet}`);
+  // every column ends in an unconditional total, so no cell ever renders an
+  // empty tooltip (bug: android-only colonies with no scientists hovered to
+  // NOTHING on the science cell — every line above is conditional)
+  out.prod.push(`= ${o.prodToQueue || o.prod} total`);
+  out.sci.push(`= ${o.research} research`);
   const taxpayers = o.popUnits - androidUnitsOf(colony); // androids pay no taxes
   out.bc.push(`${taxpayers} pop × ${(2 + ownerTraits.bcHalves) / 2} BC`);
   if (planet.special === 'gem_deposits') out.bc.push('+10 gem deposits');

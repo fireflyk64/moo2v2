@@ -117,6 +117,24 @@ export const applicationById: ReadonlyMap<string, ApplicationRow> = byId(
   'application',
 );
 
+/** Curated descriptions for items with NO application row (always-known
+ * basics etc.) — display-only, so no DATA_VERSION impact. Text mirrors the
+ * actual engine mechanics; keep in sync with economy.ts/items.ts. */
+export const CURATED_ITEM_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  capitol: 'Seat of government: +10 morale at this colony and the hub conquered races assimilate through.',
+  marine_barracks:
+    'Trains one marine per 5 turns (garrison cap +4) and lifts the no-barracks morale penalty. Marines defend against invasion and board transports (4 per squad).',
+  spy: 'Trains one agent for espionage or counter-intelligence (roster cap 10).',
+  housing: 'The colony downs tools and builds homes: all production accelerates population growth while this stays at the head of the queue.',
+  trade_goods: 'Converts all production to income at 2 prod → 1 BC (fantastic traders: 1:1) while this stays at the head of the queue.',
+};
+
+/** UI description of a buildable/researchable item: the application row's
+ * effect summary when one exists, curated text otherwise. */
+export function itemDescription(itemId: string): string | null {
+  return applicationById.get(itemId)?.effectSummary || CURATED_ITEM_DESCRIPTIONS[itemId] || null;
+}
+
 /** Weapon id -> granting application id where naive pluralization fails
  * (disrupter/disruptor spelling drift; torpedo + 's' != torpedoes). */
 export const WEAPON_APP_ALIAS: Readonly<Record<string, string>> = {

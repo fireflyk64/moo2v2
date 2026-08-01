@@ -1,7 +1,8 @@
 <script lang="ts">
   // The system-wide colonies spreadsheet: the primary way to run your empire.
   // Every edit is an optimistic command; dirty cells resolve on host accept.
-  import { selectors, itemLabel, explainOutput, COLONY_TAGS, ANDROID_RACE } from '@engine/index';
+  import { selectors, itemLabel, itemMayRepeat, explainOutput, COLONY_TAGS, ANDROID_RACE } from '@engine/index';
+  import { itemDescription } from '@engine/data/index';
   import { app, getActive } from '../state.svelte';
   import AutopilotBar from '../components/AutopilotBar.svelte';
   import PixelPlanet from '../PixelPlanet.svelte';
@@ -168,7 +169,7 @@
     if (!item) return;
     for (const row of rows) {
       if (!selected.has(row.id) || !row.buildable.includes(item)) continue;
-      const items = row.queue.length ? [item, ...row.queue.slice(1)] : [item];
+      const items = row.queue.length ? [item, ...row.queueEntries.slice(1)] : [item];
       submitNoted('set_build_queue', { colonyId: row.id, items });
     }
   }
@@ -180,8 +181,8 @@
       if (!selected.has(row.id) || !row.buildable.includes(item)) continue;
       const items =
         where === 'back' || row.queue.length === 0
-          ? [...row.queue, item]
-          : [row.queue[0]!, item, ...row.queue.slice(1)];
+          ? [...row.queueEntries, item]
+          : [row.queueEntries[0]!, item, ...row.queueEntries.slice(1)];
       submitNoted('set_build_queue', { colonyId: row.id, items });
     }
   }
@@ -353,26 +354,43 @@
     if (!item) return;
     // choosing something already queued PROMOTES one instance of it to the
     // active slot — repeats (ships, projects) are preserved, not collapsed
+    const q = row.queueEntries;
     const idx = row.queue.indexOf(item);
     const items =
       idx >= 0
-        ? [item, ...row.queue.slice(0, idx), ...row.queue.slice(idx + 1)]
-        : row.queue.length
-          ? [item, ...row.queue.slice(1)]
+        ? [q[idx]!, ...q.slice(0, idx), ...q.slice(idx + 1)]
+        : q.length
+          ? [item, ...q.slice(1)]
           : [item];
     submitNoted('set_build_queue', { colonyId: row.id, items });
+  }
+
+  /** insert at the very front: the new item builds NOW, and the displaced
+   * build keeps its queue place (slot 1) — no more change-head-then-requeue */
+  function insertFront(row: selectors.ColonyRow, item: string) {
+    if (!item) return;
+    submitNoted('set_build_queue', { colonyId: row.id, items: [item, ...row.queueEntries] });
+  }
+
+  /** toggle repeat on the active build (ships and repeatable projects): the
+   * entry stays at the head after completing and builds another copy */
+  function toggleRepeat(row: selectors.ColonyRow) {
+    const q = row.queueEntries;
+    if (!q.length) return;
+    const head = { item: q[0]!.item, ...(q[0]!.repeat ? {} : { repeat: true }) };
+    submitNoted('set_build_queue', { colonyId: row.id, items: [head, ...q.slice(1)] });
   }
 
   function removeQueued(row: selectors.ColonyRow, index: number) {
     submitNoted('set_build_queue', {
       colonyId: row.id,
-      items: row.queue.filter((_, i) => i !== index),
+      items: row.queueEntries.filter((_, i) => i !== index),
     });
   }
 
   function appendBuild(row: selectors.ColonyRow, item: string) {
     if (!item) return;
-    submitNoted('set_build_queue', { colonyId: row.id, items: [...row.queue, item] });
+    submitNoted('set_build_queue', { colonyId: row.id, items: [...row.queueEntries, item] });
   }
 
   function buy(row: selectors.ColonyRow) {
@@ -743,6 +761,9 @@
           <select
             data-testid="build-{row.id}"
             value={row.activeItem ?? ''}
+            title={row.activeItem
+              ? `${row.name} — ${label(row.activeItem)}${itemDescription(row.activeItem) ? `: ${itemDescription(row.activeItem)}` : ''}`
+              : row.name}
             onchange={(e) => setBuild(row, (e.target as HTMLSelectElement).value)}
           >
             <option value="" disabled>— build —</option>
@@ -759,6 +780,17 @@
               <option value={item}>{label(item)}</option>
             {/each}
           </select>
+          {#if row.activeItem && itemMayRepeat(row.activeItem)}
+            <button
+              class="repeat"
+              class:on={row.queueEntries[0]?.repeat === true}
+              data-testid="repeat-{row.id}"
+              title={row.queueEntries[0]?.repeat
+                ? 'repeat build is ON: another copy starts each time this completes — click to turn off'
+                : 'repeat build: keep building copies of this until you turn it off (or the colony cannot take more)'}
+              onclick={() => toggleRepeat(row)}
+            >⟳</button>
+          {/if}
         </td>
         <td data-testid="progress-{row.id}">
           {#if row.activeItem === 'housing' || row.activeItem === 'trade_goods'}
@@ -789,7 +821,7 @@
               data-testid="queued-{row.id}-{qi + 1}"
               title="{label(q)} — click ✕ to remove, or pick it in the build column to build it now"
               onclick={() => removeQueued(row, qi + 1)}
-            >{label(q)} ✕</button>
+            >{row.queueEntries[qi + 1]?.repeat ? '⟳ ' : ''}{label(q)} ✕</button>
           {/each}
           <select data-testid="queue-add-{row.id}" value="" onchange={(e) => { appendBuild(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}>
             <option value="">+ queue</option>
@@ -797,6 +829,19 @@
               <option value={item}>{label(item)}</option>
             {/each}
           </select>
+          {#if row.queue.length}
+            <select
+              data-testid="queue-now-{row.id}"
+              value=""
+              title="build NOW: goes in front of {row.activeItem ? label(row.activeItem) : 'the queue'}, which keeps its place and nothing invested is lost"
+              onchange={(e) => { insertFront(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}
+            >
+              <option value="">⤴ now</option>
+              {#each row.buildable as item (item)}
+                <option value={item}>{label(item)}</option>
+              {/each}
+            </select>
+          {/if}
         </td>
         <td>
           {#if row.buildings.length}
@@ -881,6 +926,13 @@
     cursor: pointer;
     user-select: none;
   }
+  /* the Building/Queue columns sit a long way from the colony name: light the
+     whole row under the cursor (and while one of its dropdowns has focus) so
+     the eye never loses which planet it is working in */
+  tbody tr:hover td,
+  tbody tr:focus-within td {
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
   tfoot td {
     background: var(--panel-2);
     font-weight: 600;
@@ -952,6 +1004,18 @@
     border: 1px solid var(--line);
     border-radius: 8px;
     opacity: 0.85;
+  }
+  .repeat {
+    padding: 0 0.3rem;
+    margin-left: 0.15rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    opacity: 0.6;
+  }
+  .repeat.on {
+    color: var(--accent);
+    border-color: var(--accent);
+    opacity: 1;
   }
   .queuechip:hover {
     border-color: var(--bad);
