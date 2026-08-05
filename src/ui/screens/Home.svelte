@@ -9,8 +9,10 @@
   import { app, bindActive } from '../state.svelte';
   import { BRAND } from '../brand';
   import { THEMES, applyTheme, currentTheme } from '../themes';
+  import { musicEnabled, toggleMusic } from '../music';
 
   let themeId = $state(currentTheme());
+  let musicOn = $state(musicEnabled());
 
   const q = new URLSearchParams(location.search);
   let server = $state(q.get('server') ?? DEFAULT_SERVER);
@@ -306,6 +308,10 @@
       <i style="background:{c}"></i>
     {/each}
   </span>
+</label>
+<label class="themerow" title="a generative space score, synthesized in the browser — never on unless you turn it on">
+  🎵 music
+  <input type="checkbox" data-testid="music-toggle" checked={musicOn} onchange={() => (musicOn = toggleMusic())} />
 </label>
 </div>
 

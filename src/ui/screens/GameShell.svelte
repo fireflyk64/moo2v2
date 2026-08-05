@@ -23,10 +23,12 @@
   import StarScanDialog from '../components/StarScanDialog.svelte';
   import DiplomatPortrait from '../components/DiplomatPortrait.svelte';
   import FirstContactDialog from '../components/FirstContactDialog.svelte';
+  import { musicCue, musicEnabled, toggleMusic } from '../music';
   import { generateTimelapse, type TimelapseData } from '../timelapse';
 
   let tab = $state<'colonies' | 'map' | 'research' | 'fleets' | 'designer' | 'empires' | 'reports'>('colonies');
   let seenReports = $state(0);
+  let musicOn = $state(musicEnabled());
   let chatText = $state('');
   let chatTo = $state(-1); // -1 = everyone, else a playerId (DM)
   let showHelp = $state(false);
@@ -459,7 +461,14 @@
     if (fresh.length === 0) return;
     for (const id of fresh) knownContacts.add(id);
     const toShow = fresh.filter((id) => !flashIds.has(id) && !meetQueue.includes(id));
-    if (toShow.length) meetQueue = [...meetQueue, ...toShow];
+    if (toShow.length) {
+      meetQueue = [...meetQueue, ...toShow];
+      musicCue('contact');
+    }
+  });
+  // the fast-start CONTACT moment gets the same score cue
+  $effect(() => {
+    if (app.contactFlash) musicCue('contact');
   });
   // cursor over reportsSeq, NOT reports.length: the feed caps at 300 by
   // shifting, so length freezes there and a length-based cursor never saw
@@ -483,6 +492,7 @@
         };
         if (celebrationTimer) clearTimeout(celebrationTimer);
         celebrationTimer = setTimeout(() => (celebration = null), 8000);
+        musicCue('research');
       } else if (r.kind === 'colony_ship_arrived') {
         arrival = {
           starId: Number(r.payload['starId'] ?? 0),
@@ -490,6 +500,7 @@
         };
         if (arrivalTimer) clearTimeout(arrivalTimer);
         arrivalTimer = setTimeout(() => (arrival = null), 12000);
+        musicCue('discovery');
       } else if (r.kind === 'ship_arrived') {
         const starId = Number(r.payload['starId'] ?? 0);
         shipsByStar.set(starId, (shipsByStar.get(starId) ?? 0) + 1);
@@ -502,6 +513,7 @@
       starScans = [...starScans, ...newScans];
       // the scan dialog says it all — drop the redundant arrival toast there
       for (const sid of newScans) shipsByStar.delete(sid);
+      musicCue('discovery');
     }
     if (shipsByStar.size > 0) {
       fleetArrivals = [...shipsByStar.entries()].map(([starId, ships]) => ({ starId, ships }));
@@ -795,6 +807,11 @@
       </label>
     {/if}
     <span class="saves">
+      <button
+        data-testid="music-toggle-shell"
+        title={musicOn ? 'music is on — click to silence' : 'music: a generative space score, synthesized in the browser'}
+        onclick={() => (musicOn = toggleMusic())}
+      >{musicOn ? '🎵' : '🔇'}</button>
       <button data-testid="save-game" disabled={!getActive()?.store} onclick={saveGame}
         title={getActive()?.store ? 'Download the full game as a save file (works in any tab)' : 'persistence unavailable'}>
         💾 Save

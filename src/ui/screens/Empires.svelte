@@ -13,6 +13,7 @@
   import { THEMES, applyTheme, currentTheme } from '../themes';
   import { leaderDisplayName } from '../leaderNames';
   import DiplomatPortrait from '../components/DiplomatPortrait.svelte';
+  import { musicEnabled, toggleMusic } from '../music';
   import { addBotForSeat, removeBotForSeat } from '../net';
 
   const session = () => getActive()!.session;
@@ -31,6 +32,7 @@
   const currentStyle = $derived(me ? shipStyleOf(me) : SHIP_STYLES[0]!.id);
   let styleSel = $state<string | null>(null);
   let themeId = $state(currentTheme());
+  let musicOn = $state(musicEnabled());
   const shownStyle = $derived(styleSel ?? currentStyle);
   const shownStyleInfo = $derived(SHIP_STYLES.find((s) => s.id === shownStyle) ?? SHIP_STYLES[0]!);
 
@@ -273,6 +275,10 @@
         {/each}
       </span>
       <span class="dim">Cosmetic only — game colors (players, stars, planets) never change.</span>
+      <label class="dim" title="generative space score, synthesized in the browser — never on unless you turn it on">
+        <input type="checkbox" data-testid="music-toggle-empires" checked={musicOn} onchange={() => (musicOn = toggleMusic())} />
+        🎵 music
+      </label>
     </div>
   </div>
 
