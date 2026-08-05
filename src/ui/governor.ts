@@ -179,7 +179,9 @@ export function governColonies(
     // debt rescue: the strongest unpinned yards mint money until solvent
     if (rank < rescueYards) {
       if (empire.bc < 0 && head0 !== 'trade_goods' && row.buildable.includes('trade_goods')) {
-        submit('set_build_queue', { colonyId: colony.id, items: ['trade_goods'] });
+        // ui_streamlining.md P4: rescue the treasury without erasing what was
+        // queued — trade goods parks in front, the tail waits it out
+        submit('set_build_queue', { colonyId: colony.id, items: ['trade_goods', ...row.queueEntries].slice(0, 12) });
       }
       continue;
     }
@@ -196,7 +198,7 @@ export function governColonies(
       row.buildable.includes('colony_base') &&
       !row.queue.includes('colony_base')
     ) {
-      submit('set_build_queue', { colonyId: colony.id, items: ['colony_base', ...row.queue] });
+      submit('set_build_queue', { colonyId: colony.id, items: ['colony_base', ...row.queueEntries] });
       continue;
     }
 
@@ -277,7 +279,10 @@ export function governColonies(
       item = row.buildable.includes('trade_goods') ? 'trade_goods' : options[0];
     }
     if (item && colony.queue[0]?.item !== item) {
-      submit('set_build_queue', { colonyId: colony.id, items: [item] });
+      // ui_streamlining.md P4 (friction C): the governor may replace only the
+      // head it disagrees with — the rest of the queue is re-appended, never
+      // bulldozed. Repeat flags ride along via queueEntries.
+      submit('set_build_queue', { colonyId: colony.id, items: [item, ...row.queueEntries.slice(1)].slice(0, 12) });
     }
   }
 }

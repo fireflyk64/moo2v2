@@ -3,7 +3,7 @@
   // Every edit is an optimistic command; dirty cells resolve on host accept.
   import { selectors, itemLabel, itemMayRepeat, explainOutput, COLONY_TAGS, ANDROID_RACE } from '@engine/index';
   import { itemDescription } from '@engine/data/index';
-  import { app, getActive } from '../state.svelte';
+  import { app, getActive, savePerGame } from '../state.svelte';
   import AutopilotBar from '../components/AutopilotBar.svelte';
   import PixelPlanet from '../PixelPlanet.svelte';
   import { leaderDisplayName } from '../leaderNames';
@@ -348,6 +348,17 @@
   function submitNoted(kind: string, payload: unknown) {
     const res = session().submit(kind, payload);
     if (res.error) note(`⛔ ${res.error}`);
+    else if (kind === 'set_build_queue') {
+      // ui_streamlining.md P4: a hand-edited queue is player-owned. Pin every
+      // item so the governor neither reorders nor replaces it (same lifecycle
+      // as map quick-build pins: reconcilePins sheds items as they complete).
+      // Clearing the queue clears the pin — the colony returns to autobuild.
+      const p = payload as { colonyId: number; items: Array<string | { item: string }> };
+      const ids = p.items.map((it) => (typeof it === 'string' ? it : it.item));
+      if (ids.length) app.pins[p.colonyId] = ids;
+      else delete app.pins[p.colonyId];
+      savePerGame();
+    }
     return res;
   }
 

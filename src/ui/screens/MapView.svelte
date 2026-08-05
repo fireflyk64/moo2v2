@@ -4,6 +4,7 @@
   // lairs vs Andromedan raids, blockade badges, move ordering with re-routing.
   import { selectors, inRange, isBlockaded, fuelRangeCp, supportStars, areAtWar, shortEntityId } from '@engine/index';
   import { buildableItems, itemLabel } from '@engine/items';
+  import { shipMarines } from '@engine/economy';
   import type { StarColor } from '@engine/types';
   import { MAP_SIZE } from '@engine/galaxy';
   import { playerColor, STAR_COLORS } from '../colors';
@@ -672,7 +673,12 @@
       shipId: f.ship.id,
     });
     if (res.error) showNote(`⛔ ${res.error}`);
-    else showNote(kind === 'load' ? '🚛 2 colonists aboard' : '🚛 colonists unloaded');
+    else if (kind !== 'load') showNote('🚛 colonists unloaded');
+    else {
+      // at war the same L keystroke is the invasion on-ramp — say so
+      const warOn = gs?.empires.some((e) => e.id !== me() && !e.eliminated && areAtWar(gs!, me(), e.id));
+      showNote(warOn ? '🪖 2 marines aboard — drop them on an enemy colony with a clear sky' : '🚛 2 colonists aboard');
+    }
   }
 
   // ---- map-view quick builds (pinned): B arms the selected star, item keys
@@ -741,7 +747,18 @@
   const pinStatuses = $derived.by(() => {
     void app.version;
     void app.pins;
-    return gs ? pinnedStatus(gs, me(), app.pins) : [];
+    if (!gs) return [];
+    // whole hand-edited queues are pins now (ui_streamlining.md P4), so show
+    // one bar per colony — the item actually building — with a queue count,
+    // instead of a bar per pinned item flooding the strip
+    const all = pinnedStatus(gs, me(), app.pins);
+    const byColony = new Map<number, (typeof all)[number] & { more: number }>();
+    for (const ps of all) {
+      const head = byColony.get(ps.colonyId);
+      if (!head || ps.queuePos < head.queuePos) byColony.set(ps.colonyId, { ...ps, more: (head?.more ?? 0) + (head ? 1 : 0) });
+      else head.more++;
+    }
+    return [...byColony.values()];
   });
   function cancelPinnedBuild(colonyId: number, pinIndex: number) {
     if (!gs) return;
@@ -794,6 +811,28 @@
       }
     }
     return out;
+  });
+
+  // ---- invasion checklist (ui_streamlining.md friction A): the three
+  // auto-landing preconditions from ground.ts, live, on the star panel —
+  // war games used to end with transports orbiting empty because nothing
+  // in the UI said the word "invade" or explained why nothing happened ----
+  const invadeInfo = $derived.by(() => {
+    if (!gs || !selected?.explored) return null;
+    const myId = me();
+    const target = gs.colonies.find((c) => {
+      if (c.owner === myId || c.outpost) return false;
+      const p = gs.planets.find((x) => x.id === c.planetId);
+      return p?.starId === selected.star.id && areAtWar(gs, myId, c.owner);
+    });
+    if (!target) return null;
+    const here = (s: (typeof gs.ships)[number]) => s.location.kind === 'star' && s.location.starId === selected.star.id;
+    const transports = gs.ships.filter((s) => s.owner === myId && s.shipKind === 'transport' && here(s));
+    const marines = transports.reduce((n, s) => n + shipMarines(s), 0);
+    const defenders = gs.ships.filter(
+      (s) => s.owner === target.owner && (s.shipKind === 'design' || s.shipKind === 'scout') && here(s),
+    ).length;
+    return { colony: target, transports: transports.length, marines, defenders, ready: marines > 0 && defenders === 0 };
   });
 
   /** per-star fleet markers: military vs civilian, sized by ship count */
@@ -1190,7 +1229,7 @@
         {#each pinStatuses as ps (`${ps.colonyId}:${ps.pinIndex}`)}
           <div class="pin" data-testid="pinned-{ps.colonyId}-{ps.pinIndex}">
             <button class="jump" title="show {ps.starName} on the map" onclick={() => (selectedStarId = ps.starId)}>{ps.colonyName}</button>
-            <span class="plabel">{ps.label}</span>
+            <span class="plabel">{ps.label}{ps.more > 0 ? ` +${ps.more} queued` : ''}</span>
             <span
               class="pbar"
               title="{ps.pct}% built{ps.turns !== null ? ` · ~${ps.turns} turn${ps.turns > 1 ? 's' : ''} to go` : ' · stalled (no production reaches the queue)'}{ps.queuePos > 0 ? ` · waits behind ${ps.queuePos} item${ps.queuePos > 1 ? 's' : ''}` : ''}"
@@ -1364,6 +1403,30 @@
             {/each}
           </p>
         {/if}
+      {/if}
+      {#if invadeInfo}
+        <div class="invade" data-testid="invade-checklist">
+          <b>🪖 Invading {invadeInfo.colony.name}</b>
+          <ul>
+            <li class:ok={invadeInfo.marines > 0}>
+              {#if invadeInfo.marines > 0}
+                ✓ {invadeInfo.marines} marine{invadeInfo.marines > 1 ? 's' : ''} aboard {invadeInfo.transports} transport{invadeInfo.transports > 1 ? 's' : ''} here
+              {:else if invadeInfo.transports > 0}
+                ✗ your transports here are EMPTY — load marines at one of your colonies (select the fleet, press L)
+              {:else}
+                ✗ no transports here — build transports, load marines at your colony (L), fly them in
+              {/if}
+            </li>
+            <li class:ok={invadeInfo.defenders === 0}>
+              {invadeInfo.defenders === 0
+                ? '✓ the sky is clear'
+                : `✗ ${invadeInfo.defenders} defending warship${invadeInfo.defenders > 1 ? 's' : ''} in orbit — clear them first`}
+            </li>
+            {#if invadeInfo.ready}
+              <li class="ok">▶ landing resolves automatically at the next turn boundary</li>
+            {/if}
+          </ul>
+        </div>
       {/if}
       <ul class="planets">
         {#each selected.planets as p (p.id)}
@@ -1630,6 +1693,24 @@
     border-radius: 6px;
     padding: 0 0.3rem;
     margin-right: 0.25rem;
+  }
+  .invade {
+    font-size: 0.82rem;
+    border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent);
+    border-radius: 8px;
+    padding: 0.35rem 0.5rem;
+    margin: 0.3rem 0;
+  }
+  .invade ul {
+    list-style: none;
+    margin: 0.2rem 0 0;
+    padding: 0;
+  }
+  .invade li {
+    color: var(--text-dim);
+  }
+  .invade li.ok {
+    color: var(--good, #7be07b);
   }
   .wrap {
     display: flex;

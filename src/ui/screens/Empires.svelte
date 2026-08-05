@@ -172,8 +172,16 @@
   const myColonies = $derived(gs ? gs.colonies.filter((c) => c.owner === selfId && !c.outpost) : []);
 
   // ---------- spies ----------
-  let spyTarget = $state<number | null>(null);
-  let spyMode = $state<'steal' | 'sabotage'>('steal');
+  // ui_streamlining.md friction B: this panel used to hold local state that
+  // reset to defensive/steal on every remount, so players re-submitted stale
+  // defaults and believed the engine was resetting their orders. The selects
+  // now MIRROR the engine state and submit on change — what you see is
+  // always the real standing order.
+  const spyTarget = $derived(me?.spies.target ?? null);
+  const spyMode = $derived(me?.spies.mode ?? 'steal');
+  function setSpyOrders(target: number | null, mode: 'steal' | 'sabotage') {
+    submit('set_spy_orders', { target, mode });
+  }
 
   // ---------- antarans ----------
   const portalColony = $derived(myColonies.find((c) => c.buildings.includes('dimensional_portal')));
@@ -520,18 +528,35 @@
 
   <h3>Agents ({me.spies.count}/10)</h3>
   <div class="compose">
-    <select data-testid="spy-target" bind:value={spyTarget}>
-      <option value={null}>all defensive</option>
-      {#each livingOthers as e (e.id)}<option value={e.id}>vs {e.name}</option>{/each}
+    <select
+      data-testid="spy-target"
+      value={spyTarget === null ? '' : String(spyTarget)}
+      onchange={(e) => {
+        const v = (e.target as HTMLSelectElement).value;
+        setSpyOrders(v === '' ? null : Number(v), spyMode);
+      }}
+    >
+      <option value="">all defensive</option>
+      {#each livingOthers as e (e.id)}<option value={String(e.id)}>vs {e.name}</option>{/each}
     </select>
-    <select data-testid="spy-mode" bind:value={spyMode}>
+    <select
+      data-testid="spy-mode"
+      value={spyMode}
+      disabled={spyTarget === null}
+      title={spyTarget === null ? 'pick a target first — mode only matters on offense' : ''}
+      onchange={(e) => setSpyOrders(spyTarget, (e.target as HTMLSelectElement).value as 'steal' | 'sabotage')}
+    >
       <option value="steal">steal technology</option>
       <option value="sabotage">sabotage</option>
     </select>
-    <button data-testid="spy-apply" onclick={() => submit('set_spy_orders', { target: spyTarget, mode: spyMode })}>Set orders</button>
-    <span class="dim">
-      current: {me.spies.target === null ? 'defensive' : `${me.spies.mode} vs ${nameOf(me.spies.target)}`}
-      — train more agents from the colony build list
+    <span class="dim" data-testid="spy-status">
+      {#if me.spies.count === 0}
+        no agents — orders wait until you train spies (colony build list)
+      {:else if spyTarget === null}
+        all {me.spies.count} agent{me.spies.count > 1 ? 's' : ''} defending our systems
+      {:else}
+        {me.spies.count} agent{me.spies.count > 1 ? 's' : ''} on {spyMode} vs {nameOf(spyTarget)} — resolves each turn
+      {/if}
     </span>
   </div>
 
