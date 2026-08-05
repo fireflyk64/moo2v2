@@ -11,6 +11,7 @@
   import type { GroundBattleEntry } from '../state.svelte';
   import { app, getActive, saveAutoReplay, savePerGame } from '../state.svelte';
   import { THEMES, applyTheme, currentTheme } from '../themes';
+  import { leaderDisplayName } from '../leaderNames';
   import { addBotForSeat, removeBotForSeat } from '../net';
 
   const session = () => getActive()!.session;
@@ -431,7 +432,7 @@
         <div class="leadercard offer" class:ship={row?.kind === 'ship'}>
           <div class="portrait">{portraitOf(o.leaderId, row?.kind)}</div>
           <div class="who">
-            <b>{row?.name}</b>
+            <b>{leaderDisplayName(gs.seed, o.leaderId, row?.name ?? o.leaderId)}</b>
             <span class="title">{row?.title}</span>
             <span class="kind" title={row?.kind === 'ship' ? 'bonuses apply to the whole fleet' : 'system administrator: colony bonuses apply to every colony in the assigned star system'}>{row?.kind === 'ship' ? '🚀 ship officer' : '🏛 colony leader'}</span>
           </div>
@@ -467,7 +468,7 @@
         <div class="leadercard" class:ship={row?.kind === 'ship'}>
           <div class="portrait">{portraitOf(l.leaderId, row?.kind)}</div>
           <div class="who">
-            <b>{row?.name}</b>
+            <b>{leaderDisplayName(gs.seed, l.leaderId, row?.name ?? l.leaderId)}</b>
             <span class="title">{row?.title}</span>
             <span class="kind" title={row?.kind === 'ship' ? 'bonuses apply to the whole fleet' : 'system administrator: colony bonuses apply to every colony in the assigned star system'}>{row?.kind === 'ship' ? '🚀 ship officer' : '🏛 colony leader'}</span>
           </div>

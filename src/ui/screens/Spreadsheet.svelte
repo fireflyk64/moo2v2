@@ -6,6 +6,7 @@
   import { app, getActive } from '../state.svelte';
   import AutopilotBar from '../components/AutopilotBar.svelte';
   import PixelPlanet from '../PixelPlanet.svelte';
+  import { leaderDisplayName } from '../leaderNames';
 
   const session = () => getActive()!.session;
   const allRowsWithOutposts = $derived.by(() => {
@@ -599,7 +600,7 @@
               data-testid="colony-name-{row.id}">{row.name}</span>{row.outpost ? ' (outpost)' : ''}
             <button class="mini ghost" data-testid="rename-{row.id}" title="rename colony" onclick={() => startRename(row)}>✏️</button>
             {#if row.leaderName}
-              <span class="leader" data-testid="leader-{row.id}" title="governor assigned to this colony (Empires tab)">{row.leaderName}</span>
+              <span class="leader" data-testid="leader-{row.id}" title="governor assigned to this colony (Empires tab)">{row.leaderId ? leaderDisplayName(session().getPlanned()?.seed, row.leaderId, row.leaderName) : row.leaderName}</span>
             {/if}
           {/if}
           {#if showTags}

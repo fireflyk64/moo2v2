@@ -1,5 +1,7 @@
 <script lang="ts">
   import { app, getActive } from '../state.svelte';
+  import { leaderById } from '@engine/leaders';
+  import { leaderDisplayName } from '../leaderNames';
 
   const session = () => getActive()!.session;
   const gs = $derived.by(() => {
@@ -42,6 +44,11 @@
   }
   function starOf(id: unknown): string {
     return gs?.stars.find((s) => s.id === id)?.name ?? `star ${id}`;
+  }
+  function leaderOf(id: unknown): string {
+    const lid = String(id);
+    const base = leaderById.get(lid)?.name ?? lid;
+    return gs ? leaderDisplayName(gs.seed, lid, base) : base;
   }
 
   function describe(kind: string, p: Record<string, unknown>): string {
@@ -89,9 +96,9 @@
       case 'spy_caught': return `we caught a spy from ${nameOf(p['from'])}`;
       case 'spy_assassinated': return `our assassin eliminated an enemy agent`;
       case 'spy_trained': return `a new agent reported for duty (${p['count']}/10)`;
-      case 'leader_offer': return `${p['name']} offers their services (${p['price']} BC)`;
-      case 'leader_level': return `${p['leaderId']} advanced to level ${p['level']}`;
-      case 'leader_quit': return `${p['leaderId']} quit over unpaid wages`;
+      case 'leader_offer': return `${leaderOf(p['leaderId'] ?? p['name'])} offers their services (${p['price']} BC)`;
+      case 'leader_level': return `${leaderOf(p['leaderId'])} advanced to level ${p['level']}`;
+      case 'leader_quit': return `${leaderOf(p['leaderId'])} quit over unpaid wages`;
       case 'treaty_signed': return `treaty signed: ${p['kind']} between ${nameOf(p['a'])} and ${nameOf(p['b'])}`;
       case 'surrender': return `${nameOf(p['from'])} surrendered to ${nameOf(p['to'])}`;
       case 'council_convened': return `the Galactic Council convenes: ${(p['candidates'] as number[]).map(nameOf).join(' vs ')}`;

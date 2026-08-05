@@ -27,6 +27,7 @@ export interface ColonyRow {
   jobs: { farmers: number; workers: number; scientists: number };
   /** governor assigned to this colony (null = none) */
   leaderName: string | null;
+  leaderId: string | null;
   /** per-race population groups (captured colonists appear as their own race) */
   groups: Array<{
     race: number;
@@ -154,6 +155,7 @@ export function colonyRow(state: GameState, colony: Colony, projectedFoodLack?: 
       const hired = empire.leaders.find((l) => l.colonyId === colony.id);
       return hired ? (leaderById.get(hired.leaderId)?.name ?? null) : null;
     })(),
+    leaderId: empire.leaders.find((l) => l.colonyId === colony.id)?.leaderId ?? null,
     groups: colony.groups.map((g) => ({
       race: g.race,
       raceName:
