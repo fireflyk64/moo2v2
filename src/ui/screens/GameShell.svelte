@@ -5,7 +5,7 @@
   import { restartSoloGame } from '../net';
   import { governColonies } from '../governor';
   import { autoExploreScouts, reconcilePins } from '../quickBuild';
-  import { syncEmpireColors } from '../colors';
+  import { playerColor, syncEmpireColors } from '../colors';
   import { BRAND, FULL_TITLE } from '../brand';
   import { latchEdge, type EdgeLatch, type EdgeLevel } from '../commitEdge';
   import { describeSaveError, downloadRawDatabase, downloadSave } from '../saveload';
@@ -21,6 +21,8 @@
   import GroundBattleDialog from '../battle/GroundBattleDialog.svelte';
   import TimelapseViewer from '../components/TimelapseViewer.svelte';
   import StarScanDialog from '../components/StarScanDialog.svelte';
+  import DiplomatPortrait from '../components/DiplomatPortrait.svelte';
+  import FirstContactDialog from '../components/FirstContactDialog.svelte';
   import { generateTimelapse, type TimelapseData } from '../timelapse';
 
   let tab = $state<'colonies' | 'map' | 'research' | 'fleets' | 'designer' | 'empires' | 'reports'>('colonies');
@@ -429,6 +431,36 @@
   let fleetArrivalTimer: ReturnType<typeof setTimeout> | null = null;
   /** first-reveal system scans, shown one at a time in charting order */
   let starScans = $state<number[]>([]);
+  // ---- mid-game first meetings: the fast-start CONTACT overlay fires only
+  // once, so every later first meeting gets its own envoy dialog. Contact is
+  // derived, never evented — diff the met-set across state changes instead.
+  let knownContacts: Set<number> | null = null; // null = not yet baselined
+  let meetQueue = $state<number[]>([]);
+  $effect(() => {
+    void app.version;
+    const s = gs;
+    if (!s) {
+      knownContacts = null;
+      meetQueue = [];
+      return;
+    }
+    const met = selectors.metEmpireIds(s, session().playerId);
+    if (knownContacts === null) {
+      // first look at this game (fresh start OR loaded save): baseline quietly
+      knownContacts = new Set(met);
+      return;
+    }
+    // the fast-start CONTACT overlay already introduces its envoys — and it
+    // can be set after this effect saw the same state change, so also purge
+    // its ids from an already-built queue
+    const flashIds = new Set((app.contactFlash?.pairs ?? []).flat());
+    if (meetQueue.some((id) => flashIds.has(id))) meetQueue = meetQueue.filter((id) => !flashIds.has(id));
+    const fresh = [...met].filter((id) => id !== session().playerId && !knownContacts!.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) knownContacts.add(id);
+    const toShow = fresh.filter((id) => !flashIds.has(id) && !meetQueue.includes(id));
+    if (toShow.length) meetQueue = [...meetQueue, ...toShow];
+  });
   // cursor over reportsSeq, NOT reports.length: the feed caps at 300 by
   // shifting, so length freezes there and a length-based cursor never saw
   // another report — research celebrations and arrival pings died late-game
@@ -568,7 +600,7 @@
     const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
     if (typing || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
     // never steal keys from a modal (battle orders, replay, timelapse, contact, scan)
-    if (myBattle || app.viewing || app.viewingGround || app.contactFlash || timelapse || starScans.length > 0 || winner !== null) return;
+    if (myBattle || app.viewing || app.viewingGround || app.contactFlash || timelapse || starScans.length > 0 || meetQueue.length > 0 || winner !== null) return;
     if (e.key.length === 1 && e.key >= '1' && e.key <= '7') {
       e.preventDefault();
       tab = TAB_KEYS[Number(e.key) - 1]!;
@@ -969,13 +1001,37 @@
     </div>
   {/if}
   {#if app.contactFlash}
-    {@const names = app.contactFlash.pairs
+    {@const selfId = session().playerId}
+    {@const others = [...new Set(
+      app.contactFlash.pairs
+        .filter(([x, y]) => x === selfId || y === selfId)
+        .map(([x, y]) => (x === selfId ? y : x)),
+    )]}
+    {@const otherNames = app.contactFlash.pairs
+      .filter(([x, y]) => x !== selfId && y !== selfId)
       .map(([x, y]) => `${gs.empires.find((e) => e.id === x)?.name ?? x} ⟷ ${gs.empires.find((e) => e.id === y)?.name ?? y}`)
       .join(' · ')}
     <div class="contact-overlay" data-testid="contact-flash" role="alertdialog">
       <div class="contact-box">
         <div class="contact-title">CONTACT</div>
-        <p>{names}</p>
+        {#if others.length}
+          <!-- their envoys, procedurally generated like the ships: the same
+               empire always sends the same face across the whole game -->
+          <div class="envoys">
+            {#each others as oid (oid)}
+              {@const emp = gs.empires.find((e) => e.id === oid)}
+              <div class="envoy" data-testid="envoy-{oid}">
+                <DiplomatPortrait seed={`${gs.seed}/${emp?.raceName ?? oid}/${oid}`} colorHex={playerColor(oid)} size={96} />
+                <b style:color={playerColor(oid)}>{emp?.name ?? oid}</b>
+                <span class="race">{emp?.raceName ?? ''}</span>
+              </div>
+            {/each}
+          </div>
+          <p>{others.length > 1 ? 'Their envoys await.' : 'An envoy awaits.'}</p>
+        {/if}
+        {#if otherNames}
+          <p class="contact-sub">also met: {otherNames}</p>
+        {/if}
         <p class="contact-sub">
           The empires have met at turn {app.contactFlash.turn}. Fast start is over: everyone now stands at the synced
           turn (turns you previewed past it were rewound) and the game continues turn-by-turn. This is a good moment to
@@ -983,10 +1039,25 @@
         </p>
         <div class="contact-actions">
           <button data-testid="contact-save" disabled={!getActive()?.store} onclick={saveGame}>💾 Save the contact turn</button>
+          {#if others.length}
+            <button data-testid="contact-diplomacy" class="primary" onclick={() => { tab = 'empires'; app.contactFlash = null; }}>🤝 Open diplomacy</button>
+          {/if}
           <button data-testid="contact-continue" class="primary" onclick={() => (app.contactFlash = null)}>Continue ▶</button>
         </div>
       </div>
     </div>
+  {/if}
+  {#if meetQueue.length > 0 && !app.contactFlash}
+    {#key meetQueue[0]}
+      <FirstContactDialog
+        empireId={meetQueue[0]!}
+        onclose={() => (meetQueue = meetQueue.slice(1))}
+        ondiplomacy={() => {
+          tab = 'empires';
+          meetQueue = meetQueue.slice(1);
+        }}
+      />
+    {/key}
   {/if}
   {#if starScans.length > 0}
     {#key starScans[0]}
@@ -1475,6 +1546,28 @@
   .contact-sub {
     color: var(--text-dim);
     font-size: 0.9rem;
+  }
+  .envoys {
+    display: flex;
+    gap: 1.2rem;
+    justify-content: center;
+    margin: 0.6rem 0 0.2rem;
+    flex-wrap: wrap;
+  }
+  .envoy {
+    display: grid;
+    justify-items: center;
+    gap: 0.15rem;
+    animation: envoy-in 0.7s ease-out backwards;
+    animation-delay: 0.35s;
+  }
+  @keyframes envoy-in {
+    from { opacity: 0; transform: translateY(8px); filter: brightness(2.5); }
+    to { opacity: 1; transform: none; filter: none; }
+  }
+  .envoy .race {
+    font-size: 0.75rem;
+    color: var(--text-dim);
   }
   .contact-actions {
     display: flex;

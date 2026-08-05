@@ -12,6 +12,7 @@
   import { app, getActive, saveAutoReplay, savePerGame } from '../state.svelte';
   import { THEMES, applyTheme, currentTheme } from '../themes';
   import { leaderDisplayName } from '../leaderNames';
+  import DiplomatPortrait from '../components/DiplomatPortrait.svelte';
   import { addBotForSeat, removeBotForSeat } from '../net';
 
   const session = () => getActive()!.session;
@@ -290,7 +291,10 @@
       {#each others as e (e.id)}
         {@const rel = relation(e.id)}
         <tr data-testid="empire-{e.id}">
-          <td><span class="chip" style="background:{playerColor(e.id)}"></span> {e.name}</td>
+          <td class="empirecell">
+            <DiplomatPortrait seed={`${gs.seed}/${e.raceName}/${e.id}`} colorHex={playerColor(e.id)} size={34} />
+            <span class="chip" style="background:{playerColor(e.id)}"></span> {e.name}
+          </td>
           <td>{e.raceName}{e.eliminated ? ' (eliminated)' : ''}</td>
           <td data-testid="relation-{e.id}">
             {rel.status}
@@ -876,6 +880,11 @@
     height: 0.7rem;
     border-radius: 50%;
     margin-right: 0.3rem;
+  }
+  .empirecell {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
   }
   .compose {
     display: flex;
