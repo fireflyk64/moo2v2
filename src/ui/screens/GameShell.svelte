@@ -20,6 +20,7 @@
   import BattleViewer from '../battle/BattleViewer.svelte';
   import GroundBattleDialog from '../battle/GroundBattleDialog.svelte';
   import TimelapseViewer from '../components/TimelapseViewer.svelte';
+  import StarScanDialog from '../components/StarScanDialog.svelte';
   import { generateTimelapse, type TimelapseData } from '../timelapse';
 
   let tab = $state<'colonies' | 'map' | 'research' | 'fleets' | 'designer' | 'empires' | 'reports'>('colonies');
@@ -426,6 +427,8 @@
   /** fleet-arrival ping: one line per destination star, this boundary only */
   let fleetArrivals = $state<Array<{ starId: number; ships: number }> | null>(null);
   let fleetArrivalTimer: ReturnType<typeof setTimeout> | null = null;
+  /** first-reveal system scans, shown one at a time in charting order */
+  let starScans = $state<number[]>([]);
   // cursor over reportsSeq, NOT reports.length: the feed caps at 300 by
   // shifting, so length freezes there and a length-based cursor never saw
   // another report — research celebrations and arrival pings died late-game
@@ -433,8 +436,12 @@
   $effect(() => {
     const seq = app.reportsSeq;
     const reports = app.reports;
-    if (seq < processedSeq) processedSeq = 0; // new game
+    if (seq < processedSeq) {
+      processedSeq = 0; // new game
+      starScans = [];
+    }
     const shipsByStar = new Map<number, number>();
+    const newScans: number[] = [];
     for (let i = Math.max(0, reports.length - (seq - processedSeq)); i < reports.length; i++) {
       const r = reports[i]!;
       if (r.kind === 'research_complete') {
@@ -454,7 +461,15 @@
       } else if (r.kind === 'ship_arrived') {
         const starId = Number(r.payload['starId'] ?? 0);
         shipsByStar.set(starId, (shipsByStar.get(starId) ?? 0) + 1);
+      } else if (r.kind === 'star_explored') {
+        const starId = Number(r.payload['starId'] ?? 0);
+        if (starId && !starScans.includes(starId) && !newScans.includes(starId)) newScans.push(starId);
       }
+    }
+    if (newScans.length) {
+      starScans = [...starScans, ...newScans];
+      // the scan dialog says it all — drop the redundant arrival toast there
+      for (const sid of newScans) shipsByStar.delete(sid);
     }
     if (shipsByStar.size > 0) {
       fleetArrivals = [...shipsByStar.entries()].map(([starId, ships]) => ({ starId, ships }));
@@ -552,8 +567,8 @@
     const t = e.target as HTMLElement | null;
     const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
     if (typing || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
-    // never steal keys from a modal (battle orders, replay, timelapse, contact)
-    if (myBattle || app.viewing || app.viewingGround || app.contactFlash || timelapse || winner !== null) return;
+    // never steal keys from a modal (battle orders, replay, timelapse, contact, scan)
+    if (myBattle || app.viewing || app.viewingGround || app.contactFlash || timelapse || starScans.length > 0 || winner !== null) return;
     if (e.key.length === 1 && e.key >= '1' && e.key <= '7') {
       e.preventDefault();
       tab = TAB_KEYS[Number(e.key) - 1]!;
@@ -972,6 +987,21 @@
         </div>
       </div>
     </div>
+  {/if}
+  {#if starScans.length > 0}
+    {#key starScans[0]}
+      <StarScanDialog
+        starId={starScans[0]!}
+        pending={starScans.length - 1}
+        onclose={() => (starScans = starScans.slice(1))}
+        onviewmap={() => {
+          app.focusStarId = starScans[0]!;
+          tab = 'map';
+          starScans = starScans.slice(1);
+        }}
+        onskipall={() => (starScans = [])}
+      />
+    {/key}
   {/if}
   {#if myBattle}
     <!-- keyed so a SECOND battle in the same turn gets a fresh dialog with
