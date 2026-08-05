@@ -389,6 +389,17 @@
     });
   }
 
+  /** promote a queued entry to the active slot; everything else keeps its
+   * order (and the displaced head keeps its invested production, sticky) */
+  function promoteQueued(row: selectors.ColonyRow, index: number) {
+    const q = row.queueEntries;
+    if (index <= 0 || index >= q.length) return;
+    submitNoted('set_build_queue', {
+      colonyId: row.id,
+      items: [q[index]!, ...q.slice(0, index), ...q.slice(index + 1)],
+    });
+  }
+
   function appendBuild(row: selectors.ColonyRow, item: string) {
     if (!item) return;
     submitNoted('set_build_queue', { colonyId: row.id, items: [...row.queueEntries, item] });
@@ -529,6 +540,10 @@
   <AutopilotBar />
 {/if}
 
+<!-- the table scrolls inside its own container: the page never pans sideways,
+     so the tab bar and commit footer stay put, and the checkbox + colony name
+     columns stay pinned so you never lose which planet you are editing -->
+<div class="tablewrap">
 <table data-testid="colony-table">
   <thead>
     <tr>
@@ -816,33 +831,41 @@
           {/if}
         </td>
         <td>
+          <select
+            class="queuenow"
+            data-testid="queue-now-{row.id}"
+            value=""
+            title="build NOW: goes in front of {row.activeItem ? label(row.activeItem) : 'the queue'}, which keeps its place and nothing invested is lost"
+            onchange={(e) => { insertFront(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}
+          >
+            <option value="">⚡ build now</option>
+            {#each row.buildable as item (item)}
+              <option value={item}>{label(item)}</option>
+            {/each}
+          </select>
           {#each row.queue.slice(1) as q, qi (qi)}
-            <button
-              class="queuechip"
-              data-testid="queued-{row.id}-{qi + 1}"
-              title="{label(q)} — click ✕ to remove, or pick it in the build column to build it now"
-              onclick={() => removeQueued(row, qi + 1)}
-            >{row.queueEntries[qi + 1]?.repeat ? '⟳ ' : ''}{label(q)} ✕</button>
+            <span class="queuechip" data-testid="queued-{row.id}-{qi + 1}">
+              <button
+                class="chipact"
+                data-testid="queue-front-{row.id}-{qi + 1}"
+                title="move {label(q)} to the front — it builds NOW, everything else keeps its order"
+                onclick={() => promoteQueued(row, qi + 1)}
+              >⏫</button>
+              <span title={label(q)}>{row.queueEntries[qi + 1]?.repeat ? '⟳ ' : ''}{label(q)}</span>
+              <button
+                class="chipact"
+                data-testid="queue-remove-{row.id}-{qi + 1}"
+                title="remove {label(q)} from the queue"
+                onclick={() => removeQueued(row, qi + 1)}
+              >✕</button>
+            </span>
           {/each}
-          <select data-testid="queue-add-{row.id}" value="" onchange={(e) => { appendBuild(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}>
+          <select data-testid="queue-add-{row.id}" value="" title="append to the back of the queue" onchange={(e) => { appendBuild(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}>
             <option value="">+ queue</option>
             {#each row.buildable as item (item)}
               <option value={item}>{label(item)}</option>
             {/each}
           </select>
-          {#if row.queue.length}
-            <select
-              data-testid="queue-now-{row.id}"
-              value=""
-              title="build NOW: goes in front of {row.activeItem ? label(row.activeItem) : 'the queue'}, which keeps its place and nothing invested is lost"
-              onchange={(e) => { insertFront(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}
-            >
-              <option value="">⤴ now</option>
-              {#each row.buildable as item (item)}
-                <option value={item}>{label(item)}</option>
-              {/each}
-            </select>
-          {/if}
         </td>
         <td>
           {#if row.buildings.length}
@@ -894,6 +917,7 @@
     </tr>
   </tfoot>
 </table>
+</div>
 
 <style>
   .bar {
@@ -911,17 +935,53 @@
   .presets button {
     font-size: 0.78rem;
   }
+  .tablewrap {
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
   table {
-    border-collapse: collapse;
+    /* separate, not collapse: collapsed borders detach from position:sticky
+       cells and scroll away without them */
+    border-collapse: separate;
+    border-spacing: 0;
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
     width: 100%;
     font-size: 0.85rem;
   }
   td,
   th {
-    border: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
     padding: 0.25rem 0.45rem;
     text-align: left;
     white-space: nowrap;
+  }
+  /* pin the checkbox + colony-name columns while the rest scrolls */
+  thead th:nth-child(-n + 2),
+  tbody tr:not(.buildingsrow) td:nth-child(-n + 2),
+  tfoot td:nth-child(-n + 2) {
+    position: sticky;
+    z-index: 2;
+    background: var(--bg);
+    box-sizing: border-box;
+  }
+  thead th:nth-child(1),
+  tbody tr:not(.buildingsrow) td:nth-child(1),
+  tfoot td:nth-child(1) {
+    left: 0;
+    width: 2.1rem;
+    min-width: 2.1rem;
+  }
+  thead th:nth-child(2),
+  tbody tr:not(.buildingsrow) td:nth-child(2),
+  tfoot td:nth-child(2) {
+    left: 2.1rem;
+    box-shadow: 2px 0 0 var(--line);
+  }
+  tfoot td:nth-child(-n + 2) {
+    background: var(--panel-2);
   }
   th.sortable {
     cursor: pointer;
@@ -933,6 +993,11 @@
   tbody tr:hover td,
   tbody tr:focus-within td {
     background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+  /* sticky cells need an OPAQUE hover tint or scrolled content bleeds through */
+  tbody tr:hover td:nth-child(-n + 2),
+  tbody tr:focus-within td:nth-child(-n + 2) {
+    background: color-mix(in srgb, var(--accent) 9%, var(--bg));
   }
   tfoot td {
     background: var(--panel-2);
@@ -998,13 +1063,34 @@
     outline: 1px dashed var(--accent);
   }
   .queuechip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
     font-size: 0.72rem;
-    padding: 0 0.3rem;
+    padding: 0 0.15rem;
     margin-right: 0.15rem;
     background: var(--panel-3);
     border: 1px solid var(--line);
     border-radius: 8px;
     opacity: 0.85;
+  }
+  .chipact {
+    font-size: 0.72rem;
+    padding: 0 0.15rem;
+    margin: 0;
+    background: none;
+    border: none;
+    opacity: 0.65;
+    cursor: pointer;
+  }
+  .chipact:hover {
+    opacity: 1;
+    color: var(--accent);
+  }
+  .queuenow {
+    border-color: var(--accent);
+    color: var(--accent-soft);
+    margin-right: 0.25rem;
   }
   .repeat {
     padding: 0 0.3rem;
@@ -1019,7 +1105,8 @@
     opacity: 1;
   }
   .queuechip:hover {
-    border-color: var(--bad);
+    opacity: 1;
+    border-color: var(--line-bright);
   }
   .movenote {
     font-size: 0.8rem;
