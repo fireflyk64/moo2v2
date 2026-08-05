@@ -807,7 +807,9 @@
     }
     return [...byOwner.values()].sort((a, b) => a.owner - b.owner);
   }
-  const markSize = (n: number) => 10 + Math.round(5 * Math.sqrt(n));
+  // sized to survive a zoomed-out reading: a lone scout is 21 map units,
+  // a big stack tops out around 40 (was 10 + 5√n — too easy to miss)
+  const markSize = (n: number) => 15 + Math.round(6 * Math.sqrt(n));
 
   const CLIMATE_COLORS: Record<string, string> = {
     gaia: '#5ee08a', terran: '#6cc862', arid: '#d8bb6a', swamp: '#7aa85a', ocean: '#4da3ff',
@@ -988,7 +990,7 @@
         <g transform="translate({t.x},{t.y}) rotate({t.angle})">
           <!-- in-flight ships wear the same player color as everything else;
                re-routable fleets keep the yellow fill as the affordance -->
-          <polygon points="18,0 -12,-11 -6,0 -12,11" class="fleetmark" class:reroutable={t.reroutable} style="fill:{t.reroutable ? '' : playerColor(me())}" />
+          <polygon points="24,0 -16,-14 -8,0 -16,14" class="fleetmark" class:reroutable={t.reroutable} style="fill:{t.reroutable ? '' : playerColor(me())}" />
         </g>
         <text x={t.x} y={t.y - 18} text-anchor="middle" class="eta" fill={playerColor(me())}>{t.name} · {t.eta}t</text>
       {/each}
@@ -997,6 +999,7 @@
         {@const kinds = monstersByStar.get(v.star.id)}
         {@const sv = STAR_VISUALS[v.star.color]}
         {@const scale = v.explored ? 1 : 0.82}
+        {@const settler = v.colonies.find((c) => !c.outpost)}
         <g
           class="star"
           data-testid="star-{v.star.id}"
@@ -1068,8 +1071,15 @@
           {#each v.colonies.filter((c) => !c.outpost) as c, i (c.id)}
             <circle r={22 + i * 5} fill="none" stroke={playerColor(c.owner)} stroke-width="3" opacity="0.9" />
           {/each}
+          <!-- outposts used to be invisible here: a thin dashed ring marks
+               "ours, but only a fuel stop" without claiming colony weight -->
+          {#each v.colonies.filter((c) => c.outpost) as c, i (c.id)}
+            <circle r={19 + i * 4} fill="none" stroke={playerColor(c.owner)} stroke-width="1.6" stroke-dasharray="5 6" opacity="0.85">
+              <title>outpost — fuel range only</title>
+            </circle>
+          {/each}
           {#each fleetMarks(v.ships) as fm, i (fm.owner)}
-            {@const y0 = -14 + i * 26}
+            {@const y0 = -18 + i * 32}
             {#if fm.mil > 0}
               {@const s = markSize(fm.mil)}
               <polygon
@@ -1086,7 +1096,7 @@
             {/if}
             {#if fm.civ > 0}
               {@const s = markSize(fm.civ)}
-              {@const yc = y0 + (fm.mil > 0 ? 16 : 0)}
+              {@const yc = y0 + (fm.mil > 0 ? markSize(fm.mil) + 3 : 0)}
               <polygon
                 points="20,{yc} {20 + s},{yc + s / 2} 20,{yc + s}"
                 fill="none"
@@ -1110,16 +1120,32 @@
           {#if blockadedStars.has(v.star.id)}
             <text x="-32" y="7" text-anchor="middle" class="blockade">⚓</text>
           {/if}
-          <text y="38" text-anchor="middle" class="label" class:dimlabel={!v.explored}>{v.star.name}</text>
+          <!-- settled systems wear their owner's color on the name itself:
+               the strongest zoomed-out signal for "whose space is this" -->
+          <text
+            y="38"
+            text-anchor="middle"
+            class="label"
+            class:dimlabel={!v.explored}
+            style:fill={settler ? playerColor(settler.owner) : undefined}
+          >{v.star.name}</text>
           {#if v.explored && v.planets.length}
             {@const bodies = v.planets.slice(0, 6)}
             {#each bodies as p, bi (p.id)}
               {@const bx = (bi - (bodies.length - 1) / 2) * 9}
               {#if p.body === 'planet'}
                 {@const col = v.colonies.find((c) => gs?.colonies.find((x) => x.id === c.id)?.planetId === p.id)}
-                <circle cx={bx} cy="50" r="2.4" fill={col ? playerColor(col.owner) : '#6a7288'}>
-                  <title>{p.climate} planet{col ? ` — ${col.name}` : ' (uncolonized)'}</title>
-                </circle>
+                <!-- settled worlds are SOLID owner-colored dots, open worlds
+                     are hollow rings: colonization state at a glance -->
+                {#if col}
+                  <circle cx={bx} cy="50" r="3.2" fill={playerColor(col.owner)} stroke="#05070f" stroke-width="0.8">
+                    <title>{p.climate} planet — {col.name}{col.outpost ? ' (outpost)' : ''}</title>
+                  </circle>
+                {:else}
+                  <circle cx={bx} cy="50" r="2.8" fill="none" stroke="#8a93ad" stroke-width="1.1">
+                    <title>{p.climate} planet (uncolonized)</title>
+                  </circle>
+                {/if}
               {:else}
                 <text x={bx} y="53" text-anchor="middle" class="bodyx"><title>{p.body === 'asteroids' ? 'asteroid belt' : 'gas giant'}</title>×</text>
               {/if}
