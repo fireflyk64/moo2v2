@@ -846,9 +846,10 @@
     }
     return [...byOwner.values()].sort((a, b) => a.owner - b.owner);
   }
-  // sized to survive a zoomed-out reading: a lone scout is 21 map units,
-  // a big stack tops out around 40 (was 10 + 5√n — too easy to miss)
-  const markSize = (n: number) => 15 + Math.round(6 * Math.sqrt(n));
+  // sized to survive a zoomed-out reading without crowding the star art:
+  // a lone scout is 17 map units, a big stack tops out around 32
+  // (10 + 5√n was too easy to miss, 15 + 6√n drowned the stars)
+  const markSize = (n: number) => 12 + Math.round(5 * Math.sqrt(n));
 
   const CLIMATE_COLORS: Record<string, string> = {
     gaia: '#5ee08a', terran: '#6cc862', arid: '#d8bb6a', swamp: '#7aa85a', ocean: '#4da3ff',
@@ -1029,7 +1030,7 @@
         <g transform="translate({t.x},{t.y}) rotate({t.angle})">
           <!-- in-flight ships wear the same player color as everything else;
                re-routable fleets keep the yellow fill as the affordance -->
-          <polygon points="24,0 -16,-14 -8,0 -16,14" class="fleetmark" class:reroutable={t.reroutable} style="fill:{t.reroutable ? '' : playerColor(me())}" />
+          <polygon points="20,0 -13,-12 -7,0 -13,12" class="fleetmark" class:reroutable={t.reroutable} style="fill:{t.reroutable ? '' : playerColor(me())}" />
         </g>
         <text x={t.x} y={t.y - 18} text-anchor="middle" class="eta" fill={playerColor(me())}>{t.name} · {t.eta}t</text>
       {/each}
@@ -1118,7 +1119,7 @@
             </circle>
           {/each}
           {#each fleetMarks(v.ships) as fm, i (fm.owner)}
-            {@const y0 = -18 + i * 32}
+            {@const y0 = -15 + i * 27}
             {#if fm.mil > 0}
               {@const s = markSize(fm.mil)}
               <polygon

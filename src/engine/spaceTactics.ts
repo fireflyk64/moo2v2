@@ -115,7 +115,10 @@ export const DOCTRINE_PROFILE: Record<Doctrine, DoctrineProfile> = {
     stageU: 0,
     commitTick: 0,
     strikeU: 34,
-    fireBand: 2,
+    // 0.31: hold fire until medium — the dive now closes at full burn
+    // (bow-on facing fix), so the long band is crossed in silence and the
+    // approach is paid for under the defender's guns, not traded away
+    fireBand: 1,
     span: 8,
     spin16: 16,
     holdsStation: false,
@@ -145,7 +148,10 @@ export const DOCTRINE_PROFILE: Record<Doctrine, DoctrineProfile> = {
     stageU: 0,
     commitTick: 0,
     strikeU: 186,
-    fireBand: 1,
+    // 0.31: the wall works the long band too — with divers closing at full
+    // burn the gauntlet must start farther out or a line never fires a
+    // meaningful shot before the brawl is on top of it
+    fireBand: 2,
     span: 6,
     spin16: 0,
     holdsStation: true,

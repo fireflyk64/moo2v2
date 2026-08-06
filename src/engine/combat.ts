@@ -334,6 +334,10 @@ interface Sim {
   mpMoved: number;
   /** 0.26: this tick's unspent movement, the budget jukes are paid out of */
   mpFree: number;
+  /** 0.31: actual displacement this tick (fixed point) — evasion is earned
+   * by motion ACROSS a shooter's line of fire, so the direction matters */
+  dxTick: number;
+  dyTick: number;
 }
 
 /** chance (%) that a structure hit knocks out a random ship system */
@@ -565,8 +569,23 @@ export const JUKE_ENVELOPED_PCT = 200;
  * medium band is the hardest. Guided munitions are unaffected — they steer
  * (that is what ECM is for). */
 export const EVASION_PER_MP = 4;
-/** ...capped here, so no drive makes a hull untouchable */
-export const EVASION_MAX = 30;
+/** ...capped here, so no drive makes a hull untouchable. 0.31: trimmed from
+ * 30 with the move to CROSSING-motion evasion — a knife-range orbit sits on
+ * the cap permanently under the new rule where the old scalar rule only
+ * brushed it, and 30 made the orbiting brawler untouchable in exactly the
+ * way this cap exists to forbid. */
+export const EVASION_MAX = 24;
+/** ...except a RAID (passthrough), which keeps the old ceiling: it is the
+ * one stance that spends every point of way on evasive running and never
+ * lingers, and "speed is the armor" is its entire offer. */
+export const RAID_EVASION_MAX = 30;
+/** 0.31 STEADY AIM: direct fire from a steady deck is this many to-hit
+ * points more accurate, decaying at EVASION_PER_MP per movement point the
+ * SHOOTER spent translating this tick. The mirror image of motion evasion,
+ * and the wall's answer to the run-and-gun brawl: the fleet that stands to
+ * its guns is the easiest thing on the field to hit AND the best shot on
+ * it. Guided munitions steer themselves and collect nothing. */
+export const STEADY_AIM_MAX = 10;
 /** 0.26 standoff hysteresis: a giving-ground fleet starts running when the
  * enemy comes inside its band and stops only once it has re-opened the band
  * by this much (field units) — without the gap it would spin on the line. */
@@ -715,6 +734,8 @@ export function runBattle(
     wingDone: false,
     mpMoved: 0,
     mpFree: 0,
+    dxTick: 0,
+    dyTick: 0,
     slews: init.weapons.some((w) => w.classId !== 3 && !w.mods.includes('pd') && (w.arc ?? 'F') !== '360'),
   }));
   // ECM: personal jammers, plus fleet-wide wide-area jammers
@@ -977,7 +998,10 @@ export function runBattle(
       const a = norm32(live.heading + DIRS / 2) + arcOffset(slot.i, slot.n, 4);
       const ax = ringX(live.x, prof.strikeU * FP, a);
       const ay = ringY(live.y, prof.strikeU * FP, a);
-      return clampAnchor(ax, ay, bowTo(ax, ay, live.x, live.y, bow));
+      // 0.31: the bow is judged from the DECK, not from the station (the
+      // 0.26.3 capital rule, now for everyone): a diver told to face
+      // "station -> prey" spent the whole approach nose-away from the fight
+      return clampAnchor(ax, ay, bowTo(s.x, s.y, live.x, live.y, bow));
     }
     // charge: ride the ship you are shooting at, at knife range and in its
     // BAFFLES — a charger's whole job is to live behind the thing it is
@@ -993,7 +1017,12 @@ export function runBattle(
       const a = rear + arcOffset(slot.si, slot.sn, 6) + weave;
       const ax = ringX(live.x, prof.standU * FP, a);
       const ay = ringY(live.y, prof.standU * FP, a);
-      return clampAnchor(ax, ay, bowTo(ax, ay, live.x, live.y, bow));
+      // 0.31: nose on the PREY from wherever the ship is. Facing the
+      // "station -> prey" bearing meant a charger diving in from the front
+      // was ordered to face BACKWARD (its station is behind the target), so
+      // it crawled the whole approach at the astern-course penalty, spinning;
+      // and once on station the weave dragged the bow with it every tick.
+      return clampAnchor(ax, ay, bowTo(s.x, s.y, live.x, live.y, bow));
     }
     // everyone else holds a station off the enemy mass: a crescent for the
     // walls (span degrees of arc around standDir), a closing ring for envelop
@@ -1030,10 +1059,26 @@ export function runBattle(
     // guns while they do it, which is why a standoff is a bet on your drives
     // and why it belongs to guided munitions and turrets in the first place.
     if (prof.giveGround && running[side]) {
-      const away = bowTo(E.x, E.y, ax, ay, bow);
-      return clampAnchor(ax, ay, norm32(away + (slot.si % 2 === 0 ? -8 : 8)));
+      // 0.31: the withdrawal ZIGZAGS. Evasion is earned by motion ACROSS the
+      // chaser's guns, and a dead-stern run has none — a fleet backing
+      // straight away is the easiest target on the field however fast it
+      // goes. Tacking ±2 steps every 8 ticks trades a little of the ground
+      // it gives for staying alive while it gives it, which is the whole
+      // point of a FIGHTING withdrawal.
+      const zig = ((tick >> 3) + slot.si) % 2 === 0 ? -2 : 2;
+      const zx = ringX(E.x, R, norm32(a + zig));
+      const zy = ringY(E.y, R, norm32(a + zig));
+      // abeam of the ship's OWN line of withdrawal (not its station's):
+      // the broadside stays on the pursuer even while the runner is still
+      // making for its slot
+      const away = bowTo(E.x, E.y, s.x, s.y, bow);
+      return clampAnchor(zx, zy, norm32(away + (slot.si % 2 === 0 ? -8 : 8)));
     }
-    return clampAnchor(ax, ay, bowTo(ax, ay, live ? live.x : E.x, live ? live.y : E.y, bow));
+    // 0.31: bow judged from the deck (see the charge branch): a ring slot on
+    // the far side of the enemy told its ship to face "far slot -> enemy" —
+    // the exact opposite of where the enemy stood from the ship, so an
+    // enveloping fleet spent the whole closing pointed off the field
+    return clampAnchor(ax, ay, bowTo(s.x, s.y, live ? live.x : E.x, live ? live.y : E.y, bow));
   };
   const anchorOf = (s: Sim, si: number, tick: number): { x: number; y: number; h: number } => {
     if (tactics) return tacticalAnchor(s, si, tick);
@@ -1380,9 +1425,32 @@ export function runBattle(
     if (slewing && s.slews) return 'slew';
     return null;
   };
-  /** to-hit penalty a target earns by actually moving this tick (0.26) */
-  const motionEvasion = (t: Sim): number =>
-    tactics ? Math.min(EVASION_MAX, roundDiv(t.mpMoved * EVASION_PER_MP, FP)) : 0;
+  /** to-hit penalty a target earns by actually moving this tick (0.26).
+   * 0.31: only motion ACROSS the shooter's line of fire counts — a ship
+   * boring straight down the gun line holds a constant bearing and is the
+   * easiest solution there is, however hot its drives. This is what makes a
+   * head-on charge eat its approach (the 0.26 rule charged it in crawl speed
+   * instead; with bows now properly on the enemy the dive is at full burn,
+   * so the gauntlet has to live in the gunnery, not the movement). Orbiting,
+   * weaving and fighting withdrawals keep their full evasion. */
+  const motionEvasion = (t: Sim, from: Sim): number => {
+    if (!tactics) return 0;
+    // a RAID is the carve-out: passthrough spends its whole allowance on
+    // evasive running (no jukes, no station-keeping, no shots it slows for),
+    // so every point of way it makes is evasive flying — the sub-tick
+    // corkscrew the 8-tick sim cannot draw. Everyone else earns evasion only
+    // for the crossing component the shooter actually has to lead.
+    if (t.stance === 'passthrough') return Math.min(RAID_EVASION_MAX, roundDiv(t.mpMoved * EVASION_PER_MP, FP));
+    const rx = t.x - from.x;
+    const ry = t.y - from.y;
+    const d = idist(Math.abs(rx), Math.abs(ry));
+    if (d === 0) return 0;
+    const cross = roundDiv(Math.abs(t.dxTick * ry - t.dyTick * rx), d);
+    return Math.min(EVASION_MAX, roundDiv(cross * EVASION_PER_MP, FP));
+  };
+  /** to-hit bonus for firing from a steady deck (0.31) — see STEADY_AIM_MAX */
+  const steadyAim = (s: Sim): number =>
+    tactics ? Math.max(0, STEADY_AIM_MAX - roundDiv(s.mpMoved * EVASION_PER_MP, FP)) : 0;
 
   let tick = 0;
   for (tick = 0; tick < MAX_TICKS; tick++) {
@@ -1455,9 +1523,61 @@ export function runBattle(
         if (tactics && !s.init.isBase && s.init.weapons.some((w) => w.classId === 0 || w.classId === 5)) {
           const fb = DOCTRINE_PROFILE[docs[s.init.side]].fireBand;
           const distTo = (i: number) => idist(Math.abs(sims[i]!.x - s.x), Math.abs(sims[i]!.y - s.y));
-          if (bandOf(distTo(s.targetIdx)) > fb) {
-            const alt = pickTarget(sims, s, (i) => bandOf(distTo(i)) <= fb);
-            if (alt >= 0 && bandOf(distTo(alt)) <= fb) s.targetIdx = alt;
+          // 0.31: OVERLAPPING FIELDS OF FIRE. "Allowed to shoot" is geometry
+          // as well as range: an all-forward-battery ship whose locked target
+          // is weaving through its baffles cannot work a single mount onto it
+          // (a juke reaches JUKE_MAX_OFF and no further), so holding that
+          // lock meant a wall ship died to its own orbiter without ever
+          // firing — while the NEXT ship over had a clean, steady-deck shot
+          // at that same orbiter and never took it. A gunner stuck like this
+          // switches to an enemy its guns genuinely reach, which is what
+          // makes a line of mutually supporting ships more than the sum of
+          // the ships: you dive into one ship's blind stern and stand in its
+          // neighbor's gunsight.
+          const fwdOnly = s.init.weapons.every(
+            (w) => (w.classId !== 0 && w.classId !== 5) || w.mods.includes('pd') || (w.arc ?? 'F') === 'F' || w.arc === 'FX',
+          );
+          const bearOff = (i: number) =>
+            Math.abs(headingDelta(s.heading, headingToward(sims[i]!.x - s.x, sims[i]!.y - s.y)));
+          const workable = (i: number) =>
+            bandOf(distTo(i)) <= fb && (!fwdOnly || distTo(i) <= PATTERN_MELEE || bearOff(i) <= JUKE_MAX_OFF);
+          if (!workable(s.targetIdx)) {
+            const alt = pickTarget(sims, s, workable);
+            if (alt >= 0 && workable(alt)) s.targetIdx = alt;
+          }
+          // 0.31: THE WALL CONCENTRATES ON BOARDERS-IN-THE-LINE. Against
+          // divers weaving at knife range every private duel is a losing
+          // exchange (the orbiter earns full crossing evasion and rear-arc
+          // damage, the stander earns steady aim), so a wall of six fighting
+          // six private duels dies without reply — but six steady decks on
+          // ONE diver at a time kill it before it collects. Only enemies
+          // that have actually gotten IN AMONG the wall (melee of any wall
+          // ship) draw the massed fire; at gun range the line keeps its
+          // ordered priority, so this is knife-defense, not a new targeting
+          // doctrine. The focus (nearest the wall's own mass) is a shared
+          // deterministic pick: the whole wall rolls its fire diver to diver.
+          if (docs[s.init.side] === 'line') {
+            let focus = -1;
+            let best = -1;
+            const own = cent[s.init.side]!;
+            for (let i = 0; i < sims.length; i++) {
+              const e = sims[i]!;
+              if (e.init.side === s.init.side || !active(e) || !workable(i)) continue;
+              const inAmong = sims.some(
+                (o) =>
+                  o.init.side === s.init.side &&
+                  active(o) &&
+                  !o.init.isBase &&
+                  idist(Math.abs(e.x - o.x), Math.abs(e.y - o.y)) <= PATTERN_MELEE,
+              );
+              if (!inAmong) continue;
+              const d = idist(Math.abs(e.x - own.x), Math.abs(e.y - own.y));
+              if (best < 0 || d < best) {
+                best = d;
+                focus = i;
+              }
+            }
+            if (focus >= 0) s.targetIdx = focus;
           }
         }
         continue;
@@ -1503,7 +1623,11 @@ export function runBattle(
       for (let si = 0; si < sims.length; si++) {
         const s = sims[si]!;
         if (!active(s)) continue;
+        const px = s.x;
+        const py = s.y;
         movePattern(s, si, tick);
+        s.dxTick = s.x - px;
+        s.dyTick = s.y - py;
       }
     }
     // --- movement (legacy): turn toward the desired course (hull turn rate),
@@ -1857,8 +1981,12 @@ export function runBattle(
           // nets speak at medium and short. Lumbering hulls and bases fire
           // from wherever they are; missiles/strike craft are never gated.
           // (0.26: lumbering hulls fly a doctrine too, so they keep its fire
-          // discipline; only bases shoot at whatever wanders into reach)
-          if (patterns && !s.init.isBase && (tactics || !lumber[si])) {
+          // discipline; only bases shoot at whatever wanders into reach.
+          // 0.31: ...and anyone may ANSWER a base from wherever THEY are —
+          // fire discipline shapes a fight against ships that maneuver, but
+          // holding fire while closing on a fortress that is already firing
+          // with a steady deck buys nothing and lost the approach outright.)
+          if (patterns && !s.init.isBase && (tactics || !lumber[si]) && !(tactics && t.init.isBase)) {
             const fireBand = tactics ? DOCTRINE_PROFILE[docs[s.init.side]].fireBand : DOCTRINE_FIRE_BAND[docs[s.init.side]]!;
             if (band > fireBand) continue;
           }
@@ -1898,7 +2026,7 @@ export function runBattle(
               let band2 = bandOf(d2);
               if (band2 > 0 && s.specials.has('rangemaster_target_unit')) band2 = (band2 - 1) as 0 | 1 | 2;
               let hitPct = clamp(
-                50 + attack - tt.init.beamDefense - motionEvasion(tt) + BAND_HIT[band2]! +
+                50 + attack + steadyAim(s) - tt.init.beamDefense - motionEvasion(tt, s) + BAND_HIT[band2]! +
                   (w.mods.includes('co') ? 25 : 0) + (w.mods.includes('af') ? -20 : 0),
                 5,
                 95,
