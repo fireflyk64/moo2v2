@@ -17,7 +17,7 @@ import { openBrowserStore } from '@storage/browser';
 import { generateSeed } from '@protocol/setup';
 import type { ActiveGame } from './net';
 
-function downloadBlob(name: string, blob: Blob): void {
+export function downloadBlob(name: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -93,6 +93,10 @@ export async function importSaveIntoRoom(
   roomCode: string,
   server: string,
   atTurn?: number,
+  /** which seat the loading machine plays (async mode; default 0 = host).
+   * Recorded as game.local_player_id — reconciliation later reads it to know
+   * whose script this save carries. */
+  asSeat = 0,
 ): Promise<LoadResult> {
   const { envelope, verified } = preview;
   let toImport = envelope;
@@ -110,7 +114,7 @@ export async function importSaveIntoRoom(
       ...toImport.game,
       room_code: roomCode,
       lobby_server: server,
-      local_player_id: 0, // loading machine becomes the host
+      local_player_id: asSeat, // loading machine's seat (0 = classic host load)
       status: 'active',
     },
   };

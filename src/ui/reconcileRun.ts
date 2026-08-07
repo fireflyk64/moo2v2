@@ -17,8 +17,8 @@ import type { SaveEnvelope } from '@storage/repo';
 import type { ReconcileStart } from '@storage/reconcile';
 import { freshOnionMemory, onionBattleOrders, onionTurn } from './onionBot';
 
-/** fight it out this many turns beyond the last scripted event */
-const AFTER_SCRIPT_TURNS = 80;
+/** safety slack past the scoring turn (the election decides AT endTurn) */
+const AFTER_END_SLACK = 5;
 
 export interface ReconcileRunResult {
   envelope: SaveEnvelope;
@@ -28,6 +28,7 @@ export interface ReconcileRunResult {
 export async function runReconciliation(
   start: ReconcileStart,
   onProgress?: (turn: number, cap: number) => void,
+  opts: { extraTurns?: number } = {},
 ): Promise<ReconcileRunResult> {
   const engine = createGameEngine();
   let state = engine.init(start.payload as never) as GameState;
@@ -51,7 +52,7 @@ export async function runReconciliation(
   };
 
   const memories = new Map(state.empires.map((e) => [e.id, freshOnionMemory()]));
-  const cap = start.lastScheduledTurn + AFTER_SCRIPT_TURNS;
+  const cap = start.endTurn + (opts.extraTurns ?? AFTER_END_SLACK);
 
   while (state.turn <= cap && state.winner === null) {
     // every living empire takes its planning turn (bots at every helm)

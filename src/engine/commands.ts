@@ -1759,10 +1759,12 @@ export function validateCommand(state: GameState, cmd: EngineCommand): string | 
       return 'battles are being resolved; only battle orders are accepted';
     }
     // reconciliation: colonies and population follow the recorded script —
-    // the settle/migration commands are the script's job, never a player's
+    // the settle/migration commands are the script's job, never a player's.
+    // build_outpost stays OPEN: engine-granted outpost ships re-anchor fuel
+    // range across razed territory (a scheduled claim evicts the outpost).
     if (
       state.reconcile !== undefined &&
-      ['colonize', 'build_outpost', 'construct_planet', 'move_colonists', 'load_transports', 'unload_transports'].includes(cmd.kind)
+      ['colonize', 'construct_planet', 'move_colonists', 'load_transports', 'unload_transports'].includes(cmd.kind)
     ) {
       return 'reconciliation: colonies and population follow the recorded script';
     }

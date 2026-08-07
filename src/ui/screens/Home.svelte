@@ -5,14 +5,20 @@
   import { PLAYER_COLORS } from '../colors';
   import { DEFAULT_SERVER, enterRoom, enterSoloGame, type SoloBotSpec } from '../net';
   import { enterPbmGame, pbmToken } from '../pbm';
-  import { describeSaveError, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
+  import { describeSaveError, downloadBlob, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
   import { buildReplay, setCurrentReplay } from '../replay';
+  import { enterAsyncGame } from '../net';
+  import { runReconciliation } from '../reconcileRun';
+  import { buildReconciliationStart } from '@storage/reconcile';
+  import { encodeSaveFile, verifySaveEnvelope, type SaveEnvelope } from '@storage/index';
   import { app, bindActive } from '../state.svelte';
   import { BRAND } from '../brand';
   import { THEMES, applyTheme, currentTheme } from '../themes';
   import { musicEnabled, toggleMusic } from '../music';
+  import ManualDialog from '../components/ManualDialog.svelte';
 
   let themeId = $state(currentTheme());
+  let manualOpen = $state(false);
   let musicOn = $state(musicEnabled());
 
   const q = new URLSearchParams(location.search);
@@ -129,6 +135,7 @@
     try {
       preview = await previewSave(new Uint8Array(await file.arrayBuffer()));
       resumeTurn = 'latest';
+      asyncSeat = preview.envelope.game.local_player_id ?? preview.envelope.players[0]?.player_id ?? 0;
       loadNote = '';
     } catch (e) {
       loadNote = '';
@@ -152,6 +159,113 @@
       loadNote = '';
       app.error = describeSaveError(e);
     }
+  }
+
+  // ---- async mode: resume the shared save solo, bots on every other seat ----
+  let asyncSeat = $state(0);
+  async function playAsync() {
+    if (!preview) return;
+    const env = preview.envelope;
+    const seatName = env.players.find((p) => p.player_id === asyncSeat)?.name;
+    if (!seatName) {
+      app.error = 'pick which empire you play';
+      return;
+    }
+    app.error = '';
+    loadNote = 'importing async save…';
+    try {
+      const codeAsync = 'ASY' + env.game.game_id.replace(/[^a-zA-Z0-9]/g, '').slice(-5).toUpperCase();
+      const at = resumeTurn === 'latest' ? undefined : resumeTurn;
+      await importSaveIntoRoom(preview, codeAsync, 'local', at, asyncSeat);
+      const others = env.players.filter((p) => p.player_id !== asyncSeat).map((p) => p.name);
+      const active = await enterAsyncGame(codeAsync, seatName, others);
+      preview = null;
+      loadNote = '';
+      bindActive(active);
+    } catch (e) {
+      loadNote = '';
+      app.error = describeSaveError(e);
+    }
+  }
+
+  // ---- reconciliation: merge everyone's async saves into what really happened ----
+  interface ReconRow {
+    file: string;
+    seat: number;
+    seatName: string;
+    turn: number;
+    preview: SavePreview;
+  }
+  let reconRows = $state<ReconRow[]>([]);
+  let reconNote = $state('');
+  let reconWarnings = $state<string[]>([]);
+  let reconEnvelope = $state<SaveEnvelope | null>(null);
+  let reconFileInput: HTMLInputElement;
+
+  async function onReconFiles(ev: Event) {
+    const input = ev.target as HTMLInputElement;
+    const files = [...(input.files ?? [])];
+    input.value = '';
+    app.error = '';
+    for (const f of files) {
+      try {
+        const p = await previewSave(new Uint8Array(await f.arrayBuffer()));
+        const seat = p.envelope.game.local_player_id;
+        const seatName = p.envelope.players.find((x) => x.player_id === seat)?.name ?? `#${seat}`;
+        reconRows = [...reconRows.filter((r) => r.seat !== seat), { file: f.name, seat, seatName, turn: p.verified.turn, preview: p }].sort((a, b) => a.seat - b.seat);
+      } catch (e) {
+        app.error = describeSaveError(e);
+      }
+    }
+  }
+
+  async function reconcileNow() {
+    if (!reconRows.length) return;
+    app.error = '';
+    reconEnvelope = null;
+    try {
+      reconNote = 'building the shared base…';
+      await new Promise((r) => setTimeout(r, 0));
+      const start = buildReconciliationStart(reconRows.map((r) => ({ envelope: r.preview.envelope, seat: r.seat })));
+      reconWarnings = start.warnings;
+      const res = await runReconciliation(start, (turn, cap) => {
+        reconNote = `⚖ reconciling… turn ${turn} / ~${cap}`;
+      });
+      reconEnvelope = res.envelope;
+      const w = res.finalState.winner;
+      reconNote =
+        `done at turn ${res.finalState.turn}` +
+        (w !== null
+          ? ` — ${res.envelope.players.find((p) => p.player_id === w)?.name ?? w} wins (${res.finalState.winType})`
+          : ' — undecided when the scripts ran dry');
+    } catch (e) {
+      reconNote = '';
+      app.error = describeSaveError(e);
+    }
+  }
+
+  async function watchReconciliation() {
+    if (!reconEnvelope) return;
+    reconNote = 'rebuilding history…';
+    try {
+      const verified = verifySaveEnvelope(reconEnvelope);
+      const data = await buildReplay(
+        { envelope: reconEnvelope, verified, players: reconEnvelope.players.map((p) => p.name), resumeTurns: [] },
+        (pct) => (reconNote = `rebuilding history… ${pct}%`),
+      );
+      setCurrentReplay(data);
+      reconNote = '';
+      app.screen = 'replay';
+    } catch (e) {
+      reconNote = '';
+      app.error = describeSaveError(e);
+    }
+  }
+
+  async function downloadReconciliation() {
+    if (!reconEnvelope) return;
+    const bytes = await encodeSaveFile(reconEnvelope);
+    downloadBlob(`moo2v2-reconciliation-turn${reconEnvelope.game.last_turn}.moo2save`, new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
   }
 
   async function loadPreviewed() {
@@ -288,6 +402,18 @@
         </button>
         <button onclick={() => (preview = null)}>Cancel</button>
       </span>
+      <span title="everyone loads the SAME shared save and plays their own empire solo — onion bots stand in for the other players. Save when you're done; the reconciliation below merges everyone's files into what really happened.">
+        ⏳ Async:
+        <label>
+          play as
+          <select data-testid="async-seat" bind:value={asyncSeat}>
+            {#each preview.envelope.players as p (p.player_id)}
+              <option value={p.player_id}>{p.name}</option>
+            {/each}
+          </select>
+        </label>
+        <button data-testid="play-async" onclick={playAsync} disabled={app.connecting}>⏳ Play async (bots stand in)</button>
+      </span>
       <p class="dim">
         Players joining the room get their old empire back by using the same name they played under
         ({preview.players.join(', ')}); in-game 🤖 controls let a bot stand in for anyone missing.
@@ -314,10 +440,43 @@
       PBM game also resumes normally, so a game can move between play-by-mail and live play freely.
     </p>
   </details>
+  <details class="pbmbox">
+    <summary>⚖ Reconciliation (merge async saves)</summary>
+    <p class="dim">
+      Everyone played the same save solo (⏳ async) — load ALL the resulting save files here. Each
+      empire's recorded production (tech, ships, colonies, population, buildings, garrisons, spies)
+      replays on one shared timeline under board-game rules while bots fight the fleets toward the
+      goal ({'{'}core worlds or domination{'}'}). Deterministic: the same files give every player the
+      identical outcome. A missing player's empire fights on as a plain CPU from the shared base.
+    </p>
+    <button data-testid="recon-add" onclick={() => reconFileInput.click()}>＋ Add save files…</button>
+    <input bind:this={reconFileInput} type="file" multiple accept=".moo2save,.json,application/octet-stream" style="display:none" data-testid="recon-files" onchange={onReconFiles} />
+    {#each reconRows as r (r.seat)}
+      <p class="dim" data-testid="recon-row-{r.seat}">
+        📄 {r.file} — <b>{r.seatName}</b> (seat {r.seat}), turn {r.turn}
+        <button onclick={() => (reconRows = reconRows.filter((x) => x.seat !== r.seat))}>✕</button>
+      </p>
+    {/each}
+    {#each reconWarnings as w, i (i)}
+      <p class="warnline" data-testid="recon-warning">⚠ {w}</p>
+    {/each}
+    <button data-testid="recon-run" onclick={reconcileNow} disabled={!reconRows.length || app.connecting}>⚖ Reconcile</button>
+    {#if reconNote}<p class="dim" data-testid="recon-note">{reconNote}</p>{/if}
+    {#if reconEnvelope}
+      <span>
+        <button data-testid="recon-watch" onclick={watchReconciliation}>🎬 Watch what really happened</button>
+        <button data-testid="recon-download" onclick={downloadReconciliation}>💾 Download reconciliation save</button>
+      </span>
+    {/if}
+  </details>
   {#if loadNote}<p class="dim" data-testid="load-note">{loadNote}</p>{/if}
   {#if app.error}<p class="error" data-testid="error">{app.error}</p>{/if}
 </div>
-<p class="labline"><a href="#battle-lab">⚗ Battle Lab</a> — build fleets for both sides and watch them fight (balance sandbox)</p>
+<p class="labline">
+  <a href="#battle-lab">⚗ Battle Lab</a> — build fleets for both sides and watch them fight (balance sandbox)
+  · <button class="manualbtn" data-testid="open-manual" onclick={() => (manualOpen = true)}>📖 Manual — how every mode works</button>
+</p>
+{#if manualOpen}<ManualDialog onclose={() => (manualOpen = false)} />{/if}
 <label class="themerow" title="cosmetic only — switch any time here or on the Empires screen; game colors (players, stars, planets) never change">
   🎨 UI theme
   <select data-testid="ui-theme" bind:value={themeId} onchange={() => applyTheme(themeId)}>

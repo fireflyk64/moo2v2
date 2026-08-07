@@ -9,6 +9,7 @@ import {
   groundModifiers,
   pickGroundAttack,
   pickGroundDefense,
+  TERRAIN_INFO,
   terrainFractions,
   TERRAIN_H,
   TERRAIN_W,
@@ -237,5 +238,32 @@ describe('set_ground_tactic command', () => {
     expect(validateCommand(state, cmd(1, { colonyId: colony.id, tactic: 'fortress' }))).toMatch(/not your colony/);
     expect(validateCommand(state, cmd(0, { colonyId: colony.id, tactic: 'banzai' }))).toMatch(/unknown doctrine/);
     expect(validateCommand(state, cmd(0, { colonyId: 999999, tactic: 'fortress' }))).toMatch(/no colony/);
+  });
+});
+
+describe('terraformed worlds fight back (0.32.0)', () => {
+  const avgDefBonus = (climate: string): number => {
+    let sum = 0;
+    const N = 120;
+    for (let id = 1; id <= N; id++) {
+      const frac = terrainFractions(generateTerrain(id * 31 + 5, climate));
+      for (const [ch, share] of Object.entries(frac)) sum += (TERRAIN_INFO[ch]?.defBonus ?? 0) * share;
+    }
+    return sum / N;
+  };
+
+  it('the terraform ladder lays down defender-friendly ground', () => {
+    const gaia = avgDefBonus('gaia');
+    const terran = avgDefBonus('terran');
+    const ocean = avgDefBonus('ocean');
+    const swamp = avgDefBonus('swamp');
+    const arid = avgDefBonus('arid');
+    // richer biospheres carry more cover than the dry mid-tier world
+    expect(gaia).toBeGreaterThan(arid);
+    expect(terran).toBeGreaterThan(arid);
+    expect(ocean).toBeGreaterThan(arid);
+    expect(swamp).toBeGreaterThan(arid);
+    // and the top of the ladder is the hardest garden to storm
+    expect(gaia).toBeGreaterThan(terran);
   });
 });

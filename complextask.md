@@ -22,7 +22,7 @@ You have 4 major tasks.
   player color to instantly view from that player's vision (there should be a
   list of banners that can be clicked in tihs mode)
 
-- [ ]  Last task and most complicated is that an asycnhronous version of the game
+- [x]  Last task and most complicated is that an asycnhronous version of the game
   should be available. In this mode a player can select a save game file to
   resume and select async mode (it could even be before contact). Everyone
   will select the same save file in async mode. In async mode it plays as a
@@ -68,4 +68,22 @@ You have 4 major tasks.
   structures cna determinne if invasions are successful and space battles are.  
   Remember that we only record production values (eg deltas) every time a new   
   ship is created or a new population is created.
-  
+
+- [x] Detailed manual button that shows a manual showing how all the game modes work at setup and start screens (eg victory stars, the async mode) and exactly how the board game mechanics work with planet production being shifted when colonies are lost and AIs controlling the fleet
+
+- [x] change to the ground combat system so that worlds with more terraforming level (eg swamp, ocean, terran, gaia) also tend to have more defender-friendly terrain tiles to make it harder to invade from the ground combat map generation perspective
+
+- [x] Ensure the reconciliation simulation is always the same no matter which player runs it or what order the saves are presented to the system. Clearly gettinginto this mode requires multiple save files. Missing save files are treated as simple CPU players from the lowest of the save game (but warning)
+
+- [x] It's possible that bot-controlled players will not be able to reach each other at the end because fleets can destroy colonies but they may not have colony ships to make fresh colonies. In addition to scheduled production, the strongest industrial world can crank out outpost ships based on recorded production population to setup outposts on destroyed territories. That being the only production path I believe allows ships to travel around. Now if colonies have too strong a shield that could lead to a draw situation. Note that colonization events that happen where outpost ships exist "win" and remove the outpost if that happens.
+
+- [x] The game is scored once the save games run out of turns (min turn of submitted savegames). At that point population that is remaining elects a leader. 
+
+- [x] commit what we have
+
+- [x] Imagine some of the shortcomings of the reconciliation mode -- are there strategies that are ruled out? Please fix those
+
+- [ ] Commit
+
+- [ ] Can you please have the extant bots each play out a game with different personalities then combine them using the reconciliation mode and see if the best performing player really did win if not, figure out what happened and make a rpeort about it.
+

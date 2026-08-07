@@ -34,8 +34,12 @@ export interface ReconcileStart {
   baseTurn: number;
   players: Array<{ id: number; name: string; raceJson: string | null }>;
   settings: GameState['settings'];
-  /** highest scheduled turn across all scripts (run at least this far) */
+  /** highest scheduled turn across all scripts */
   lastScheduledTurn: number;
+  /** the scoring turn: min last-turn across the submitted saves */
+  endTurn: number;
+  /** e.g. players whose save is missing — they play as plain CPUs off the base */
+  warnings: string[];
 }
 
 function foldLog(envelope: SaveEnvelope, upToIndex?: number): GameState {
@@ -77,7 +81,7 @@ interface EmpireSnapshot {
   fields: Set<number>;
   shipIds: Set<number>;
   /** planetId -> owned colony summary */
-  colonies: Map<number, { units: number; buildings: Set<string>; marines: number; outpost: boolean }>;
+  colonies: Map<number, { units: number; buildings: Set<string>; marines: number; outpost: boolean; climate: string; steps: number }>;
   /** every planet that held ANY colony (to tell conquest from colonization) */
   settledPlanets: Set<number>;
   spies: number;
@@ -85,15 +89,25 @@ interface EmpireSnapshot {
 
 function snapshotEmpire(state: GameState, empireId: number): EmpireSnapshot {
   const empire = state.empires.find((e) => e.id === empireId);
-  const colonies = new Map<number, { units: number; buildings: Set<string>; marines: number; outpost: boolean }>();
+  const colonies = new Map<number, { units: number; buildings: Set<string>; marines: number; outpost: boolean; climate: string; steps: number }>();
   const settledPlanets = new Set<number>();
   for (const c of state.colonies) {
     settledPlanets.add(c.planetId);
     if (c.owner !== empireId) continue;
-    // only the player's own race counts toward the recorded pop script —
-    // natives, androids and captured aliens are not "production"
-    const units = c.groups.filter((g) => g.race === empireId).reduce((n, g) => n + Math.floor(g.popK / 1000), 0);
-    colonies.set(c.planetId, { units, buildings: new Set(c.buildings), marines: c.marines ?? 0, outpost: c.outpost });
+    // the player's own race AND their built androids count toward the pop
+    // script — natives and captured aliens are combat/discovery, not production
+    const units = c.groups
+      .filter((g) => g.race === empireId || g.race === -2)
+      .reduce((n, g) => n + Math.floor(g.popK / 1000), 0);
+    const planet = state.planets.find((p) => p.id === c.planetId);
+    colonies.set(c.planetId, {
+      units,
+      buildings: new Set(c.buildings),
+      marines: c.marines ?? 0,
+      outpost: c.outpost,
+      climate: planet?.climate ?? 'barren',
+      steps: planet?.terraformSteps ?? 0,
+    });
   }
   return {
     apps: new Set(empire?.knownApps ?? []),
@@ -159,6 +173,9 @@ export function harvestSchedule(envelope: SaveEnvelope, seat: number, basePrefix
       if (dUnits > 0) sched.pop.push({ turn, planetId, units: dUnits });
       for (const b of col.buildings) if (!before.buildings.has(b)) sched.buildings.push({ turn, planetId, building: b });
       if (col.marines !== before.marines) sched.marines.push({ turn, planetId, count: col.marines });
+      if (col.climate !== before.climate || col.steps !== before.steps) {
+        (sched.terraform ??= []).push({ turn, planetId, climate: col.climate as never, steps: col.steps });
+      }
     }
     if (now.spies !== prev.spies) sched.spies.push({ turn, count: now.spies });
     prev = now;
@@ -167,8 +184,13 @@ export function harvestSchedule(envelope: SaveEnvelope, seat: number, basePrefix
   return sched;
 }
 
-/** assemble the reconciliation game_start from the loaded saves */
-export function buildReconciliationStart(inputs: ReconcileInput[]): ReconcileStart {
+/** assemble the reconciliation game_start from the loaded saves.
+ * Deterministic and ORDER-INDEPENDENT: the same set of saves produces the
+ * identical start (same seed, same scripts) for every player who runs it,
+ * however the files were presented. Players whose save is missing take part
+ * as plain CPU empires from the shared base (with a warning). */
+export function buildReconciliationStart(inputsIn: ReconcileInput[]): ReconcileStart {
+  const inputs = [...inputsIn].sort((a, b) => a.seat - b.seat);
   if (!inputs.length) throw new SaveFileError('structure', 'reconciliation needs at least one save');
   const seats = new Set<number>();
   for (const inp of inputs) {
@@ -192,7 +214,8 @@ export function buildReconciliationStart(inputs: ReconcileInput[]): ReconcileSta
   const schedules = inputs
     .map((inp) => harvestSchedule(inp.envelope, inp.seat, prefix))
     .sort((a, b) => a.empireId - b.empireId);
-  const reconcile: ReconcileState = { schedules, usedClaims: [] };
+  const endTurn = Math.min(...inputs.map((i) => i.envelope.game.last_turn));
+  const reconcile: ReconcileState = { schedules, usedClaims: [], endTurn };
   const baseWithScripts: GameState = { ...base, phase: 'planning', pendingBattles: [], reconcile };
 
   // deterministic seed: everyone who reconciles the same saves sees the SAME
@@ -207,6 +230,14 @@ export function buildReconciliationStart(inputs: ReconcileInput[]): ReconcileSta
   const players = inputs[0]!.envelope.players
     .map((p) => ({ id: p.player_id, name: p.name, raceJson: p.race_json }))
     .sort((a, b) => a.id - b.id);
+  const warnings = players
+    .filter((p) => !seats.has(p.id) && base.empires.some((e) => e.id === p.id && !e.eliminated))
+    .map((p) => `${p.name} has no save file — that empire plays as a plain CPU from the shared base (no recorded production)`);
+  // scoring ends at the SHORTEST save: a much longer game loses its tail
+  const maxTurn = Math.max(...inputs.map((i) => i.envelope.game.last_turn));
+  if (maxTurn > endTurn + 10) {
+    warnings.push(`the saves end at different turns — scoring stops at turn ${endTurn} (the shortest save); recorded turns beyond that are ignored`);
+  }
 
   const lastScheduledTurn = schedules.reduce((n, s) => {
     const turns = [
@@ -232,5 +263,7 @@ export function buildReconciliationStart(inputs: ReconcileInput[]): ReconcileSta
     players,
     settings: base.settings,
     lastScheduledTurn,
+    endTurn,
+    warnings,
   };
 }

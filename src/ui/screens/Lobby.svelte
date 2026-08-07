@@ -3,8 +3,10 @@
   import type { GameSettings } from '@protocol/messages';
   import { app, getActive } from '../state.svelte';
   import { PLAYER_COLORS } from '../colors';
+  import ManualDialog from '../components/ManualDialog.svelte';
 
   let ready = $state(false);
+  let manualOpen = $state(false);
   let presetId = $state('solari');
   let custom = $state(false);
   let customPicks = $state<string[]>(['dictatorship']);
@@ -272,7 +274,8 @@
 
 {#if settings && selfId === 0}
   <fieldset class="modes">
-    <legend>Game setup (host)</legend>
+    <legend>Game setup (host) <button class="manualbtn" data-testid="open-manual" onclick={() => (manualOpen = true)}>📖 Manual</button></legend>
+    {#if manualOpen}<ManualDialog onclose={() => (manualOpen = false)} />{/if}
     <button
       class="preset"
       data-testid="quick-game-preset"
@@ -444,6 +447,10 @@
     </label>
   </fieldset>
 {:else if settings}
+  {#if manualOpen}<ManualDialog onclose={() => (manualOpen = false)} />{/if}
+  <p class="dim">
+    <button class="manualbtn" data-testid="open-manual-guest" onclick={() => (manualOpen = true)}>📖 Manual — how every mode works</button>
+  </p>
   <p class="dim" data-testid="settings-view">
     {settings.galaxySize} galaxy, {settings.startMode} start —
     {MODE_HELP.filter((m) => settings.modes[m.key]).map((m) => m.label).join(', ') || 'no optional modes'}{(settings.coreWorlds ?? 'off') !== 'off' ? ` — 🟢 CORE WORLDS (${settings.coreWorlds})` : ''}{(settings.realtimeTurnSeconds ?? 0) > 0 ? ` — ⏱ REALTIME ${settings.realtimeTurnSeconds}s turns` : (settings.autoTurnSeconds ?? 0) > 0 ? ` — auto-turn ${settings.autoTurnSeconds}s after all but one commit` : ''}{(settings.pickPoints ?? 10) !== 10 ? ` — ${settings.pickPoints} pick points` : ''}

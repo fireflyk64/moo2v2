@@ -18,7 +18,7 @@ import { ceilDiv } from './imath';
 import { applyTerraformStep, constructAsBarren, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
 import { androidUnitsOf, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, foodLogistics, groupGrowthK, MARINES_PER_TRANSPORT, marinesOf, maxPopulation, organicUnitsOf, traitsOf } from './economy';
 import { applyFoundingSpecials, normalizeJobsForGroup } from './commands';
-import { applyReconcileSchedules, reconcileActive, reconcileEspionage } from './reconcile';
+import { applyReconcileSchedules, reconcileActive, reconcileEspionage, reconcileFinalScoring } from './reconcile';
 import { rngFor } from './rng';
 import { applyResearch, appPickableBy, availableFields, grantApp } from './research';
 import { applicationsOfField } from './data/index';
@@ -116,6 +116,7 @@ function finishTurn(state: GameState, events: TurnEvent[], foughtAt: ReadonlySet
     reconcileEspionage(state, events);
     s11_defaultDesignRefresh(state, events);
     s12_victory(state, events);
+    reconcileFinalScoring(state, events); // scripts ran dry: population elects
     s13_endTurn(state);
     return;
   }

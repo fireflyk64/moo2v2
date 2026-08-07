@@ -131,8 +131,19 @@ function foundScripted(
   return colony;
 }
 
+function applyTerraform(state: GameState, planetId: number, climate: GameState['planets'][number]['climate'], steps: number): void {
+  const planet = state.planets.find((p) => p.id === planetId);
+  if (!planet || planet.body !== 'planet') return;
+  planet.climate = climate;
+  planet.terraformSteps = steps;
+}
+
 /** catch a late-activated claim up on its recorded history through `turn` */
 function catchUp(state: GameState, empire: Empire, colony: Colony, sched: ReconcileSchedule, fromTurn: number, turn: number): void {
+  // terraforming first: the climate sets the capacity the pop catch-up fills
+  for (const t of sched.terraform ?? []) {
+    if (t.planetId === colony.planetId && t.turn >= fromTurn && t.turn <= turn) applyTerraform(state, t.planetId, t.climate, t.steps);
+  }
   for (const b of sched.buildings) {
     if (b.planetId === colony.planetId && b.turn >= fromTurn && b.turn <= turn) addBuilding(colony, b.building);
   }
@@ -170,7 +181,10 @@ export function applyReconcileSchedules(state: GameState, events: TurnEvent[]): 
     }
   }
   for (const [planetId, claims] of [...pendingByPlanet.entries()].sort((a, b) => a[0] - b[0])) {
-    if (state.colonies.some((c) => c.planetId === planetId)) continue; // held — claims stay on hold
+    const standing = state.colonies.find((c) => c.planetId === planetId);
+    if (standing && !standing.outpost) continue; // held — claims stay on hold
+    // a colonization claim beats a squatting outpost: the dome is packed up
+    if (standing) state.colonies = state.colonies.filter((c) => c !== standing);
     claims.sort((a, b) => a.turn - b.turn || a.empireId - b.empireId);
     const claim = claims[0]!;
     const empire = empireOf.get(claim.empireId)!;
@@ -200,8 +214,13 @@ export function applyReconcileSchedules(state: GameState, events: TurnEvent[]): 
       }
     }
 
-    // ---- r3/r4/r5: scripted growth, construction, garrisons — only while the
-    // recorded owner actually holds the world (zeroed/lost colonies get nothing) ----
+    // ---- r3/r4/r5: scripted terraforming, growth, construction, garrisons —
+    // only while the recorded owner actually holds the world (zeroed/lost
+    // colonies get nothing; an applied terraform is permanent) ----
+    for (const t of sched.terraform ?? []) {
+      if (t.turn !== turn) continue;
+      if (ownedColonyOn(state, empire.id, t.planetId)) applyTerraform(state, t.planetId, t.climate, t.steps);
+    }
     for (const p of sched.pop) {
       if (p.turn !== turn) continue;
       const colony = ownedColonyOn(state, empire.id, p.planetId);
@@ -289,7 +308,55 @@ export function applyReconcileSchedules(state: GameState, events: TurnEvent[]): 
       events.push({ visibleTo: -1, kind: 'reconcile_ship', payload: { empireId: empire.id, starId: spawnStar, kind: entry.kind } });
     }
   }
+  // ---- r7: reach insurance — wars can burn colonies faster than any script
+  // replaces them, cutting the survivors off from each other. Every 5th turn
+  // each living empire's strongest industrial world cranks out an outpost
+  // ship (if it has none), so bots can re-anchor fuel range across razed
+  // territory. Scheduled colonization landing on such an outpost evicts it.
+  if (turn % 5 === 0) {
+    for (const empire of living) {
+      const hasOutpostShip = state.ships.some((s) => s.owner === empire.id && s.shipKind === 'outpost_ship');
+      if (hasOutpostShip) continue;
+      const yard = state.colonies
+        .filter((c) => c.owner === empire.id && !c.outpost)
+        .sort((a, b) => {
+          const pa = a.groups.reduce((n, g) => n + g.popK, 0);
+          const pb = b.groups.reduce((n, g) => n + g.popK, 0);
+          return pb - pa || a.id - b.id;
+        })[0];
+      if (!yard) continue;
+      const planet = state.planets.find((p) => p.id === yard.planetId)!;
+      state.ships.push({
+        id: allocId(state, empire.id),
+        owner: empire.id,
+        shipKind: 'outpost_ship',
+        designId: null,
+        location: { kind: 'star', starId: planet.starId },
+        cargoPopUnits: 0,
+        cargoRace: empire.id,
+        dmgStructure: 0,
+        dmgArmor: 0,
+      });
+    }
+  }
   state.ships.sort((a, b) => a.id - b.id);
+}
+
+/** Scoring: the reconciliation is decided once the save games run out of
+ * turns (ReconcileState.endTurn = min last-turn across the submitted saves).
+ * If nobody has won outright by then, the population that remains elects a
+ * leader — the biggest empire by people takes a council-style victory. */
+export function reconcileFinalScoring(state: GameState, events: TurnEvent[]): void {
+  const endTurn = state.reconcile?.endTurn;
+  if (endTurn === undefined || state.turn < endTurn || state.winner !== null) return;
+  const living = state.empires.filter((e) => !e.eliminated);
+  if (!living.length) return;
+  const popOf = (id: number) =>
+    state.colonies.filter((c) => c.owner === id).reduce((n, c) => n + c.groups.reduce((m, g) => m + g.popK, 0), 0);
+  const leader = living.sort((a, b) => popOf(b.id) - popOf(a.id) || a.id - b.id)[0]!;
+  state.winner = leader.id;
+  state.winType = 'council';
+  events.push({ visibleTo: -1, kind: 'victory', payload: { empireId: leader.id, type: 'council', reconciled: true } });
 }
 
 /** reconciliation espionage: auto-targeted rings, passive-tech theft only,

@@ -442,6 +442,9 @@ export interface ReconcileSchedule {
   buildings: Array<{ turn: number; planetId: number; building: string }>;
   /** trained garrison recorded at each change */
   marines: Array<{ turn: number; planetId: number; count: number }>;
+  /** terraforming milestones: the world's climate as the player's own game
+   * changed it (applied while they hold the world; permanent once applied) */
+  terraform?: Array<{ turn: number; planetId: number; climate: Climate; steps: number }>;
   /** empire-wide spy roster recorded at each change */
   spies: Array<{ turn: number; count: number }>;
 }
@@ -451,6 +454,10 @@ export interface ReconcileState {
   schedules: ReconcileSchedule[];
   /** consumed one-shot colonization claims (sorted by planetId, empireId) */
   usedClaims: Array<{ planetId: number; empireId: number }>;
+  /** the scoring turn: min last-turn across the submitted saves. When it is
+   * reached with no winner, the remaining population elects a leader
+   * (population-weighted council-style victory). Absent = no scoring turn. */
+  endTurn?: number;
 }
 
 export interface PopTransit {

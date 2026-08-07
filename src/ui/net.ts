@@ -367,6 +367,71 @@ export async function enterSoloGame(
   };
 }
 
+/** ASYNC MODE: resume an imported multiplayer save single-player — the human
+ * takes ONE saved seat (by that seat's original name), onion stand-ins play
+ * every other saved empire. The imported game must already sit in the room's
+ * database (importSaveIntoRoom with the chosen seat), so this entry only
+ * hosts the resume over a MemoryHub and seats the bots by name. Play as many
+ * turns as you like, then 💾 save: the file records your seat
+ * (local_player_id) and later feeds reconciliation. */
+export async function enterAsyncGame(
+  roomCode: string,
+  seatName: string,
+  otherSeatNames: string[],
+): Promise<ActiveGame> {
+  const playerCount = 1 + otherSeatNames.length;
+  const params: RoomParams = { server: 'local', code: roomCode, name: seatName, playerCount };
+  const hub = new MemoryHub(playerCount);
+  const hostTransport = hub.join();
+
+  const { store, sqlocal, memoryOnly } = await openRoomStore(params.code);
+  const identity = {
+    name: seatName, // name-matched into the saved empire's seat on resume
+    engineVersion: ENGINE_VERSION,
+    dataVersion: DATA_VERSION,
+    roomCode: params.code,
+    lobbyServer: params.server,
+  };
+  const resume = await loadResume(store, params.code, createGameEngine() as unknown as EngineAdapter<GameState>);
+  if (!resume || !resume.log.length) {
+    await store.destroy().catch(() => undefined);
+    throw new Error('no imported game to resume in this room — load the shared save first');
+  }
+
+  const hosted = createHostedGame<GameState>({
+    transport: hostTransport,
+    engine: createGameEngine() as unknown as EngineAdapter<GameState>,
+    hostEngine: createGameEngine() as unknown as EngineAdapter<GameState>,
+    branchEngine: createGameEngine() as unknown as EngineAdapter<GameState>,
+    store,
+    settings: { ...DEFAULT_SETTINGS, playerCount },
+    identity,
+    resume: { gameId: resume.gameId, log: resume.log },
+  });
+
+  const active: ActiveGame = {
+    transport: hostTransport,
+    session: hosted.session,
+    host: hosted.host,
+    store,
+    sqlocal,
+    memoryOnly,
+    params,
+    startGame: () => {
+      throw new Error('async mode resumes a save; there is nothing to start');
+    },
+    solo: null,
+    soloBots: [],
+    bots: [],
+    pbm: null,
+    soloSetup: null,
+  };
+  // onion stand-ins claim the other saved seats by name (the addBotForSeat
+  // hotjoin flow — the same one the Empires screen uses for absent players)
+  for (const other of otherSeatNames) addBotForSeat(active, other, 'onion');
+  return active;
+}
+
 /** Tear down a solo game and start a fresh campaign in the same room with the
  * same bots. Unlike leaveGame, the store handle is released BEFORE re-entry
  * (awaited), so the new game reopens the same OPFS database instead of

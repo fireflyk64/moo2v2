@@ -46,12 +46,16 @@ export const TERRAIN_INFO: Record<string, { id: string; name: string; color: str
 };
 
 /** climate -> weighted zone palette. Rocky worlds (desert/barren/hostile/
- * tundra/energized) carry the ridge/crater cover that favors defenders. */
+ * tundra/energized) carry the ridge/crater cover that favors defenders —
+ * and the TERRAFORMED tiers (swamp/ocean/terran/gaia, 0.32.0) grow their own:
+ * the richer the biosphere, the more forest/marsh/hill cover it lays down,
+ * so the worlds most worth taking are also the hardest to take from the
+ * ground (open plains shrink as the terraform ladder climbs). */
 const CLIMATE_ZONES: Record<string, Array<[string, number]>> = {
-  gaia: [['p', 40], ['f', 30], ['h', 20], ['m', 10]],
-  terran: [['p', 45], ['f', 25], ['h', 20], ['m', 10]],
-  ocean: [['p', 40], ['m', 35], ['h', 15], ['f', 10]],
-  swamp: [['m', 45], ['f', 30], ['p', 20], ['h', 5]],
+  gaia: [['p', 18], ['f', 42], ['h', 25], ['m', 15]],
+  terran: [['p', 25], ['f', 35], ['h', 25], ['m', 15]],
+  ocean: [['p', 22], ['m', 40], ['h', 18], ['f', 20]],
+  swamp: [['m', 52], ['f', 32], ['p', 10], ['h', 6]],
   arid: [['p', 30], ['d', 35], ['h', 20], ['r', 15]],
   desert: [['d', 40], ['r', 25], ['c', 15], ['p', 20]],
   tundra: [['i', 35], ['h', 25], ['r', 20], ['p', 20]],
