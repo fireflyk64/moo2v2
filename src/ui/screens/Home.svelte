@@ -11,6 +11,10 @@
   import { runReconciliation } from '../reconcileRun';
   import { buildReconciliationStart } from '@storage/reconcile';
   import { encodeSaveFile, verifySaveEnvelope, type SaveEnvelope } from '@storage/index';
+  import { generateSeed } from '@protocol/setup';
+  import { DEFAULT_SETTINGS, type GameSettings } from '@protocol/messages';
+  import { buildDayOneAsync } from '../asyncStart';
+  import { checkRaceString, decodeRaceString, type RaceStringPayload } from '../raceString';
   import { app, bindActive } from '../state.svelte';
   import { BRAND } from '../brand';
   import { THEMES, applyTheme, currentTheme } from '../themes';
@@ -184,6 +188,85 @@
       bindActive(active);
     } catch (e) {
       loadNote = '';
+      app.error = describeSaveError(e);
+    }
+  }
+
+  // ---- day-one async: assemble a fresh game from pasted race strings ----
+  let d1HostName = $state('');
+  let d1HostPreset = $state('solari');
+  let d1HostToken = $state('');
+  let d1GuestTokens = $state('');
+  let d1Galaxy = $state<GameSettings['galaxySize']>('medium');
+  let d1StartMode = $state<GameSettings['startMode']>('average');
+  let d1PickPoints = $state(10);
+  let d1CoreWorlds = $state<'off' | 'central' | 'random'>('off');
+  let d1OutOfBox = $state(false);
+  let d1Note = $state('');
+
+  interface D1Row {
+    payload: RaceStringPayload | null;
+    raw: string;
+    summary: string;
+    errors: string[];
+    warnings: string[];
+  }
+  const d1Opts = $derived({ pickPoints: d1PickPoints, outOfBoxThinking: d1OutOfBox });
+  const d1Guests = $derived.by((): D1Row[] =>
+    d1GuestTokens
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+      .map((raw) => {
+        try {
+          const payload = decodeRaceString(raw);
+          const check = checkRaceString(payload, d1Opts);
+          return { payload, raw, summary: `${payload.name} — ${check.summary}`, errors: check.errors, warnings: check.warnings };
+        } catch (e) {
+          return { payload: null, raw, summary: raw.slice(0, 24) + '…', errors: [e instanceof Error ? e.message : String(e)], warnings: [] };
+        }
+      }),
+  );
+  const d1Host = $derived.by((): RaceStringPayload => {
+    if (d1HostToken.trim()) {
+      try {
+        const p = decodeRaceString(d1HostToken);
+        return { name: d1HostName.trim() || p.name, raceJson: p.raceJson };
+      } catch {
+        /* fall through to the preset */
+      }
+    }
+    return { name: d1HostName.trim() || name || 'Host', raceJson: JSON.stringify({ presetId: d1HostPreset }) };
+  });
+  const d1HostCheck = $derived(checkRaceString(d1Host, d1Opts));
+
+  async function startDayOneAsync() {
+    app.error = '';
+    d1Note = '';
+    try {
+      const settings: GameSettings = {
+        ...DEFAULT_SETTINGS,
+        galaxySize: d1Galaxy,
+        startMode: d1StartMode,
+        pickPoints: d1PickPoints,
+        coreWorlds: d1CoreWorlds,
+        modes: { ...DEFAULT_SETTINGS.modes, outOfBoxThinking: d1OutOfBox },
+      };
+      const guests = d1Guests.map((g) => {
+        if (!g.payload || g.errors.length) throw new Error(`fix ${g.summary}: ${g.errors.join('; ')}`);
+        return g.payload;
+      });
+      const seed = generateSeed();
+      const res = buildDayOneAsync({ host: d1Host, guests, settings, seed });
+      const bytes = await encodeSaveFile(res.envelope);
+      const fname = `moo2v2-async-day1-${seed.slice(0, 8)}.moo2save`;
+      downloadBlob(fname, new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
+      // load it straight into the preview so the host can ⏳ Play async now
+      preview = await previewSave(bytes);
+      resumeTurn = 'latest';
+      asyncSeat = 0;
+      d1Note = `✓ ${fname} downloaded — share it with everyone (${res.envelope.players.map((p) => p.name).join(', ')}); each player loads it and presses ⏳ Play async as themselves.` + (res.warnings.length ? ` ⚠ ${res.warnings.join(' · ')}` : '');
+    } catch (e) {
       app.error = describeSaveError(e);
     }
   }
@@ -439,6 +522,55 @@
       If someone is playing right now, you join their live game instead. Any downloaded 💾 save of a
       PBM game also resumes normally, so a game can move between play-by-mail and live play freely.
     </p>
+  </details>
+  <details class="pbmbox">
+    <summary>⏳ Start async game from day one</summary>
+    <p class="dim">
+      No shared lobby needed: everyone copies their <b>📋 race string</b> (Lobby or Empires screen)
+      and sends it to the async host. The host pastes them all below, picks the options and their
+      own race, and generates the shared save — then every player loads that file and presses
+      ⏳ Play async as themselves.
+    </p>
+    <label>Your name <input data-testid="d1-host-name" bind:value={d1HostName} placeholder={name || 'Host'} /></label>
+    <label>Your race:
+      <select data-testid="d1-host-preset" bind:value={d1HostPreset} disabled={!!d1HostToken.trim()}>
+        {#each RACE_PRESETS as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
+      </select>
+      or paste your own race string
+      <input data-testid="d1-host-token" bind:value={d1HostToken} placeholder="moo2race1:… (optional)" />
+    </label>
+    {#if d1HostCheck.errors.length}<p class="warnline">⚠ you: {d1HostCheck.errors.join('; ')}</p>{/if}
+    <label>Player race strings (one per line)
+      <textarea data-testid="d1-guests" rows="4" bind:value={d1GuestTokens} placeholder="moo2race1:…&#10;moo2race1:…"></textarea>
+    </label>
+    {#each d1Guests as g, i (i)}
+      <p class="dim" data-testid="d1-guest-row">
+        {g.errors.length ? '⛔' : g.warnings.length ? '⚠' : '✓'} {g.summary}
+        {#if g.errors.length}<span class="warnline"> — {g.errors.join('; ')}</span>{/if}
+        {#if g.warnings.length}<span class="warnline"> — {g.warnings.join('; ')}</span>{/if}
+      </p>
+    {/each}
+    <span>
+      Galaxy
+      <select data-testid="d1-galaxy" bind:value={d1Galaxy}>{#each ['small', 'medium', 'large', 'huge'] as g (g)}<option value={g}>{g}</option>{/each}</select>
+      Start
+      <select data-testid="d1-start" bind:value={d1StartMode}>
+        <option value="pre_warp">pre-warp</option><option value="average">average</option><option value="advanced">advanced</option>
+      </select>
+      Picks
+      <select data-testid="d1-picks" bind:value={d1PickPoints}>{#each [10, 12, 14, 16] as ppv (ppv)}<option value={ppv}>{ppv}</option>{/each}</select>
+      🟢 Core worlds
+      <select data-testid="d1-coreworlds" bind:value={d1CoreWorlds}>
+        <option value="off">off</option><option value="central">central</option><option value="random">scattered</option>
+      </select>
+      <label><input type="checkbox" data-testid="d1-oob" bind:checked={d1OutOfBox} /> out-of-box picks</label>
+    </span>
+    <button
+      data-testid="d1-start-btn"
+      onclick={startDayOneAsync}
+      disabled={d1Guests.length === 0 || d1Guests.some((g) => g.errors.length > 0) || d1HostCheck.errors.length > 0}
+    >⏳ Create the shared async save</button>
+    {#if d1Note}<p class="dim" data-testid="d1-note">{d1Note}</p>{/if}
   </details>
   <details class="pbmbox">
     <summary>⚖ Reconciliation (merge async saves)</summary>

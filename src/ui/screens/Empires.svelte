@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { encodeRaceString } from '../raceString';
   import { leaderById, salaryOf, MAX_LEADERS_PER_KIND, countKind } from '@engine/leaders';
   import { selectors, shipStyleOf, SHIP_STYLES, HULLS_BUILDABLE } from '@engine/index';
   import { PICK_ROWS, GOVERNMENTS, pickById } from '@engine/data/index';
@@ -23,6 +24,7 @@
   });
   const selfId = $derived(session().playerId);
   const me = $derived(gs ? gs.empires.find((e) => e.id === selfId) : undefined);
+  let raceToken = $state('');
   /** race discovery: only empires you have actually met show up */
   const met = $derived.by(() => (gs ? selectors.metEmpireIds(gs, selfId) : new Set<number>()));
   const others = $derived(gs ? gs.empires.filter((e) => e.id !== selfId && met.has(e.id)) : []);
@@ -231,7 +233,13 @@
   {/each}
 
   <!-- your own race's traits, shown for PRESET races too (bugs.md) -->
-  <h3>Your race — {me.raceName}</h3>
+  <h3>Your race — {me.raceName}
+    <button class="dim" data-testid="copy-race-string" title="your name + race picks as a token for a day-one ASYNC game — the async host pastes everyone's on the Home screen" onclick={() => {
+      raceToken = encodeRaceString({ name: me.name, raceJson: JSON.stringify({ picks: [...me.picks], raceName: me.raceName, ...(me.color ? { color: me.color } : {}) }) });
+      void navigator.clipboard?.writeText(raceToken).catch(() => undefined);
+    }}>📋 copy race string</button>
+    {#if raceToken}<input readonly data-testid="race-string-out" value={raceToken} onfocus={(e) => (e.target as HTMLInputElement).select()} />{/if}
+  </h3>
   <p class="pickrow" data-testid="my-race-picks">
     {#each me.picks as p (p)}
       {@const row = pickById.get(p)}

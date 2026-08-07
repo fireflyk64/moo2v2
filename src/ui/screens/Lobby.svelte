@@ -4,9 +4,21 @@
   import { app, getActive } from '../state.svelte';
   import { PLAYER_COLORS } from '../colors';
   import ManualDialog from '../components/ManualDialog.svelte';
+  import { encodeRaceString } from '../raceString';
 
   let ready = $state(false);
   let manualOpen = $state(false);
+  // day-one async: this player's name + race as a copyable token
+  let raceToken = $state('');
+  function copyRaceString() {
+    const myName = roster.find((p) => p.id === selfId)?.name ?? 'Player';
+    const color = bannerColor ? { color: bannerColor } : {};
+    const raceJson = custom
+      ? JSON.stringify({ picks: [...customPicks].sort(), raceName, ...color })
+      : JSON.stringify({ presetId, ...color });
+    raceToken = encodeRaceString({ name: myName, raceJson });
+    void navigator.clipboard?.writeText(raceToken).catch(() => undefined);
+  }
   let presetId = $state('solari');
   let custom = $state(false);
   let customPicks = $state<string[]>(['dictatorship']);
@@ -458,6 +470,10 @@
 {/if}
 
 <div class="race">
+  <p class="dim">
+    <button data-testid="copy-race-string" title="your name + race picks as a token for a day-one ASYNC game — the async host pastes everyone's on the Home screen" onclick={copyRaceString}>📋 Copy race string (async setup)</button>
+    {#if raceToken}<input readonly data-testid="race-string-out" value={raceToken} onfocus={(e) => (e.target as HTMLInputElement).select()} /> <span>copied ✓</span>{/if}
+  </p>
   <label>
     <input type="radio" checked={!custom} onchange={() => { custom = false; pushConfig(); }} /> Preset:
     <select data-testid="race-select" bind:value={presetId} onchange={pushConfig} disabled={custom}>
