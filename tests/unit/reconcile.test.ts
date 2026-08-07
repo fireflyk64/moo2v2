@@ -159,16 +159,20 @@ describe('reconciliation scripted economy', () => {
     expect(ship.location).toEqual({ kind: 'star', starId: homeStar }); // only colony = nearest colony
   });
 
-  it('reach insurance: every 5th turn a colonyful empire without an outpost ship gets one', () => {
+  it('reach insurance: every 5th turn tops the fleet up to TWO outpost ships (lane + redundancy)', () => {
     let state = newGame();
     while (state.turn <= 5) state = advance(state);
     for (const e of state.empires) {
       expect(state.ships.filter((s) => s.owner === e.id && s.shipKind === 'outpost_ship').length).toBe(1);
     }
-    // no stockpiling: the next 5th turn only replaces a SPENT ship
     while (state.turn <= 10) state = advance(state);
     for (const e of state.empires) {
-      expect(state.ships.filter((s) => s.owner === e.id && s.shipKind === 'outpost_ship').length).toBe(1);
+      expect(state.ships.filter((s) => s.owner === e.id && s.shipKind === 'outpost_ship').length).toBe(2);
+    }
+    // no stockpiling past the pair
+    while (state.turn <= 15) state = advance(state);
+    for (const e of state.empires) {
+      expect(state.ships.filter((s) => s.owner === e.id && s.shipKind === 'outpost_ship').length).toBe(2);
     }
   });
 

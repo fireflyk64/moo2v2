@@ -70,7 +70,7 @@ export async function runReconciliation(
         session,
         state,
         me,
-        tactic: opts.tactics?.[me] ?? 'hybrid',
+        tactic: opts.tactics?.[me] ?? 'split', // lab-measured default (bugs/reconcile-tactics.md)
         memory: memories.get(me)!,
       });
     }

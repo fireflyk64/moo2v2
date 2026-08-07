@@ -97,8 +97,10 @@ export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
   const warships = state.ships.filter((s) => s.owner === me && s.shipKind === 'design' && s.location.kind === 'star');
   const myWeight = warships.reduce((n, s) => n + weightOf(s), 0);
 
-  // ---- war: the goal is the goal — declare when the count clearly favors us
-  // (or a rival squats on a victory star), one declaration per turn ----
+  // ---- war: the goal is the goal — declare at rough fleet parity or better
+  // (the per-group winnability gates below do the real safety work; a bot
+  // that only fights from clear superiority never fights a mirror), always
+  // against a rival squatting on a victory star, one declaration per turn ----
   const coreIds = new Set(state.coreWorlds ?? []);
   const notAtWar = rivals.filter((r) => !atWarWith.has(r.id));
   if (notAtWar.length && warships.length > 0) {
@@ -106,7 +108,7 @@ export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
       .filter((r) => {
         const theirs = rivalWeightTotal.get(r.id) ?? 0;
         const holdsCore = coreIds.size > 0 && state.colonies.some((c) => c.owner === r.id && coreIds.has(c.planetId));
-        return myWeight * 4 >= theirs * 5 || (holdsCore && myWeight * 4 >= theirs * 4);
+        return myWeight * 10 >= theirs * 9 || holdsCore;
       })
       .sort((a, b) => (rivalWeightTotal.get(a.id) ?? 0) - (rivalWeightTotal.get(b.id) ?? 0) || a.id - b.id)[0];
     if (target) {
@@ -172,9 +174,16 @@ export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
 
     if (memory.targets[gi] === null) {
       const pool = [...targets.values()].filter((t) => winnable(groupWeight, t));
+      // reachability first (a commitment the fleet cannot fly to just parks
+      // it at home — the unreachable ones are the outpost chain's job); then
       // main group (0) hunts the biggest winnable baddie; raiders take the
       // softest — small fleets favor soft targets by doctrine
+      const musterStar = heaviestStackStar(group);
+      const reach = musterStar === null ? new Set<number>() : new Set(selectors.moveOptions(state, me, musterStar).filter((o) => o.reachable).map((o) => o.starId));
       pool.sort((a, b) => {
+        const ra = reach.has(a.starId) ? 0 : 1;
+        const rb = reach.has(b.starId) ? 0 : 1;
+        if (ra !== rb) return ra - rb;
         if (a.core !== b.core) return a.core ? -1 : 1;
         if (gi === 0) return b.value - a.value || a.defWeight - b.defWeight || a.starId - b.starId;
         return a.defWeight - b.defWeight || b.value - a.value || a.starId - b.starId;
@@ -265,18 +274,43 @@ function moveGroup(
       muster = star;
     }
   }
+  const starById = new Map(state.stars.map((s) => [s.id, s]));
   for (const [from, st] of stacks) {
     const winsAlone = st.w * WIN_RATIO_DEN >= defWeight * WIN_RATIO_NUM + WIN_RATIO_DEN;
     const jump = reinforce || atTargetW > 0 ? winsAlone || atTargetW > 0 : st.w >= assembled && winsAlone;
     const dest = jump ? targetStar : muster;
     if (dest === from) continue;
-    const ok = selectors.moveOptions(state, me, from).some((o) => o.reachable && o.starId === dest);
-    if (ok) {
+    const options = selectors.moveOptions(state, me, from).filter((o) => o.reachable);
+    if (options.some((o) => o.starId === dest)) {
       for (let i = 0; i < st.ids.length; i += 20) {
         session.submit('move_ships', { shipIds: st.ids.slice(i, i + 20), destStarId: dest });
       }
+      continue;
+    }
+    // out of reach: STAGE FORWARD — creep to the reachable star nearest the
+    // destination so the moment the outpost chain bridges, the jump is short
+    const destObj = starById.get(dest);
+    const fromObj = starById.get(from);
+    if (!destObj || !fromObj) continue;
+    const step = options
+      .filter((o) => o.starId !== from)
+      .sort((a, b) => starDistance(starById.get(a.starId)!, destObj) - starDistance(starById.get(b.starId)!, destObj) || a.starId - b.starId)[0];
+    if (step && starDistance(starById.get(step.starId)!, destObj) < starDistance(fromObj, destObj)) {
+      for (let i = 0; i < st.ids.length; i += 20) {
+        session.submit('move_ships', { shipIds: st.ids.slice(i, i + 20), destStarId: step.starId });
+      }
     }
   }
+}
+
+/** the star carrying the group's heaviest stack (null for an empty group) */
+function heaviestStackStar(group: Ship[]): number | null {
+  const w = new Map<number, number>();
+  for (const s of group) {
+    const from = (s.location as { starId: number }).starId;
+    w.set(from, (w.get(from) ?? 0) + 1);
+  }
+  return [...w.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? null;
 }
 
 function massGroup(ctx: ReconcileBotCtx, group: Ship[]): void {
@@ -354,11 +388,12 @@ function runOutposts(
     const options = selectors.moveOptions(state, me, row.atStarId);
     const reachable = new Set(options.filter((o) => o.reachable).map((o) => o.starId));
     // goals we cannot reach yet: enemy target stars outside the bubble
+    const here = starById.get(row.atStarId)!;
+    const byDistance = (ids: number[]): number | undefined =>
+      ids.sort((a, b) => starDistance(starById.get(a)!, here) - starDistance(starById.get(b)!, here) || a - b)[0];
     const unreachableGoals = [...targets.keys()].filter((sid) => !reachable.has(sid) && sid !== row.atStarId);
-    const goalStar = unreachableGoals.length
-      ? starById.get(unreachableGoals.sort((a, b) => a - b)[0]!)
-      : // redundancy: aim at the nearest enemy target (or the map's far side)
-        starById.get([...targets.keys()].sort((a, b) => a - b)[0] ?? -1);
+    const goalId = unreachableGoals.length ? byDistance(unreachableGoals) : byDistance([...targets.keys()]);
+    const goalStar = goalId !== undefined ? starById.get(goalId) : undefined;
     const candidates = options
       .filter(
         (o) =>
@@ -373,7 +408,9 @@ function runOutposts(
         const sb = starById.get(b.starId)!;
         return starDistance(sa, goalStar) - starDistance(sb, goalStar) || a.starId - b.starId;
       });
-    const dest = candidates[0];
+    // two ships in service diversify: even ids push the lane, odd ids take
+    // the runner-up spot — a parallel link so one lost dome cannot sever it
+    const dest = candidates[row.ship.id % 2] ?? candidates[0];
     if (dest && dest.starId !== row.atStarId) {
       session.submit('move_ships', { shipIds: [row.ship.id], destStarId: dest.starId });
     }

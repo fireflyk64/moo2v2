@@ -320,12 +320,13 @@ export function applyReconcileSchedules(state: GameState, events: TurnEvent[]): 
   // ---- r7: reach insurance — wars can burn colonies faster than any script
   // replaces them, cutting the survivors off from each other. Every 5th turn
   // each living empire's strongest industrial world cranks out an outpost
-  // ship (if it has none), so bots can re-anchor fuel range across razed
-  // territory. Scheduled colonization landing on such an outpost evicts it.
+  // ship (up to TWO in service: one extends the lane, one lays redundancy),
+  // so bots can re-anchor fuel range across razed territory. Scheduled
+  // colonization landing on such an outpost evicts it.
   if (turn % 5 === 0) {
     for (const empire of living) {
-      const hasOutpostShip = state.ships.some((s) => s.owner === empire.id && s.shipKind === 'outpost_ship');
-      if (hasOutpostShip) continue;
+      const outpostShips = state.ships.filter((s) => s.owner === empire.id && s.shipKind === 'outpost_ship').length;
+      if (outpostShips >= 2) continue;
       const yard = state.colonies
         .filter((c) => c.owner === empire.id && !c.outpost)
         .sort((a, b) => {

@@ -413,7 +413,7 @@ export class SoloBot {
         session: this.session,
         state: this.session.getPlanned() ?? state,
         me,
-        tactic: 'hybrid',
+        tactic: 'split', // lab-measured default (bugs/reconcile-tactics.md)
         memory: this.reconcileMemory,
       });
       return;
