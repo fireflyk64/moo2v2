@@ -63,6 +63,8 @@ const PLANET_COUNT_WEIGHTS: Record<StarColor, number[]> = {
   red: [4, 20, 29, 26, 15, 6],
   brown: [12, 40, 26, 16, 6, 0],
   black_hole: [100, 0, 0, 0, 0, 0],
+  // core worlds (green stars) are never empty — the variant guarantees a world
+  green: [0, 20, 30, 30, 15, 5],
 };
 
 // rock-only systems were everywhere at 62/18/20 — most orbit rolls should be
@@ -164,6 +166,14 @@ const MINERAL_WEIGHTS: Record<StarColor, Array<[Minerals, number]>> = {
     ['ultra_rich', 8],
   ],
   black_hole: [['abundant', 100]],
+  // core worlds: ordinary wealth — the prize is the victory star, not the dirt
+  green: [
+    ['ultra_poor', 5],
+    ['poor', 20],
+    ['abundant', 50],
+    ['rich', 18],
+    ['ultra_rich', 7],
+  ],
 };
 
 function weighted<T>(rng: Rng, entries: Array<[T, number]>): T {
@@ -234,6 +244,9 @@ export interface GeneratedGalaxy {
   planets: Planet[];
   /** homeworld planet id per empire index */
   homePlanets: number[];
+  /** core-worlds variant: designated victory planet ids, one per green star
+   * (sorted). Absent when the variant is off. */
+  coreWorlds?: number[];
   nextId: number;
 }
 
@@ -257,6 +270,18 @@ const ROTATIONS: Record<number, ReadonlyArray<readonly [number, number]>> = {
   7: [[16384, 0], [10215, 12810], [-3646, 15973], [-14761, 7109], [-14761, -7109], [-3646, -15973], [10215, -12810]],
   8: [[16384, 0], [11585, 11585], [0, 16384], [-11585, 11585], [-16384, 0], [-11585, -11585], [0, -16384], [11585, -11585]],
 };
+
+/** N evenly spaced unit vectors for ring layouts beyond the 2..8 mirror
+ * seats (core worlds place playerCount+2 stars, up to 10). Same fixed-point
+ * scale as ROTATIONS. */
+const RING_POINTS: Record<number, ReadonlyArray<readonly [number, number]>> = {
+  9: [[16384, 0], [12551, 10532], [2845, 16135], [-8192, 14189], [-15396, 5604], [-15396, -5604], [-8192, -14189], [2845, -16135], [12551, -10532]],
+  10: [[16384, 0], [13255, 9630], [5063, 15582], [-5063, 15582], [-13255, 9630], [-16384, 0], [-13255, -9630], [-5063, -15582], [5063, -15582], [13255, -9630]],
+};
+
+function ringPoints(n: number): ReadonlyArray<readonly [number, number]> {
+  return ROTATIONS[n] ?? RING_POINTS[n] ?? ROTATIONS[8]!;
+}
 
 function rotatePoint(cx: number, cy: number, dx: number, dy: number, rot: readonly [number, number]): { x: number; y: number } {
   const [c, s] = rot;
@@ -427,7 +452,11 @@ export function generateGalaxy(
   settings: GameStateSettings,
   empireTraits: RaceTraits[],
 ): GeneratedGalaxy {
-  if (settings.mirror && ROTATIONS[empireTraits.length]) {
+  const coreMode =
+    settings.coreWorlds === 'central' || settings.coreWorlds === 'random' ? settings.coreWorlds : null;
+  // core worlds force the standard generator: a ring of playerCount+2 stars
+  // has no N-fold symmetry to mirror
+  if (settings.mirror && !coreMode && ROTATIONS[empireTraits.length]) {
     return generateMirrorGalaxy(seed, settings, empireTraits);
   }
   const rng = rngFor(seed, 'galaxy');
@@ -435,12 +464,36 @@ export function generateGalaxy(
   const starCount = STAR_COUNTS[settings.galaxySize];
   let nextId = 1;
 
-  // --- star placement with minimum separation ---
+  // --- core worlds first, so ordinary placement flows around them ---
   const stars: Star[] = [];
   const taken = new Set<string>();
   const namePool = makeNamePool(rng);
+  const coreCount = coreMode ? empireTraits.length + 2 : 0;
+  if (coreMode === 'central') {
+    const cx = w >> 1;
+    const cy = h >> 1;
+    const radius = Math.max(MIN_STAR_DIST + 30, Math.min(cx, cy) / 3);
+    for (const rot of ringPoints(coreCount)) {
+      const { x, y } = rotatePoint(cx, cy, radius, 0, rot);
+      stars.push({ id: nextId++, name: starName(rng, taken, namePool), x, y, color: 'green', wormholeTo: null });
+    }
+  } else if (coreMode === 'random') {
+    // scatter with generous mutual spacing, relaxing when the roll gets tight
+    for (const spacing of [450, 300, MIN_STAR_DIST]) {
+      let attempts = 0;
+      while (stars.length < coreCount && attempts++ < 4000) {
+        const x = 60 + rng.int(w - 120);
+        const y = 60 + rng.int(h - 120);
+        if (stars.some((s) => (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y) < spacing * spacing)) continue;
+        stars.push({ id: nextId++, name: starName(rng, taken, namePool), x, y, color: 'green', wormholeTo: null });
+      }
+      if (stars.length >= coreCount) break;
+    }
+  }
+
+  // --- star placement with minimum separation ---
   let guard = 0;
-  while (stars.length < starCount && guard++ < 20000) {
+  while (stars.length < starCount + coreCount && guard++ < 20000) {
     const x = 60 + rng.int(w - 120);
     const y = 60 + rng.int(h - 120);
     if (stars.some((s) => (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y) < MIN_STAR_DIST * MIN_STAR_DIST)) {
@@ -465,9 +518,29 @@ export function generateGalaxy(
   }
   planets.sort((a, b) => a.id - b.id);
 
+  // --- core-world guarantee: every green star holds at least one real world ---
+  const coreWorldIds: number[] = [];
+  for (const star of stars) {
+    if (star.color !== 'green') continue;
+    let bodies = planets.filter((p) => p.starId === star.id && p.body === 'planet');
+    if (bodies.length === 0) {
+      const patch = planets.find((p) => p.starId === star.id)!; // green never rolls 0 bodies
+      patch.body = 'planet';
+      patch.sizeClass = 1 + weighted(rng, SIZE_WEIGHTS.map((wgt, i) => [i, wgt] as [number, number]));
+      patch.climate = weighted(rng, CLIMATE_WEIGHTS[orbitBand(patch.orbit)]);
+      patch.gravity = rollGravity(rng, patch.sizeClass, patch.minerals);
+      bodies = [patch];
+    }
+    // the designated victory world: the star's biggest world, innermost on ties
+    const world = bodies.reduce((a, b) => (b.sizeClass > a.sizeClass || (b.sizeClass === a.sizeClass && b.orbit < a.orbit) ? b : a));
+    coreWorldIds.push(world.id);
+  }
+  coreWorldIds.sort((a, b) => a - b);
+
   // --- homeworlds: pick well-separated stars, override one planet each ---
+  // (never on a core world — the victory stars start unowned)
   const homeStars: Star[] = [];
-  const nonHole = stars.filter((s) => s.color !== 'black_hole');
+  const nonHole = stars.filter((s) => s.color !== 'black_hole' && s.color !== 'green');
   let bestSpread: Star[] | null = null;
   for (let attempt = 0; attempt < 200 && !bestSpread; attempt++) {
     const shuffled = [...nonHole];
@@ -521,7 +594,7 @@ export function generateGalaxy(
   // --- wormhole pairs (after home selection: home systems never get one) ---
   const wormholes = Math.min(2, Math.floor(stars.length / 12));
   const homeIds = new Set(homeStars.map((s) => s.id));
-  const candidates = stars.filter((s) => s.color !== 'black_hole' && !homeIds.has(s.id));
+  const candidates = stars.filter((s) => s.color !== 'black_hole' && s.color !== 'green' && !homeIds.has(s.id));
   for (let i = 0; i < wormholes && candidates.length >= 2; i++) {
     const a = candidates.splice(rng.int(candidates.length), 1)[0]!;
     const b = candidates.splice(rng.int(candidates.length), 1)[0]!;
@@ -558,7 +631,13 @@ export function generateGalaxy(
   nextId = placeHomeworlds(planets, homeStars, empireTraits, settings, nextId);
   planets.sort((a, b) => a.id - b.id);
 
-  return { stars, planets, homePlanets: homePlanetIds(planets, empireTraits.length), nextId };
+  return {
+    stars,
+    planets,
+    homePlanets: homePlanetIds(planets, empireTraits.length),
+    ...(coreMode ? { coreWorlds: coreWorldIds } : {}),
+    nextId,
+  };
 }
 
 /** Override each home star's orbit 3 with the race homeworld and equalize the

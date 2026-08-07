@@ -20,7 +20,7 @@ export type Climate =
 
 export type Minerals = 'ultra_poor' | 'poor' | 'abundant' | 'rich' | 'ultra_rich';
 export type Gravity = 'low' | 'normal' | 'high';
-export type StarColor = 'blue' | 'white' | 'yellow' | 'orange' | 'red' | 'brown' | 'black_hole';
+export type StarColor = 'blue' | 'white' | 'yellow' | 'orange' | 'red' | 'brown' | 'black_hole' | 'green';
 export type BodyType = 'planet' | 'asteroids' | 'gas_giant';
 
 export interface Star {
@@ -299,6 +299,12 @@ export interface GameStateSettings {
    * their hull turn rate by spending movement points to bring forward-arc
    * guns onto off-axis targets (combat.ts). Absent/false = classic turning. */
   slewing?: boolean;
+  /** CORE WORLDS variant: playerCount+2 green stars, each guaranteed a real
+   * world; hold a >=1-pop colony on every designated world to win.
+   * 'central' rings them around the map center, 'random' scatters them.
+   * Absent/'off' = classic galaxy. Forces the standard generator (mirror is
+   * ignored while this is on). */
+  coreWorlds?: 'off' | 'central' | 'random';
 }
 
 export type ProposalKind =
@@ -392,7 +398,17 @@ export interface GameState {
    * tied up for the whole trip). Optional-additive for save compatibility. */
   popTransits?: PopTransit[];
   winner: number | null;
-  winType: 'conquest' | 'council' | 'antaran' | null;
+  winType: 'conquest' | 'council' | 'antaran' | 'core_worlds' | null;
+  /** Core Worlds variant: the designated planet ids (sorted), one per green
+   * star. Optional-additive: absent = variant off. */
+  coreWorlds?: number[];
+  /** a victory was declared and the table chose to keep playing: the win
+   * stays on record (winner/winType) but turns keep advancing.
+   * Optional-additive for save compatibility. */
+  victoryContinued?: boolean;
+  /** reconciliation mode: recorded per-empire scripts drive all production
+   * (see ReconcileState). Absent = normal simulation. Optional-additive. */
+  reconcile?: ReconcileState;
   /** campaign-timelapse opt-in (empire ids, sorted). The timelapse replays
    * the WHOLE game on an unfogged map, so it is consent-gated: when every
    * living empire has voted, timelapseReadyTurn latches to the current turn
@@ -400,6 +416,41 @@ export interface GameState {
    * Optional-additive for save compatibility. */
   timelapseVotes?: number[];
   timelapseReadyTurn?: number | null;
+}
+
+/** RECONCILIATION (0.32.0): the board-game alternative simulation. Each
+ * async-played save contributes one empire's recorded per-turn script; the
+ * reconciliation walks the shared base state forward applying ONLY these
+ * scripts for economy (no normal production/research/growth) while movement,
+ * combat, invasions and elimination run under the real rules with bots at
+ * the helm. Presence of GameState.reconcile switches the pipeline over. */
+export interface ReconcileSchedule {
+  empireId: number;
+  /** tech invented at turn (applied via grantApp, off-script research is off) */
+  research: Array<{ turn: number; app: string }>;
+  /** research fields completed at turn (hull unlocks, miniaturization) */
+  fields: Array<{ turn: number; fieldNum: number }>;
+  /** ship production: 'design:<hull>' or a civilian ShipKind, preferring the
+   * colony nearest the star it was actually produced at */
+  ships: Array<{ turn: number; starId: number; kind: string }>;
+  /** predetermined colonization claims (one-shot; the first claimant holds
+   * the world until they lose it, then the next claim activates).
+   * units = founding population (absent = 1) */
+  colonize: Array<{ turn: number; planetId: number; outpost?: boolean; units?: number }>;
+  /** positive population deltas, in colonist units */
+  pop: Array<{ turn: number; planetId: number; units: number }>;
+  buildings: Array<{ turn: number; planetId: number; building: string }>;
+  /** trained garrison recorded at each change */
+  marines: Array<{ turn: number; planetId: number; count: number }>;
+  /** empire-wide spy roster recorded at each change */
+  spies: Array<{ turn: number; count: number }>;
+}
+
+export interface ReconcileState {
+  /** one script per participating empire, sorted by empireId */
+  schedules: ReconcileSchedule[];
+  /** consumed one-shot colonization claims (sorted by planetId, empireId) */
+  usedClaims: Array<{ planetId: number; empireId: number }>;
 }
 
 export interface PopTransit {

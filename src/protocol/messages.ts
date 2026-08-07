@@ -79,6 +79,11 @@ export interface GameSettings {
    * guns onto off-axis targets (small hulls slew nearly freely, capitals pay
    * dearly). Absent/false = classic turning. */
   slewing?: boolean;
+  /** CORE WORLDS variant: playerCount+2 green stars, each guaranteed a real
+   * world; hold a >=1-pop colony on every designated world to win. 'central'
+   * rings them around the map center, 'random' scatters them. Overrides
+   * mirror while on. Absent/'off' = classic. */
+  coreWorlds?: 'off' | 'central' | 'random';
 }
 
 /** fast start: nobody may run more than this many turns past the slowest
@@ -189,6 +194,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   homeStart: 'good',
   fastStart: false,
   slewing: false,
+  coreWorlds: 'off',
 };
 
 const TE = new TextEncoder();

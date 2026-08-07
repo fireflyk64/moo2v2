@@ -52,4 +52,6 @@ export const STAR_COLORS: Record<StarColor, string> = {
   red: '#ff7a6b',
   brown: '#a9825f',
   black_hole: '#5b4a75',
+  // core worlds (victory stars): an impossible emerald no real star wears
+  green: '#3dffa8',
 };

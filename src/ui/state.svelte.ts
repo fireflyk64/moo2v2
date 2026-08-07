@@ -48,7 +48,7 @@ export interface ReportEntry {
 }
 
 export const app = $state({
-  screen: 'home' as 'home' | 'lobby' | 'game',
+  screen: 'home' as 'home' | 'lobby' | 'game' | 'replay',
   error: '',
   connecting: false,
   version: 0,

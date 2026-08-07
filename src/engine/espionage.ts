@@ -39,11 +39,11 @@ function govSpyDefense(gov: string): number {
   }
 }
 
-function offenseOf(state: GameState, empire: Empire): number {
+export function offenseOf(state: GameState, empire: Empire): number {
   return traitsOf(empire).spyingPct + empireAccum(state, empire).spyOffense + leaderEmpireBonuses(empire).spyOffense;
 }
 
-function defenseOf(state: GameState, empire: Empire): number {
+export function defenseOf(state: GameState, empire: Empire): number {
   // alien management centers harden the whole empire (non-cumulative)
   const amc = state.colonies.some((c) => c.owner === empire.id && c.buildings.includes('alien_management_center'))
     ? 10

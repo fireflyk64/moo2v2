@@ -254,7 +254,7 @@ export class SoloBot {
   /** Play the current turn once: issue orders, then commit. */
   private maybePlay(): void {
     const state = this.session.getState();
-    if (!state || state.winner !== null) return;
+    if (!state || (state.winner !== null && !state.victoryContinued)) return;
     if (state.phase !== 'planning') {
       this.orderBattles(state);
       return;

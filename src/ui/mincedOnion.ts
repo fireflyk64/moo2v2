@@ -32,7 +32,7 @@
 // All tunables live in the tables at the top — the tournament improvement
 // loop edits weights, not control flow.
 
-import { foodLogistics, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, designMountMix, designStats, hullIndexOf, marinesOf, pickDoctrine, selectors, shipMarines, starDistance } from '@engine/index';
+import { foodLogistics, freeFreighters, HULL_WEIGHT, MONSTER_CLEAR_WEIGHT, designMountMix, designStats, hullIndexOf, marinesOf, pickDoctrine, selectors, shipMarines, starDistance } from '@engine/index';
 import { generateTerrain, pickGroundAttack } from '@engine/groundTactics';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
 import { applicationsOfField, fieldByNum, subjectOfField } from '@engine/data/index';
@@ -357,6 +357,8 @@ interface FreeTarget {
   reachable: boolean;
   atMyStar: boolean;
   guarded: boolean;
+  /** core-worlds variant: this is a designated victory world */
+  core: boolean;
 }
 
 /** what the ledger says about the rival right now (the minced brain's
@@ -407,12 +409,16 @@ interface Intel {
   enemyAtMyStars: number;
   farmerShare: number;
   cpHeadroom: number;
+  /** core-worlds variant: designated victory planet ids (empty = variant off) */
+  coreWorlds: Set<number>;
+  /** stars of the designated victory worlds */
+  coreStars: Set<number>;
   /** rival observations (null before contact / after their elimination) */
   spy: RivalIntel | null;
 }
 
 /** acquisition score 0..100 (spec §Planets) */
-function planetScore(planet: Planet, atMyStar: boolean, guarded: boolean): number {
+function planetScore(planet: Planet, atMyStar: boolean, guarded: boolean, core = false): number {
   let s =
     CLIMATE_SCORE[planet.climate] +
     MINERAL_SCORE[planet.minerals] +
@@ -422,6 +428,7 @@ function planetScore(planet: Planet, atMyStar: boolean, guarded: boolean): numbe
   if (planet.gravity === 'low') s -= 3;
   if (planet.gravity === 'high') s -= 5;
   if (guarded) s -= 12; // denied until the fleet crosses the threshold
+  if (core) s += 40; // a victory world outranks any dirt: the variant IS the goal
   return Math.max(0, Math.min(100, s));
 }
 
@@ -518,18 +525,24 @@ function gatherIntel(ctx: MincedCtx): Intel | null {
   }
 
   const guardedStars = new Set(planned.monsters.map((m) => m.starId));
+  const coreWorlds = new Set(planned.coreWorlds ?? []);
+  const coreStars = new Set(
+    (planned.coreWorlds ?? []).map((pid) => starOf.get(pid)).filter((x): x is number => x !== undefined),
+  );
   const freeTargets: FreeTarget[] = planned.planets
     .filter((p) => p.body === 'planet' && !planned.colonies.some((c) => c.planetId === p.id))
     .map((p) => {
       const atMyStar = myStars.has(p.starId);
       const guarded = guardedStars.has(p.starId);
+      const core = coreWorlds.has(p.id);
       return {
         planet: p,
         starId: p.starId,
-        score: planetScore(p, atMyStar, guarded),
+        score: planetScore(p, atMyStar, guarded, core),
         reachable: reach.has(p.starId) || atMyStar,
         atMyStar,
         guarded,
+        core,
       };
     })
     .sort((a, b) => b.score - a.score || a.planet.id - b.planet.id);
@@ -633,6 +646,8 @@ function gatherIntel(ctx: MincedCtx): Intel | null {
     enemyAtMyStars,
     farmerShare: units > 0 ? farmers / units : 0,
     cpHeadroom: summary.cpSources - summary.cpUsage,
+    coreWorlds,
+    coreStars,
     spy,
   };
 }
@@ -678,6 +693,16 @@ function scoreConstraints(ctx: MincedCtx, intel: Intel): Record<Constraint, numb
     // tech through. Blocked-on-the-unlock outranks nearly everything.
     if (!bot.knownApps.includes('colony_ship')) s.expansion = Math.max(s.expansion, 85);
   }
+  // core worlds (the variant IS the victory condition): free designated worlds
+  // keep the pressure pegged however big the empire grows — the size decay and
+  // the pipeline damper must never let the race go cold
+  const freeCore = freeTargets.filter((t) => t.core);
+  if (freeCore.some((t) => t.reachable)) {
+    if (pipeline < 2) s.expansion = Math.max(s.expansion, 80);
+  } else if (freeCore.length) {
+    s.range = Math.max(s.range, 75);
+  }
+
   // range: worthwhile planets exist but none reachable — or the war target is
   // out of the bubble with nothing left to settle
   if (settleable.length && !reachableSettles.length) s.range = 70;
@@ -1056,13 +1081,17 @@ function runColonies(
   // reachable worthwhile worlds) runs 3-4 settlers in flight, not the flat 2
   // — rounds 1-4 lost the cafef00d rich seat every time (onion 9-13c where
   // v2 snowballed to 19-30c, twice into eliminating the onion outright)
+  // a committed lair clear at a settleable no-splinter prize wants a settler
+  // riding with the fleet, so it counts toward the pipeline demand
+  const lairSettles = lairSettleOp(ctx, intel) !== null ? 1 : 0;
+  const settleDemand = settleable.length + lairSettles;
   const wantPipeline =
     plan === 'expansion' || scores.expansion >= 40
       ? Math.min(
-          2 + Math.floor(settleable.length / 4) + (ctx.personality === 'expander' ? 1 : 0),
-          settleable.length,
+          2 + Math.floor(settleDemand / 4) + (ctx.personality === 'expander' ? 1 : 0),
+          settleDemand,
         )
-      : Math.min(1, settleable.length);
+      : Math.min(1, settleDemand);
 
   let rank = 0;
   for (const row of intel.rows) {
@@ -1267,6 +1296,20 @@ function maybeBuy(
 
 // ------------------------------------------------------- expansion + range
 
+/** The committed strike is an ordinary-lair clear whose system holds a free
+ * colonizable world and NO splinter colony (a splinter joins by presence
+ * alone) — the op that wants a settler riding with the fleet. */
+function lairSettleOp(ctx: MincedCtx, intel: Intel): number | null {
+  const star = ctx.memory.attackStar;
+  if (star === null) return null;
+  const lairs = ctx.planned.monsters.filter((m) => m.starId === star);
+  if (!lairs.length || !lairs.every((m) => MONSTER_PRICE[m.kind] === MONSTER_CLEAR_WEIGHT)) return null;
+  const prizes = intel.freeTargets.filter((t) => t.starId === star);
+  if (!prizes.length) return null;
+  if (prizes.some((t) => t.planet.special === 'splinter_colony')) return null;
+  return star;
+}
+
 function runExpansionMoves(ctx: MincedCtx, intel: Intel): void {
   const { planned, me, session } = ctx;
   const bar = COLONIZE_BAR[ctx.personality];
@@ -1285,9 +1328,45 @@ function runExpansionMoves(ctx: MincedCtx, intel: Intel): void {
   // distance breaks ties (spec: a closer weaker target can beat a distant
   // better one — the cost term inside score handles guarded/poor worlds)
   const starById = new Map(planned.stars.map((s) => [s.id, s]));
+
+  // lair escort: a committed no-splinter lair clear takes ONE settler along.
+  // The escort rides to wherever the strike is massing (never to the guarded
+  // star on its own — a lone civilian at a lair is a free kill); the strike
+  // execution in runMilitary carries it on the final jump, where the
+  // 12-weight deterministic clear guarantees zero attacker losses.
+  const opStar = lairSettleOp(ctx, intel);
+  let escortId: number | null = null;
+  let escortHold: number | null = null; // star the escort waits at
+  if (opStar !== null) {
+    const massAt = new Map<number, number>();
+    for (const s of planned.ships) {
+      if (s.owner === me && s.shipKind === 'design' && s.location.kind === 'star') {
+        massAt.set(s.location.starId, (massAt.get(s.location.starId) ?? 0) + 1);
+      }
+    }
+    escortHold = [...massAt.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? null;
+    const goal = starById.get(escortHold ?? opStar);
+    const idle = planned.ships
+      .filter((s) => s.owner === me && s.shipKind === 'colony_ship' && s.location.kind === 'star')
+      .sort((a, b) => {
+        const da = goal ? starDistance(starById.get((a.location as { starId: number }).starId)!, goal) : 0;
+        const db = goal ? starDistance(starById.get((b.location as { starId: number }).starId)!, goal) : 0;
+        return da - db || a.id - b.id;
+      });
+    escortId = idle[0]?.id ?? null;
+  }
+
   for (const ship of planned.ships) {
     if (ship.owner !== me || ship.shipKind !== 'colony_ship' || ship.location.kind !== 'star') continue;
     const here = ship.location.starId;
+    if (ship.id === escortId && opStar !== null) {
+      // the escort's only errand is the op — move to the muster and wait
+      if (here !== escortHold && escortHold !== null) {
+        const ok = selectors.moveOptions(planned, me, here).some((o) => o.reachable && o.starId === escortHold);
+        if (ok) session.submit('move_ships', { shipIds: [ship.id], destStarId: escortHold });
+      }
+      continue;
+    }
     const local = intel.freeTargets
       .filter((t) => t.starId === here && !t.guarded)
       .sort((a, b) => b.score - a.score)[0];
@@ -1371,6 +1450,74 @@ function runOutpostChain(ctx: MincedCtx, intel: Intel): void {
   if (queued) return;
   const yard = intel.rows.find((r) => r.buildable.includes('outpost_ship'));
   if (yard) session.submit('set_build_queue', { colonyId: yard.id, items: ['outpost_ship', ...yard.queue] });
+}
+
+// ------------------------------------------------------- pop logistics
+
+/** Ship colonists to EXCELLENT worlds (gaia / rich / ultra-rich) until they
+ * are at least half full. Growth compounds with free headroom (economy
+ * groupGrowthK), so seeding a big empty prize from near-cap donors is the
+ * best population trade in the game — and no bot made it before 0.32.
+ * In-system shuttles are free/instant; between systems every unit ties up 5
+ * freighters for the trip, budgeted after the food runs. */
+function runPopulationLogistics(ctx: MincedCtx, intel: Intel): void {
+  const { planned, me, session } = ctx;
+  const excellent = (p: Planet) => p.climate === 'gaia' || p.minerals === 'rich' || p.minerals === 'ultra_rich';
+
+  const incoming = new Map<number, number>();
+  for (const t of planned.popTransits ?? []) {
+    if (t.empireId === me) incoming.set(t.toColonyId, (incoming.get(t.toColonyId) ?? 0) + t.units);
+  }
+  const filled = (r: selectors.ColonyRow) => r.popUnits + (incoming.get(r.id) ?? 0);
+
+  const needs = intel.rows
+    .filter((r) => excellent(r.planet) && filled(r) * 2 < r.maxPop)
+    .sort((a, b) => planetScore(b.planet, false, false) - planetScore(a.planet, false, false) || a.id - b.id);
+  if (!needs.length) return;
+
+  // donors: comfortable colonies (4+ units, >=70% full) — their growth has
+  // flattened, so drafting a couple of units costs almost nothing
+  const starOfColony = new Map(intel.rows.map((r) => [r.id, r.planet.starId]));
+  const donors = intel.rows.filter(
+    (r) => r.popUnits >= 4 && r.popUnits * 10 >= r.maxPop * 7 && !r.foodLack,
+  );
+  if (!donors.length) return;
+
+  // freighter budget: 5 per unit between systems, keep one fleet spare for food
+  let freighterBudget = Math.max(0, freeFreighters(planned, intel.bot) - 5);
+  let commands = 0;
+  const drafted = new Map<number, number>(); // donorId -> units taken this turn
+
+  for (const need of needs) {
+    if (commands >= 4) break;
+    let want = Math.ceil(need.maxPop / 2) - filled(need);
+    const destStar = starOfColony.get(need.id);
+    const ranked = [...donors].sort((a, b) => {
+      const sameA = starOfColony.get(a.id) === destStar ? 0 : 1;
+      const sameB = starOfColony.get(b.id) === destStar ? 0 : 1;
+      return sameA - sameB || b.popUnits - a.popUnits || a.id - b.id;
+    });
+    for (const donor of ranked) {
+      if (want <= 0 || commands >= 4) break;
+      if (donor.id === need.id) continue;
+      const grp = donor.groups.find((g) => g.race === me && !g.unrest);
+      if (!grp) continue;
+      const taken = drafted.get(donor.id) ?? 0;
+      const spareUnits = Math.min(grp.units - 1, donor.popUnits - 3) - taken;
+      if (spareUnits <= 0) continue;
+      const sameSystem = starOfColony.get(donor.id) === destStar;
+      let count = Math.min(2, spareUnits, want);
+      if (!sameSystem) {
+        count = Math.min(count, Math.floor(freighterBudget / 5));
+        if (count <= 0) continue;
+        freighterBudget -= count * 5;
+      }
+      session.submit('move_colonists', { fromColonyId: donor.id, toColonyId: need.id, race: me, count });
+      drafted.set(donor.id, taken + count);
+      want -= count;
+      commands++;
+    }
+  }
 }
 
 // -------------------------------------------------------------- military
@@ -1565,6 +1712,24 @@ function runMilitary(ctx: MincedCtx, intel: Intel, scores: Record<Constraint, nu
       session.submit('declare_war', { target: rival.id });
     }
   }
+  // core worlds: a rival squatting on a victory star is a standing casus
+  // belli for EVERY personality — once no free core world remains for us,
+  // the race goes through them (same winnable-opening gate as alwaysWar)
+  else if (
+    intel.coreStars.size > 0 &&
+    rival &&
+    !intel.atWar &&
+    fleetReady &&
+    advantage >= strikeAdv + 0.2 &&
+    intel.rows.length >= 4 &&
+    !intel.freeTargets.some((t) => t.core) &&
+    planned.colonies.some((c) => c.owner === rival.id && intel.coreWorlds.has(c.planetId))
+  ) {
+    const opening = pickAttackStar(ctx, intel, warships, spy);
+    if (opening !== null && (opening.guard === 0 || myWeight * 0.8 >= opening.guard * STRIKE_SOFTNESS)) {
+      session.submit('declare_war', { target: rival.id });
+    }
+  }
 
   if (memory.attackStar === null) {
     if (intel.atWar && rival && fleetReady && advantage >= strikeAdv) {
@@ -1664,11 +1829,23 @@ function runMilitary(ctx: MincedCtx, intel: Intel, scores: Record<Constraint, nu
         muster = star;
       }
     }
+    const targetStar: number = memory.attackStar;
+    const settleOp = lairSettleOp(ctx, intel) === targetStar;
     for (const [from, st] of stacks) {
-      const dest = st.w >= barW ? memory.attackStar : muster;
+      const dest: number = st.w >= barW ? targetStar : (muster ?? targetStar);
       if (dest === from) continue;
+      const ids = [...st.ids];
+      // no-splinter lair op: the settler rides the clearing jump — the
+      // 12-weight deterministic clear is lossless, so the civilian is safe
+      if (ordinaryLair && settleOp && dest === targetStar) {
+        for (const s of planned.ships) {
+          if (s.owner === me && s.shipKind === 'colony_ship' && s.location.kind === 'star' && s.location.starId === from) {
+            ids.push(s.id);
+          }
+        }
+      }
       const ok = selectors.moveOptions(planned, me, from).some((o) => o.reachable && o.starId === dest);
-      if (ok) session.submit('move_ships', { shipIds: st.ids, destStarId: dest });
+      if (ok) session.submit('move_ships', { shipIds: ids.slice(0, 20), destStarId: dest });
     }
   }
 
@@ -1722,7 +1899,8 @@ function pickAttackStar(
     const guard = (spy?.stacks.get(sid) ?? 0) + (bases.get(sid) ?? 0) * 4;
     const target = starById.get(sid);
     const dist = originObj && target ? starDistance(originObj, target) : 0;
-    const score = pop - guard * 1.2 - dist * 0.15;
+    // victory stars first — the core-worlds race goes through them
+    const score = pop - guard * 1.2 - dist * 0.15 + (intel.coreStars.has(sid) ? 1000 : 0);
     if (score > bestScore) {
       bestScore = score;
       best = { starId: sid, guard };
@@ -1815,6 +1993,7 @@ export function mincedTurn(ctx: MincedCtx): void {
   runResearch(ctx, intel, plan, scores);
   runLeaders(ctx, intel, plan);
   runColonies(ctx, intel, plan, scores);
+  runPopulationLogistics(ctx, intel);
   runExpansionMoves(ctx, intel);
   runMilitary(ctx, intel, scores);
 }

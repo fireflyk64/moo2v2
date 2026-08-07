@@ -207,12 +207,20 @@
     return full.toDataURL('image/png');
   }
 
+  // replay mode (0.32.0): a saved game's reconstructed state + a chosen
+  // perspective replace the live session. All order-issuing UI is inert.
+  const {
+    replayState = null,
+    replayViewAs = null,
+  }: { replayState?: import('@engine/types').GameState | null; replayViewAs?: number | null } = $props();
+  const replay = $derived(replayState !== null);
   const session = () => getActive()!.session;
   const gs = $derived.by(() => {
+    if (replayState) return replayState;
     void app.version;
     return session().getPlanned();
   });
-  const me = () => session().playerId;
+  const me = () => (replayState ? (replayViewAs ?? 0) : session().playerId);
   const foeName = (id: number) => gs?.empires.find((e) => e.id === id)?.raceName ?? `#${id}`;
   const view = $derived.by(() => (gs ? selectors.galaxyView(gs, me()) : []));
   const fleets = $derived.by(() => (gs ? selectors.fleetRows(gs, me()) : []));
@@ -547,7 +555,7 @@
 
   function clickStar(starId: number) {
     if (Date.now() < suppressClickUntil) return;
-    if (selectedShipIds.length > 0 && selectedStarId !== starId) {
+    if (!replay && selectedShipIds.length > 0 && selectedStarId !== starId) {
       // prune ships that no longer exist (destroyed in a battle) so a stale
       // selection can't wedge star selection with endless invalid moves
       const live = new Set(fleets.map((f) => f.ship.id));
@@ -585,6 +593,7 @@
     else selectedShipIds = [ids[0]!];
   }
   function onMapKey(e: KeyboardEvent) {
+    if (replay) return;
     const t = e.target as HTMLElement | null;
     const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -631,10 +640,12 @@
   }
 
   function colonize(shipId: number, planetId: number) {
+    if (replay) return;
     const res = session().submit('colonize', { shipId, planetId });
     if (res.error) showNote(`⛔ ${res.error}`);
   }
   function outpost(shipId: number, planetId: number) {
+    if (replay) return;
     const res = session().submit('build_outpost', { shipId, planetId });
     if (res.error) showNote(`⛔ ${res.error}`);
   }
@@ -660,6 +671,7 @@
     else outpost(f.ship.id, target.id);
   }
   function hotTransports(kind: 'load' | 'unload') {
+    if (replay) return;
     const pool = selectedShipIds.length ? shipsHere.filter((f) => selectedShipIds.includes(f.ship.id)) : shipsHere;
     const colonyOf = (f: (typeof shipsHere)[number]) =>
       kind === 'load' ? f.canLoadFromColonyId : f.canUnloadToColonyId;
@@ -761,7 +773,7 @@
     return [...byColony.values()];
   });
   function cancelPinnedBuild(colonyId: number, pinIndex: number) {
-    if (!gs) return;
+    if (replay || !gs) return;
     const colony = gs.colonies.find((c) => c.id === colonyId);
     if (!colony) return;
     const res = cancelPin(session(), app.pins, colony, pinIndex);
@@ -777,7 +789,7 @@
   let renameStarText = $state('');
   const focusNow = (el: HTMLElement) => el.focus();
   const canRenameSelected = $derived.by(() => {
-    if (!gs || !selected) return false;
+    if (replay || !gs || !selected) return false;
     return gs.colonies.some((c) => {
       if (c.owner !== me()) return false;
       const p = gs.planets.find((x) => x.id === c.planetId);
@@ -927,6 +939,8 @@
     red: { spectral: 'M', common: 'red dwarf/giant', coreR: 5.8, coronaR: 12.5, spikeLen: 11, spikeCount: 2, spikeAlpha: 0.15, glow: 0.14, hotCoreTint: 0.18 },
     brown: { spectral: 'L/T', common: 'brown dwarf', coreR: 5.1, coronaR: 10.5, spikeLen: 0, spikeCount: 0, spikeAlpha: 0, glow: 0.09, hotCoreTint: 0.12 },
     black_hole: { spectral: 'X', common: 'black hole', coreR: 0, coronaR: 0, spikeLen: 0, spikeCount: 0, spikeAlpha: 0, glow: 0, hotCoreTint: 0 },
+    // core world: an emerald beacon nature never made — biggest glow on the map
+    green: { spectral: '★', common: 'core world (victory star)', coreR: 8.6, coronaR: 21, spikeLen: 28, spikeCount: 6, spikeAlpha: 0.55, glow: 0.34, hotCoreTint: 0.46 },
   };
 
   const SPIKE_ANGLES: Record<StarColor, number[]> = {
@@ -937,11 +951,14 @@
     red: [0, 90],
     brown: [],
     black_hole: [],
+    green: [0, 30, 60, 90, 120, 150],
   };
 
   function starClassText(color: StarColor): string {
     const v = STAR_VISUALS[color];
-    return color === 'black_hole' ? 'black hole' : `${v.spectral}-class ${v.common}`;
+    if (color === 'black_hole') return 'black hole';
+    if (color === 'green') return 'CORE WORLD — hold every green star to win';
+    return `${v.spectral}-class ${v.common}`;
   }
 
   function starSpikeStroke(color: StarColor): string {
@@ -957,7 +974,7 @@
     {#if app.autopilot.enabled}
       <!-- autopilot players live on the map: the same sliders as the colony
            screen, so weights are adjustable without leaving it -->
-      <AutopilotBar />
+      {#if !replay}<AutopilotBar />{/if}
     {/if}
     {#if mapNote}
       <div class="mapnote" data-testid="map-note">{mapNote}</div>
@@ -1441,7 +1458,7 @@
                 <button
                   data-testid="scrap-outpost-{c.id}"
                   title="dismantle this outpost for 25 BC salvage (its fuel-range support goes with it)"
-                  onclick={() => session().submit('scrap_outpost', { colonyId: c.id })}
+                  onclick={() => !replay && session().submit('scrap_outpost', { colonyId: c.id })}
                 >🗑 scrap outpost</button>
               {/if}
               {#if !c.outpost && (c.owner === me() || shipsHere.length > 0)}
@@ -1467,7 +1484,7 @@
                           value={gs?.colonies.find((x) => x.id === c.id)?.groundTactic ?? ''}
                           onchange={(e) => {
                             const v = (e.target as HTMLSelectElement).value;
-                            session().submit('set_ground_tactic', { colonyId: c.id, tactic: v || null });
+                            if (!replay) session().submit('set_ground_tactic', { colonyId: c.id, tactic: v || null });
                           }}
                         >
                           <option value="">standard defense</option>
@@ -1490,7 +1507,7 @@
                 <button
                   data-testid="construct-{p.id}"
                   title="rebuild this body into a barren world (consumes the construction ship)"
-                  onclick={() => session().submit('construct_planet', { shipId: f.ship.id, planetId: p.id })}
+                  onclick={() => !replay && session().submit('construct_planet', { shipId: f.ship.id, planetId: p.id })}
                 >construct planet</button>
               {/if}
             {/each}

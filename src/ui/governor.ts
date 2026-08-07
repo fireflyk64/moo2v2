@@ -57,7 +57,7 @@ export function governColonies(
   pinned?: ReadonlySet<number>,
 ): void {
   const planned = session.getPlanned();
-  if (!planned || planned.winner !== null) return;
+  if (!planned || (planned.winner !== null && !planned.victoryContinued)) return;
   const me = session.playerId;
   const empire = planned.empires.find((e) => e.id === me);
   if (!empire) return;

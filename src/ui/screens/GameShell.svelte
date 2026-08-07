@@ -86,7 +86,7 @@
   let governedFp = '';
   $effect(() => {
     const s = gs;
-    if (!s || !app.autopilot.enabled || s.phase !== 'planning' || s.winner !== null) return;
+    if (!s || !app.autopilot.enabled || s.phase !== 'planning' || (s.winner !== null && !s.victoryContinued)) return;
     const pinnedIds = Object.keys(app.pins).filter((k) => (app.pins[Number(k)]?.length ?? 0) > 0);
     const fp = `${s.turn}:${JSON.stringify(app.autopilot.weights)}:${pinnedIds.join(',')}`;
     if (fp === governedFp) return;
@@ -98,7 +98,7 @@
   let exploredFp = -1;
   $effect(() => {
     const s = gs;
-    if (!s || !app.autoExplore || s.phase !== 'planning' || s.winner !== null || s.turn === exploredFp) return;
+    if (!s || !app.autoExplore || s.phase !== 'planning' || (s.winner !== null && !s.victoryContinued) || s.turn === exploredFp) return;
     exploredFp = s.turn;
     autoExploreScouts(session());
   });
@@ -108,7 +108,7 @@
   let researchFp = '';
   $effect(() => {
     const s = gs;
-    if (!s || s.phase !== 'planning' || s.winner !== null || !app.researchQueue.length) return;
+    if (!s || s.phase !== 'planning' || (s.winner !== null && !s.victoryContinued) || !app.researchQueue.length) return;
     const emp = s.empires.find((e) => e.id === session().playerId);
     if (!emp || emp.research.fieldNum !== null) return;
     const fp = `${s.turn}:${app.researchQueue.map((q) => q.fieldNum).join(',')}`;
@@ -178,6 +178,8 @@
       .filter(({ p, bot }) => p.id !== session().playerId && (!p.connected || bot));
   });
   const winner = $derived(gs?.winner ?? null);
+  /** decided AND nobody chose to keep playing: freezes autopilot/turn UX */
+  const gameOver = $derived(winner !== null && !gs?.victoryContinued);
   const authHash = $derived.by(() => {
     void app.version;
     const auth = session().getState();
@@ -353,7 +355,7 @@
   /** what (if anything) needs the player right now — checked at each new
    * planning turn against fresh state + the just-resolved turn's reports */
   function ffInterrupt(resolvedTurn: number): string | null {
-    if (winner !== null) return 'the game is decided';
+    if (gameOver) return 'the game is decided';
     if (app.contactFlash) return 'CONTACT';
     if (app.viewing) return 'a battle replay is up';
     if (app.viewingGround) return 'an invasion playback is up';
@@ -396,7 +398,7 @@
       ffTimer = null;
       if (!ffActive) return;
       const now = session().getPlanned();
-      if (!now || now.phase !== 'planning' || now.winner !== null) return;
+      if (!now || now.phase !== 'planning' || (now.winner !== null && !now.victoryContinued)) return;
       if (fastActive) endTurn();
       else if (!iCommitted) {
         flushTelemetry();
@@ -612,7 +614,7 @@
     const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
     if (typing || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
     // never steal keys from a modal (battle orders, replay, timelapse, contact, scan)
-    if (myBattle || app.viewing || app.viewingGround || app.contactFlash || timelapse || starScans.length > 0 || meetQueue.length > 0 || winner !== null) return;
+    if (myBattle || app.viewing || app.viewingGround || app.contactFlash || timelapse || starScans.length > 0 || meetQueue.length > 0 || gameOver) return;
     if (e.key.length === 1 && e.key >= '1' && e.key <= '7') {
       e.preventDefault();
       tab = TAB_KEYS[Number(e.key) - 1]!;
@@ -907,12 +909,15 @@
       ⚡ Fast start: you are {fastAhead} turns ahead of the slowest player{slowestInfo ? ` (${slowestInfo.name})` : ''}. When empires meet, CONTACT rewinds everyone to the synced turn — progress past it is replayed from your submitted orders.
     </div>
   {/if}
-  {#if winner !== null}
-    {@const winLabel = gs.winType === 'council' ? 'is elected supreme ruler of the council' : gs.winType === 'antaran' ? 'has conquered the Andromedan home' : 'wins by conquest'}
+  {#if winner !== null && !gs?.victoryContinued}
+    {@const winLabel = gs.winType === 'council' ? 'is elected supreme ruler of the council' : gs.winType === 'antaran' ? 'has conquered the Andromedan home' : gs.winType === 'core_worlds' ? 'holds every core world' : 'wins by conquest'}
     <div class="banner" data-testid="victory">
       Victory: {roster.find((p) => p.id === winner)?.name ?? winner} {winLabel}!
       <button data-testid="timelapse-watch-victory" title="replay the whole campaign on an unfogged map" onclick={() => app.timelapseRequest++}>
         🎬 watch the campaign timelapse
+      </button>
+      <button data-testid="victory-continue" title="the win stays on record, but turns keep advancing for everyone" onclick={() => session().submit('continue_game', {})}>
+        ▶ keep playing
       </button>
     </div>
   {/if}

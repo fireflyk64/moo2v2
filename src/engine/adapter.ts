@@ -100,6 +100,7 @@ export function initGame(start: EngineGameStart): GameState {
     antarans: { nextRaidTurn: 25, assaultBy: null },
     winner: null,
     winType: null,
+    ...(galaxy.coreWorlds ? { coreWorlds: galaxy.coreWorlds } : {}),
   };
 
   // starting knowledge per start mode. DEBUG "unlock all" (only alongside
@@ -304,6 +305,7 @@ function advancedStart(state: GameState, homePlanets: number[], traits: RaceTrai
   const ranked: Array<{ starId: number; owner: number; d: number }> = [];
   for (const star of state.stars) {
     if (takenHomes.has(star.id)) continue;
+    if (star.color === 'green') continue; // core worlds start unowned, never pre-settled
     if (!state.planets.some((p) => p.starId === star.id && p.body === 'planet')) continue;
     let owner = 0;
     let bestD = Infinity;
@@ -558,9 +560,11 @@ export function createGameEngine() {
     return empireContactPairs(state);
   },
 
-  /** protocol hook (fast-start): victory also ends the async phase */
+  /** protocol hook (fast-start): victory also ends the async phase — unless
+   * the table chose to keep playing (continue_game), which resumes turns
+   * while the recorded win stands */
   winnerOf(state: GameState): number | null {
-    return state.winner;
+    return state.victoryContinued ? null : state.winner;
   },
 
   turnOf(state: GameState): number {
@@ -616,11 +620,13 @@ function bigEmpireStart(state: GameState): void {
   // candidate planets: colonizable, unguarded, not already a homeworld
   const guarded = new Set(state.monsters.map((m) => m.starId));
   const homeStars = new Set(homeStarOf.values());
+  const greenStars = new Set(state.stars.filter((s) => s.color === 'green').map((s) => s.id));
   const candidates = state.planets.filter(
     (p) =>
       p.body === 'planet' &&
       !guarded.has(p.starId) &&
       !homeStars.has(p.starId) &&
+      !greenStars.has(p.starId) && // core worlds start unowned, never pre-settled
       !state.colonies.some((c) => c.planetId === p.id),
   );
 

@@ -287,7 +287,7 @@ export function seedMonsters(state: GameState): void {
   // descending distance and take the first that keeps the graph whole.
   const candidates: Array<{ starId: number; score: number }> = [];
   for (const star of state.stars) {
-    if (homeStars.has(star.id) || star.color === 'black_hole' || star.sym === -1) continue;
+    if (homeStars.has(star.id) || star.color === 'black_hole' || star.color === 'green' || star.sym === -1) continue;
     let nearest = Infinity;
     for (const hs of homeStars) {
       const h = state.stars.find((s) => s.id === hs)!;
@@ -309,6 +309,8 @@ export function seedMonsters(state: GameState): void {
   const guarded = new Set<number>(orion ? [orion.starId] : []);
   for (const star of state.stars) {
     if (homeStars.has(star.id) || star.id === orion?.starId || star.sym === -1) continue;
+    // core worlds are contested by the players, never fenced by keepers
+    if (star.color === 'green') continue;
     if (!state.planets.some((p) => p.starId === star.id && p.body === 'planet')) continue;
     const pct = systemPrizeworthy(state, star.id) ? 55 : 8;
     if (rng.chancePct(pct)) {

@@ -46,6 +46,7 @@
     red: 'class M — red dwarf',
     brown: 'class L/T — brown dwarf',
     black_hole: 'collapsed singularity',
+    green: 'CORE WORLD — a victory star: hold a colony on every green star to win',
   };
 
   const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];

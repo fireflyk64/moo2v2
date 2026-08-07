@@ -4,6 +4,7 @@
   import Home from './screens/Home.svelte';
   import Lobby from './screens/Lobby.svelte';
   import GameShell from './screens/GameShell.svelte';
+  import ReplayViewer from './screens/ReplayViewer.svelte';
   import { app } from './state.svelte';
 
   let route = $state(location.hash);
@@ -66,6 +67,8 @@
     <Home />
   {:else if app.screen === 'lobby'}
     <Lobby />
+  {:else if app.screen === 'replay'}
+    <ReplayViewer />
   {:else}
     <GameShell />
     {#if route === '#battle-lab'}

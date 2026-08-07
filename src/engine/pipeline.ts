@@ -18,6 +18,7 @@ import { ceilDiv } from './imath';
 import { applyTerraformStep, constructAsBarren, convertiblePlanetsInSystem, terraformCost, unsettledPlanetsInSystem } from './terraform';
 import { androidUnitsOf, colonyMaxPop, colonyOutput, colonyPopUnits, farmingViable, foodLogistics, groupGrowthK, MARINES_PER_TRANSPORT, marinesOf, maxPopulation, organicUnitsOf, traitsOf } from './economy';
 import { applyFoundingSpecials, normalizeJobsForGroup } from './commands';
+import { applyReconcileSchedules, reconcileActive, reconcileEspionage } from './reconcile';
 import { rngFor } from './rng';
 import { applyResearch, appPickableBy, availableFields, grantApp } from './research';
 import { applicationsOfField } from './data/index';
@@ -32,13 +33,19 @@ export interface AdvanceResult {
 export function advanceTurn(state: GameState): AdvanceResult {
   const events: TurnEvent[] = [];
 
-  s1_population(state, events);
-  const outputs = s2_colonyOutput(state, events);
-  s3_buildAdvance(state, outputs, events);
-  s4_research(state, outputs, events);
-  // S5 spawn happens inside s3 (completions instantiate immediately at the colony's star)
+  if (reconcileActive(state)) {
+    // reconciliation: the recorded scripts ARE the economy — no growth, no
+    // yards, no labs beyond what the players' own games produced
+    applyReconcileSchedules(state, events);
+  } else {
+    s1_population(state, events);
+    const outputs = s2_colonyOutput(state, events);
+    s3_buildAdvance(state, outputs, events);
+    s4_research(state, outputs, events);
+    // S5 spawn happens inside s3 (completions instantiate immediately at the colony's star)
+  }
   s6_movement(state, events);
-  s6b_discoveries(state, events);
+  if (!reconcileActive(state)) s6b_discoveries(state, events);
 
   // S7 encounters
   const battles = detectBattles(state);
@@ -98,6 +105,20 @@ export function resolveCombat(state: GameState): AdvanceResult {
 function finishTurn(state: GameState, events: TurnEvent[], foughtAt: ReadonlySet<string> = new Set()): void {
   resolveInvasions(state, events, foughtAt); // S10 ground operations
   s10_strandedRetreat(state, events); // ships beyond fuel range limp home
+  if (reconcileActive(state)) {
+    // reconciliation keeps the WAR systems and drops the economy systems:
+    // no upkeep books, no barracks drills (garrisons are scripted), no
+    // leaders, no Antarans, no random events, no council — but conquered
+    // populations still assimilate, designs still track granted tech, and
+    // spies act under the reconciliation doctrine
+    s11_diplomacyUpkeep(state);
+    assimilate(state, events);
+    reconcileEspionage(state, events);
+    s11_defaultDesignRefresh(state, events);
+    s12_victory(state, events);
+    s13_endTurn(state);
+    return;
+  }
   s10_shipUpkeep(state, events);
   s11_diplomacyUpkeep(state); // peace handshakes
   assimilate(state, events); // S11 conquered populations settle in
@@ -808,6 +829,28 @@ function s12_victory(state: GameState, events: TurnEvent[]): void {
     state.winner = alive[0]!.id;
     state.winType = 'conquest';
     events.push({ visibleTo: -1, kind: 'victory', payload: { empireId: state.winner, type: 'conquest' } });
+  }
+  // core worlds: hold a real (>=1 pop unit) colony on EVERY designated world.
+  // Distinct planets have distinct owners, so at most one empire can qualify.
+  const coreIds = state.coreWorlds ?? [];
+  if (coreIds.length > 0 && state.winner === null) {
+    for (const empire of alive) {
+      const holdsAll = coreIds.every((pid) =>
+        state.colonies.some(
+          (c) =>
+            c.planetId === pid &&
+            c.owner === empire.id &&
+            !c.outpost &&
+            c.groups.reduce((n, g) => n + g.popK, 0) >= 1000,
+        ),
+      );
+      if (holdsAll) {
+        state.winner = empire.id;
+        state.winType = 'core_worlds';
+        events.push({ visibleTo: -1, kind: 'victory', payload: { empireId: empire.id, type: 'core_worlds' } });
+        break;
+      }
+    }
   }
 }
 

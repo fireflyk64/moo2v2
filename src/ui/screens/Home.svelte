@@ -6,6 +6,7 @@
   import { DEFAULT_SERVER, enterRoom, enterSoloGame, type SoloBotSpec } from '../net';
   import { enterPbmGame, pbmToken } from '../pbm';
   import { describeSaveError, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
+  import { buildReplay, setCurrentReplay } from '../replay';
   import { app, bindActive } from '../state.svelte';
   import { BRAND } from '../brand';
   import { THEMES, applyTheme, currentTheme } from '../themes';
@@ -129,6 +130,24 @@
       preview = await previewSave(new Uint8Array(await file.arrayBuffer()));
       resumeTurn = 'latest';
       loadNote = '';
+    } catch (e) {
+      loadNote = '';
+      app.error = describeSaveError(e);
+    }
+  }
+
+  /** replay mode: no room, no import — reconstruct the save's history and
+   * open the viewer (any player's perspective, any turn) */
+  async function watchReplay() {
+    if (!preview) return;
+    app.error = '';
+    loadNote = 'rebuilding history…';
+    try {
+      const data = await buildReplay(preview, (pct) => (loadNote = `rebuilding history… ${pct}%`));
+      setCurrentReplay(data);
+      preview = null;
+      loadNote = '';
+      app.screen = 'replay';
     } catch (e) {
       loadNote = '';
       app.error = describeSaveError(e);
@@ -264,6 +283,9 @@
       </label>
       <span>
         <button data-testid="confirm-load" onclick={loadPreviewed} disabled={app.connecting}>Load as host</button>
+        <button data-testid="watch-replay" title="scrub the whole game turn by turn through any player's eyes — nothing is imported or resumed" onclick={watchReplay} disabled={app.connecting}>
+          🎞 Watch replay
+        </button>
         <button onclick={() => (preview = null)}>Cancel</button>
       </span>
       <p class="dim">

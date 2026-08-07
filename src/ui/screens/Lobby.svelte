@@ -336,11 +336,26 @@
         <option value={16}>16</option>
       </select>
     </label>
-    <label title="the galaxy is built from identical rotated wedges — every player starts on the edge with exactly the same nearby stars, planets and keepers">
+    <label title="Core Worlds victory race: the galaxy gets players+2 GREEN stars, each guaranteed at least one real world. Hold a colony (1+ pop) on every designated core world at once to win — the table may still choose to keep playing. central: the green stars ring the map center; scattered: they land anywhere. Overrides the mirror galaxy while on.">
+      🟢 Core worlds:
+      <select
+        data-testid="core-worlds"
+        value={settings.coreWorlds ?? 'off'}
+        onchange={(e) => updateSetting('coreWorlds', (e.target as HTMLSelectElement).value as GameSettings['coreWorlds'])}
+      >
+        <option value="off">off</option>
+        <option value="central">central (ring at map center)</option>
+        <option value="random">scattered (anywhere)</option>
+      </select>
+    </label>
+    <label title={(settings.coreWorlds ?? 'off') !== 'off'
+      ? 'core worlds places its own stars — the mirror layout is superseded while the variant is on'
+      : 'the galaxy is built from identical rotated wedges — every player starts on the edge with exactly the same nearby stars, planets and keepers'}>
       <input
         type="checkbox"
         data-testid="mode-mirror"
-        checked={settings.mirror ?? false}
+        disabled={(settings.coreWorlds ?? 'off') !== 'off'}
+        checked={(settings.coreWorlds ?? 'off') === 'off' && (settings.mirror ?? false)}
         onchange={(e) => updateSetting('mirror', (e.target as HTMLInputElement).checked)}
       />
       Mirror galaxy
@@ -431,7 +446,7 @@
 {:else if settings}
   <p class="dim" data-testid="settings-view">
     {settings.galaxySize} galaxy, {settings.startMode} start —
-    {MODE_HELP.filter((m) => settings.modes[m.key]).map((m) => m.label).join(', ') || 'no optional modes'}{(settings.realtimeTurnSeconds ?? 0) > 0 ? ` — ⏱ REALTIME ${settings.realtimeTurnSeconds}s turns` : (settings.autoTurnSeconds ?? 0) > 0 ? ` — auto-turn ${settings.autoTurnSeconds}s after all but one commit` : ''}{(settings.pickPoints ?? 10) !== 10 ? ` — ${settings.pickPoints} pick points` : ''}
+    {MODE_HELP.filter((m) => settings.modes[m.key]).map((m) => m.label).join(', ') || 'no optional modes'}{(settings.coreWorlds ?? 'off') !== 'off' ? ` — 🟢 CORE WORLDS (${settings.coreWorlds})` : ''}{(settings.realtimeTurnSeconds ?? 0) > 0 ? ` — ⏱ REALTIME ${settings.realtimeTurnSeconds}s turns` : (settings.autoTurnSeconds ?? 0) > 0 ? ` — auto-turn ${settings.autoTurnSeconds}s after all but one commit` : ''}{(settings.pickPoints ?? 10) !== 10 ? ` — ${settings.pickPoints} pick points` : ''}
   </p>
 {/if}
 

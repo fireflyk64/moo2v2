@@ -1111,6 +1111,21 @@ const applyAssignLeader: Applier = (state, cmd) => {
 
 // ---------- resign (concession) ----------
 
+// ---------- continue after victory ----------
+
+/** Any live empire may keep the table playing after a declared victory: the
+ * win stays on record (winner/winType) but turns resume. */
+const validateContinueGame: Validator = (state) => {
+  if (state.winner === null) return 'no victory to continue past';
+  if (state.victoryContinued) return 'the game already continues';
+  return null;
+};
+
+const applyContinueGame: Applier = (state, cmd, events) => {
+  state.victoryContinued = true;
+  events?.push({ visibleTo: -1, kind: 'game_continued', payload: { empireId: cmd.playerId } });
+};
+
 const validateResign: Validator = () => null; // any live empire may concede
 
 const applyResign: Applier = (state, cmd) => {
@@ -1718,6 +1733,7 @@ export const COMMANDS: Record<string, { validate: Validator; apply: Applier }> =
   diplo_respond: { validate: validateRespond, apply: applyRespond },
   attack_antarans: { validate: validateAttackAntarans, apply: applyAttackAntarans },
   resign: { validate: validateResign, apply: applyResign },
+  continue_game: { validate: validateContinueGame, apply: applyContinueGame },
   cast_vote: { validate: validateVote, apply: applyVote },
   move_colonists: { validate: validateMoveColonists, apply: applyMoveColonists },
   trait_reassignment: { validate: validateTraitReassign, apply: applyTraitReassign },
@@ -1741,6 +1757,14 @@ export function validateCommand(state: GameState, cmd: EngineCommand): string | 
     if (cmd.turn !== state.turn) return `command for turn ${cmd.turn}, current ${state.turn}`;
     if (state.phase === 'battle_orders' && cmd.kind !== 'battle_orders') {
       return 'battles are being resolved; only battle orders are accepted';
+    }
+    // reconciliation: colonies and population follow the recorded script —
+    // the settle/migration commands are the script's job, never a player's
+    if (
+      state.reconcile !== undefined &&
+      ['colonize', 'build_outpost', 'construct_planet', 'move_colonists', 'load_transports', 'unload_transports'].includes(cmd.kind)
+    ) {
+      return 'reconciliation: colonies and population follow the recorded script';
     }
   }
   const def = COMMANDS[cmd.kind];
