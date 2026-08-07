@@ -118,6 +118,15 @@ function foundScripted(
   }
   state.colonies.push(colony);
   state.colonies.sort((a, b) => a.id - b.id);
+  // the record proves the keeper fell in the player's own game: monsters at
+  // a scripted settlement die with it (Antaran raiders are not lair keepers)
+  const slain = state.monsters.filter((m) => m.starId === planet.starId && !m.kind.startsWith('antaran_'));
+  if (slain.length) {
+    state.monsters = state.monsters.filter((m) => !slain.includes(m));
+    for (const m of slain) {
+      events.push({ visibleTo: -1, kind: 'monster_slain', payload: { kind: m.kind, starId: planet.starId, empireId: empire.id } });
+    }
+  }
   if (!outpost) applyFoundingSpecials(state, planet, colony, events);
   if (!empire.exploredStars.includes(star.id)) {
     empire.exploredStars.push(star.id);
@@ -345,18 +354,29 @@ export function applyReconcileSchedules(state: GameState, events: TurnEvent[]): 
 /** Scoring: the reconciliation is decided once the save games run out of
  * turns (ReconcileState.endTurn = min last-turn across the submitted saves).
  * If nobody has won outright by then, the population that remains elects a
- * leader — the biggest empire by people takes a council-style victory. */
+ * leader — the biggest empire by people takes a council-style victory. In a
+ * core-worlds game, the election counts ONLY the people living on the green
+ * stars' designated worlds (total population breaks ties). */
 export function reconcileFinalScoring(state: GameState, events: TurnEvent[]): void {
   const endTurn = state.reconcile?.endTurn;
   if (endTurn === undefined || state.turn < endTurn || state.winner !== null) return;
   const living = state.empires.filter((e) => !e.eliminated);
   if (!living.length) return;
-  const popOf = (id: number) =>
-    state.colonies.filter((c) => c.owner === id).reduce((n, c) => n + c.groups.reduce((m, g) => m + g.popK, 0), 0);
-  const leader = living.sort((a, b) => popOf(b.id) - popOf(a.id) || a.id - b.id)[0]!;
+  const coreIds = new Set(state.coreWorlds ?? []);
+  const popOf = (id: number, coreOnly: boolean) =>
+    state.colonies
+      .filter((c) => c.owner === id && (!coreOnly || coreIds.has(c.planetId)))
+      .reduce((n, c) => n + c.groups.reduce((m, g) => m + g.popK, 0), 0);
+  const leader = living.sort((a, b) => {
+    if (coreIds.size) {
+      const d = popOf(b.id, true) - popOf(a.id, true);
+      if (d !== 0) return d;
+    }
+    return popOf(b.id, false) - popOf(a.id, false) || a.id - b.id;
+  })[0]!;
   state.winner = leader.id;
-  state.winType = 'council';
-  events.push({ visibleTo: -1, kind: 'victory', payload: { empireId: leader.id, type: 'council', reconciled: true } });
+  state.winType = coreIds.size && popOf(leader.id, true) > 0 ? 'core_worlds' : 'council';
+  events.push({ visibleTo: -1, kind: 'victory', payload: { empireId: leader.id, type: state.winType, reconciled: true } });
 }
 
 /** reconciliation espionage: auto-targeted rings, passive-tech theft only,

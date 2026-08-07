@@ -22,6 +22,7 @@ import type { Empire, GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 import { botRaceById, botRacePicks } from './botRaces';
 import { freshOnionMemory, onionBattleOrders, onionTurn, pickAssaultPlanet, pickFormation, pickInvadeTactic, planetScore, type OnionMemory } from './onionBot';
+import { freshReconcileMemory, reconcileBotTurn } from './reconcileBot';
 import { freshMincedMemory, mincedBattleOrders, mincedTurn, type MincedMemory } from './mincedOnion';
 
 export type BotMode = 'parity' | 'fair';
@@ -168,6 +169,7 @@ export class SoloBot {
   mirrorSettlersGranted = 0;
   /** cross-turn plan/commitment state for the onion brain */
   private onionMemory: OnionMemory = freshOnionMemory();
+  private reconcileMemory = freshReconcileMemory();
   /** cross-turn plan/commitment/observation state for the minced brain */
   private mincedMemory: MincedMemory = freshMincedMemory();
 
@@ -403,6 +405,19 @@ export class SoloBot {
     // the terrain shades the pick — set once and re-set only when it changes
     this.orderGroundDoctrine(state, me);
 
+    // ---- reconciliation games: the economy is a script, fleet play is the
+    // game — every brain defers to the dedicated reconcile fleet doctrine
+    // (mass into strike groups, price installations, hit soft targets) ----
+    if (state.reconcile !== undefined) {
+      reconcileBotTurn({
+        session: this.session,
+        state: this.session.getPlanned() ?? state,
+        me,
+        tactic: 'hybrid',
+        memory: this.reconcileMemory,
+      });
+      return;
+    }
     // ---- onion brain: the constraint-driven doctrine owns the whole turn
     // (research, colonies, expansion, military) — shared shell above (lobby,
     // commit, concession hygiene, parity grants) stays identical for A/B

@@ -8,7 +8,7 @@
   import { describeSaveError, downloadBlob, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
   import { buildReplay, setCurrentReplay } from '../replay';
   import { enterAsyncGame } from '../net';
-  import { runReconciliation } from '../reconcileRun';
+  import { buildReconciliationKickoff, runReconciliation } from '../reconcileRun';
   import { buildReconciliationStart } from '@storage/reconcile';
   import { encodeSaveFile, verifySaveEnvelope, type SaveEnvelope } from '@storage/index';
   import { generateSeed } from '@protocol/setup';
@@ -327,6 +327,30 @@
     }
   }
 
+  /** live reconciliation: same merge, but HUMANS fly the fleets — generates
+   * a kickoff save at the base turn with a short realtime turn timer */
+  async function createLiveReconciliation() {
+    if (!reconRows.length) return;
+    app.error = '';
+    try {
+      reconNote = 'building the shared base…';
+      await new Promise((r) => setTimeout(r, 0));
+      const start = buildReconciliationStart(reconRows.map((r) => ({ envelope: r.preview.envelope, seat: r.seat })));
+      reconWarnings = start.warnings;
+      const envelope = buildReconciliationKickoff(start);
+      const bytes = await encodeSaveFile(envelope);
+      const fname = `moo2v2-reconciliation-live-turn${envelope.game.last_turn}.moo2save`;
+      downloadBlob(fname, new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
+      preview = await previewSave(bytes);
+      resumeTurn = 'latest';
+      asyncSeat = 0;
+      reconNote = `✓ ${fname} — resumes at turn ${envelope.game.last_turn} with a ${'{'}20s{'}'} realtime turn clock. Load as host and everyone joins by name (bots stand in for the missing), or ⏳ Play async to fight the bots alone. Scoring is unchanged: when the scripts run out, the population (core worlds count on the green stars) decides.`;
+    } catch (e) {
+      reconNote = '';
+      app.error = describeSaveError(e);
+    }
+  }
+
   async function watchReconciliation() {
     if (!reconEnvelope) return;
     reconNote = 'rebuilding history…';
@@ -592,7 +616,8 @@
     {#each reconWarnings as w, i (i)}
       <p class="warnline" data-testid="recon-warning">⚠ {w}</p>
     {/each}
-    <button data-testid="recon-run" onclick={reconcileNow} disabled={!reconRows.length || app.connecting}>⚖ Reconcile</button>
+    <button data-testid="recon-run" onclick={reconcileNow} disabled={!reconRows.length || app.connecting}>⚖ Reconcile (bot tactics)</button>
+    <button data-testid="recon-live" title="humans fly the fleets: generates a live save at the shared base turn — short realtime turn timer, colony/research screens locked to the script, same scoring" onclick={createLiveReconciliation} disabled={!reconRows.length || app.connecting}>🎮 Live reconciliation (human tactics)</button>
     {#if reconNote}<p class="dim" data-testid="recon-note">{reconNote}</p>{/if}
     {#if reconEnvelope}
       <span>

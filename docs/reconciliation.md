@@ -28,13 +28,23 @@ Tests: `tests/unit/reconcile.test.ts`, `tests/determinism/reconciliation.test.ts
 - **Reach insurance**: every 5th turn an empire with no outpost ship gets one
   at its strongest world; a scheduled claim evicts a squatting outpost.
 - **War is real**: fuel range, battles, bombardment, defensive structures,
-  invasions vs garrison+militia — the exact main-game rules, bots commanding
-  (alwaysWar, core-worlds pursuit when the variant is on).
+  invasions vs garrison+militia — the exact main-game rules. The bots fly a
+  dedicated fleet doctrine (`src/ui/reconcileBot.ts`): mass into 1-3 strike
+  groups (tactic: consolidated / split / hybrid), price installations at 4
+  frigate-equivalents per defensive structure, jump only when the assembled
+  group clearly outweighs the garrison, soft targets for small groups.
+  Or humans fly them: the LIVE kickoff save resumes the merged game at the
+  base turn under a short realtime clock (colony/research screens locked to
+  the script), bot stand-ins for absent players, same scoring.
+- **Monsters bow to the record**: a scripted colony landing on a guarded
+  world kills its keeper outright — the save proves the fight was won.
 - **Spies**: sabotage targets defensive structures; espionage copies only
   passive techs (armor / drives / fuel cells), only with a ≥10 offense
   advantage or against a democracy, and only on a successful roll.
 - **Scoring**: at the shortest save's final turn, if nobody has won, the
-  biggest surviving population elects a leader (council-style win).
+  biggest surviving population elects a leader (council-style win); in a
+  core-worlds game the election counts the people ON the green stars'
+  designated worlds first (total population breaks ties).
 - **Determinism**: seed and scripts derive from the file set alone — same
   files, same outcome, any order, any machine. Missing players join as plain
   CPUs from the base (warned).

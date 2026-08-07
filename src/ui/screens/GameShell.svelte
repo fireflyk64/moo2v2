@@ -178,6 +178,12 @@
       .filter(({ p, bot }) => p.id !== session().playerId && (!p.connected || bot));
   });
   const winner = $derived(gs?.winner ?? null);
+  /** reconciliation: the economy follows the recorded script — the colony and
+   * research screens are display-only history, so they gray out */
+  const reconcileLive = $derived(gs?.reconcile !== undefined);
+  $effect(() => {
+    if (reconcileLive && (tab === 'colonies' || tab === 'research')) tab = 'map';
+  });
   /** decided AND nobody chose to keep playing: freezes autopilot/turn UX */
   const gameOver = $derived(winner !== null && !gs?.victoryContinued);
   const authHash = $derived.by(() => {
@@ -922,11 +928,11 @@
     </div>
   {/if}
   <nav>
-    <button class:active={tab === 'colonies'} data-testid="tab-colonies" onclick={() => (tab = 'colonies')}>
+    <button class:active={tab === 'colonies'} data-testid="tab-colonies" disabled={reconcileLive} title={reconcileLive ? 'reconciliation: the economy follows the recorded script' : undefined} onclick={() => (tab = 'colonies')}>
       Colonies{#if defaultBuildCount > 0}<span class="idlebadge" data-testid="default-build-badge" title="{defaultBuildCount} colon{defaultBuildCount > 1 ? 'ies are' : 'y is'} not actively constructing (empty queue, housing or trade goods)">{defaultBuildCount}</span>{/if}
     </button>
     <button class:active={tab === 'map'} data-testid="tab-map" onclick={() => (tab = 'map')}>Map</button>
-    <button class:active={tab === 'research'} class:pulse={researchIdle} data-testid="tab-research" onclick={() => (tab = 'research')}>Research</button>
+    <button class:active={tab === 'research'} class:pulse={researchIdle && !reconcileLive} data-testid="tab-research" disabled={reconcileLive} title={reconcileLive ? 'reconciliation: research follows the recorded script' : undefined} onclick={() => (tab = 'research')}>Research</button>
     <button class:active={tab === 'fleets'} data-testid="tab-fleets" onclick={() => (tab = 'fleets')}>
       Fleets{#if fleetsInFlight > 0}<span class="idlebadge flying" data-testid="fleets-in-flight-badge" title="{fleetsInFlight} fleet{fleetsInFlight > 1 ? 's' : ''} in flight">{fleetsInFlight}</span>{/if}
     </button>

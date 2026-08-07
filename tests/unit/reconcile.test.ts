@@ -216,6 +216,31 @@ describe('reconciliation scripted economy', () => {
     expect(colony.groups[0]!.popK).toBeGreaterThanOrEqual(6000); // room only a gaia offers
   });
 
+  it('monsters die when a scripted colony lands on their world (the record proves the kill)', () => {
+    let state = newGame();
+    const planetId = freePlanet(state);
+    const starId = state.planets.find((p) => p.id === planetId)!.starId;
+    state.monsters.push({ id: state.nextId++, kind: 'hydra', starId, dmgStructure: 0 });
+    state.reconcile!.schedules[0]!.colonize.push({ turn: 2, planetId });
+    while (state.turn < 3) state = advance(state);
+    expect(state.colonies.find((c) => c.planetId === planetId)?.owner).toBe(0);
+    expect(state.monsters.some((m) => m.starId === starId)).toBe(false);
+  });
+
+  it('core-worlds scoring: the green stars decide the election, not total population', () => {
+    let state = newGame();
+    state.reconcile!.endTurn = 3;
+    // designate a free world as the core world and hand it to empire 0
+    const planetId = freePlanet(state);
+    state.coreWorlds = [planetId];
+    state.reconcile!.schedules[0]!.colonize.push({ turn: 2, planetId });
+    // empire 1 dwarfs empire 0 in TOTAL population
+    state.colonies.find((c) => c.owner === 1)!.groups[0]!.popK = 30000;
+    while (state.turn <= 3 && state.winner === null) state = advance(state);
+    expect(state.winner).toBe(0); // people on the victory star outrank the masses
+    expect(state.winType).toBe('core_worlds');
+  });
+
   it('when the saves run out of turns, the remaining population elects a leader', () => {
     let state = newGame();
     state.reconcile!.endTurn = 3;

@@ -15,7 +15,8 @@ import type { GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 import type { SaveEnvelope } from '@storage/repo';
 import type { ReconcileStart } from '@storage/reconcile';
-import { freshOnionMemory, onionBattleOrders, onionTurn } from './onionBot';
+import { onionBattleOrders } from './onionBot';
+import { freshReconcileMemory, reconcileBotTurn, type ReconcileTactic } from './reconcileBot';
 
 /** safety slack past the scoring turn (the election decides AT endTurn) */
 const AFTER_END_SLACK = 5;
@@ -28,7 +29,7 @@ export interface ReconcileRunResult {
 export async function runReconciliation(
   start: ReconcileStart,
   onProgress?: (turn: number, cap: number) => void,
-  opts: { extraTurns?: number } = {},
+  opts: { extraTurns?: number; tactics?: Record<number, ReconcileTactic> } = {},
 ): Promise<ReconcileRunResult> {
   const engine = createGameEngine();
   let state = engine.init(start.payload as never) as GameState;
@@ -51,7 +52,7 @@ export async function runReconciliation(
     return null;
   };
 
-  const memories = new Map(state.empires.map((e) => [e.id, freshOnionMemory()]));
+  const memories = new Map(state.empires.map((e) => [e.id, freshReconcileMemory()]));
   const cap = start.endTurn + (opts.extraTurns ?? AFTER_END_SLACK);
 
   while (state.turn <= cap && state.winner === null) {
@@ -65,13 +66,11 @@ export async function runReconciliation(
           return err ? { error: err } : {};
         },
       } as unknown as GameSession<GameState>;
-      onionTurn({
+      reconcileBotTurn({
         session,
         state,
-        planned: state,
         me,
-        personality: 'balanced',
-        alwaysWar: true,
+        tactic: opts.tactics?.[me] ?? 'hybrid',
         memory: memories.get(me)!,
       });
     }
@@ -138,4 +137,70 @@ export async function runReconciliation(
     history: true,
   };
   return { envelope, finalState: state };
+}
+
+/** short default clocks for the LIVE reconciliation (human tactics): the
+ * realtime timer keeps the finale moving; commit early to go faster */
+export const LIVE_RECON_REALTIME_SECONDS = 20;
+export const LIVE_RECON_AUTOTURN_SECONDS = 45;
+
+/** Build the LIVE reconciliation kickoff: a normal save at the base turn
+ * whose state carries the scripts. Load it as host and everyone joins by
+ * name (or ⏳ Play async vs bot stand-ins) — humans fly the fleets, the
+ * engine replays the economy, and the same end-of-scripts scoring applies. */
+export function buildReconciliationKickoff(start: ReconcileStart): SaveEnvelope {
+  const engine = createGameEngine();
+  const resumeJson = (start.payload as { resumeState?: string }).resumeState;
+  if (!resumeJson) throw new Error('reconciliation start carries no state');
+  const base = engine.deserialize(resumeJson) as GameState;
+  const settings = {
+    ...(base.settings as unknown as Record<string, unknown>),
+    realtimeTurnSeconds: LIVE_RECON_REALTIME_SECONDS,
+    autoTurnSeconds: LIVE_RECON_AUTOTURN_SECONDS,
+  };
+  const state: GameState = { ...base, settings: settings as unknown as GameState['settings'] };
+  const startPayload = {
+    ...(start.payload as Record<string, unknown>),
+    settings,
+    resumeState: engine.serialize(state),
+  };
+  const checked = engine.init(startPayload as never) as GameState; // sanity: it loads
+  engine.takeEvents();
+  const gameId = `g-${start.seed.slice(0, 16)}`;
+  const envelope: SaveEnvelope = {
+    format: 'moo2v2-save',
+    version: 2,
+    game: {
+      game_id: gameId,
+      created_at: new Date().toISOString(),
+      engine_version: ENGINE_VERSION,
+      data_version: DATA_VERSION,
+      protocol_version: 1,
+      settings_json: canonicalStringify(settings),
+      seed: start.seed,
+      local_player_id: 0,
+      lobby_server: 'reconciliation-live',
+      room_code: 'RECONL',
+      status: 'active',
+      last_turn: checked.turn,
+      last_seq: 0,
+    },
+    players: start.players.map((p) => ({
+      game_id: gameId,
+      player_id: p.id,
+      name: p.name,
+      race_json: p.raceJson,
+      is_host: p.id === 0 ? 1 : 0,
+    })),
+    commands: [{ seq: 0, turn: 0, playerId: -1, kind: 'game_start', payload: canonicalStringify(startPayload) }],
+    snapshot: {
+      turn: checked.turn,
+      seq: 0,
+      stateJson: engine.serialize(checked),
+      stateHash: engine.hash(checked),
+    },
+    snapshots: [],
+    history: true,
+  };
+  return envelope;
 }

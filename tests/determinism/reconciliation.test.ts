@@ -11,7 +11,7 @@ import type { GameState } from '@engine/types';
 import type { EngineCommand } from '@engine/commands';
 import { verifySaveEnvelope, type SaveEnvelope } from '@storage/savefile';
 import { buildReconciliationStart, commonPrefixLength, harvestSchedule } from '@storage/reconcile';
-import { runReconciliation } from '@ui/reconcileRun';
+import { buildReconciliationKickoff, runReconciliation } from '@ui/reconcileRun';
 import { buildReplay } from '@ui/replay';
 import { expanderBot, runHeadlessGame, type BotPolicy } from '../../src/headless/bots';
 
@@ -197,6 +197,16 @@ describe('reconciliation end to end', () => {
       // a missing save file: that empire joins as a plain CPU with a warning
       const partial = buildReconciliationStart([{ envelope: envA, seat: 0 }]);
       expect(partial.warnings.some((w) => w.includes('Bob'))).toBe(true);
+
+      // the LIVE kickoff: a normal save at the base turn, scripts aboard,
+      // short realtime clock — humans fly the fleets from here
+      const kickoff = buildReconciliationKickoff(start);
+      const kv = verifySaveEnvelope(kickoff);
+      expect(kv.mode).toBe('replay');
+      expect(kickoff.game.last_turn).toBe(start.baseTurn);
+      const kickState = gameEngine.deserialize(kickoff.snapshot!.stateJson);
+      expect(kickState.reconcile?.schedules.length).toBe(2);
+      expect((kickState.settings as { realtimeTurnSeconds?: number }).realtimeTurnSeconds).toBe(20);
     },
     600_000,
   );

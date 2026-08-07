@@ -80,6 +80,13 @@
       <p>
         Asynchronous multiplayer without a shared clock:
       </p>
+      <p>
+        <b>From day one:</b> no shared game needed. Everyone copies their <b>📋 race string</b>
+        (Lobby or Empires screen) and sends it to the host, who pastes them into
+        <i>⏳ Start async game from day one</i> on the Home screen, picks the options and their own
+        race, and generates the shared save — with sanity checks on pick budgets and mode-gated
+        picks. Or fork any existing game:
+      </p>
       <ol>
         <li>One player 💾 saves the game (any point works — even before first contact) and shares the file.</li>
         <li><b>Everyone</b> loads the SAME file, picks <i>play as</i> their own empire, and presses <i>⏳ Play async</i>. The game resumes solo: onion bots stand in for every other player.</li>
@@ -101,8 +108,11 @@
         <li><b>Population &amp; buildings</b> arrive on their recorded turns only while the recorded owner still holds the world; a colony bombed to nothing collects nothing.</li>
         <li><b>War is real.</b> Fleet movement, fuel range, space battles, orbital bombardment, starbases and ground batteries, marine invasions against garrisons and militia — all resolve under the exact main-game rules, with AI bots commanding every fleet toward the goal (the core worlds if the base game runs that variant, domination otherwise). Camping an uncontested fleet on a victory star works precisely because colonies are predetermined.</li>
         <li><b>Reach insurance.</b> Wars can burn colonies faster than any script replaces them. Every 5th turn, an empire without an outpost ship gets one from its strongest world, so bots can re-anchor fuel range across razed space. A scheduled colonization claim landing on such an outpost evicts it.</li>
+        <li><b>Monsters bow to the record.</b> A scripted colony landing on a keeper-guarded world kills the monster outright — the player's own game proves the fight was already won.</li>
         <li><b>Spies</b> follow a reconciliation doctrine: sabotage hits <i>defensive structures</i>; espionage can only copy <i>passive</i> technologies (armor class, drives, fuel range), and only with a large offensive advantage or against a democracy — if the rolls land.</li>
-        <li><b>Scoring.</b> The game is scored when the save files run out of turns (the shortest file sets the clock). If nobody has won outright by then, the population that remains elects a leader — the biggest empire by people takes the crown.</li>
+        <li><b>Scoring.</b> The game is scored when the save files run out of turns (the shortest file sets the clock). If nobody has won outright by then, the population that remains elects a leader — the biggest empire by people takes the crown. In a core-worlds game the election counts the people living on the green stars' worlds (total population breaks ties).</li>
+        <li><b>Bot fleet doctrine.</b> The reconciliation bots mass into a small number of strike groups, price starbases and batteries into every target, strike only when the assembled group clearly wins, and send small groups at soft targets while the main fleet hunts the big prizes.</li>
+        <li><b>🎮 Human tactics.</b> Prefer to fly the fleets yourselves? <i>Live reconciliation</i> generates a kickoff save at the shared base turn: load it as host and everyone rejoins by name (bot stand-ins cover the missing) under a short realtime turn clock. The colony and research screens gray out — the economy still follows the script — but the fleets, the wars and the invasions are yours. Same scoring.</li>
         <li><b>Determinism.</b> The same set of files produces the identical reconciliation for every player who runs it, in any order. A missing player's file is allowed: that empire fights on as a plain CPU from the shared base (you'll see a warning).</li>
       </ul>
       <p>
