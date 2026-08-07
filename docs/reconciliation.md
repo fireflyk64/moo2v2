@@ -83,6 +83,12 @@ Inherent to the design (accepted, documented):
    do not fire. What the base state had, it keeps.
 8. **Espionage is a sideshow.** By design spies only copy passives or blow up
    defenses — deep-strike tech theft and economy sabotage strategies are out.
+9. **Gains ride the record; losses stay home.** Only positive deltas are
+   recorded, so pop you lost to wars or starvation in your own game
+   re-materializes in the merged timeline unless the reconciliation's own
+   fighting re-inflicts it. Measured in practice by the field experiment
+   (bugs/reconcile-experiment.md): the most battle-scarred own game came back
+   demographically whole and won the end-of-scripts population election.
 
 The honest summary: reconciliation rewards *building a great engine* and
 punishes *metagaming weak bots*, because the engine's output is portable into

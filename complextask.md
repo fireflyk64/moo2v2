@@ -83,7 +83,7 @@ You have 4 major tasks.
 
 - [x] Imagine some of the shortcomings of the reconciliation mode -- are there strategies that are ruled out? Please fix those
 
-- [ ] Commit
+- [x] Commit
 
-- [ ] Can you please have the extant bots each play out a game with different personalities then combine them using the reconciliation mode and see if the best performing player really did win if not, figure out what happened and make a rpeort about it.
+- [x] Can you please have the extant bots each play out a game with different personalities then combine them using the reconciliation mode and see if the best performing player really did win if not, figure out what happened and make a rpeort about it.
 
