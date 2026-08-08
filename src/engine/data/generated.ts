@@ -348,7 +348,7 @@ export const PICK_ROWS: readonly PickRow[] = [
   },
   {
     "id": "out_of_box_thinking",
-    "cost": 2,
+    "cost": 3,
     "value": null,
     "meaning": "Out-of-the-Box Thinking: may buy skipped technologies from already-completed fields with research points (requires the matching game option)."
   }

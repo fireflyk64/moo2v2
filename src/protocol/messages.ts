@@ -37,7 +37,7 @@ export interface GameSettings {
     stickyBuild: boolean;
     antarans: boolean;
     randomEvents: boolean;
-    /** unlocks the 2-point out_of_box_thinking race pick (buy skipped techs with RP) */
+    /** unlocks the 3-point out_of_box_thinking race pick (buy skipped techs with RP) */
     outOfBoxThinking?: boolean;
     /** unlocks the planetary construction ship (endgame construction reward) */
     constructionShip?: boolean;

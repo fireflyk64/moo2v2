@@ -47,8 +47,8 @@ const extra = (state: GameState, appId: string, remove = false) => ({
 });
 
 describe('tech persistence', () => {
-  it('the pick exists, costs 2, and resolves into the trait', () => {
-    expect(pickById.get('out_of_box_thinking')?.cost).toBe(2);
+  it('the pick exists, costs 3, and resolves into the trait', () => {
+    expect(pickById.get('out_of_box_thinking')?.cost).toBe(3);
     expect(resolveTraits(['dictatorship', 'out_of_box_thinking']).outOfBoxThinking).toBe(true);
     expect(resolveTraits(['dictatorship']).outOfBoxThinking).toBe(false);
   });
