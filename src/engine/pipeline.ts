@@ -410,11 +410,12 @@ function s3_buildAdvance(state: GameState, outputs: TurnOutputs, events: TurnEve
         colony.queue.unshift(entry);
       }
     }
-    // production stored on a queue that was empty ALL turn evaporates
-    // (classic behavior) — banking it indefinitely lets an idle colony buy a
-    // Star Fortress "for free" the turn it finally queues one. Overflow from
-    // an item that just completed still carries to next turn's queue.
-    if (idleAllTurn && colony.queue.length === 0) colony.storedProd = 0;
+    // production EARNED while the queue was empty ALL turn evaporates —
+    // banking it indefinitely lets an idle colony buy a Star Fortress "for
+    // free" the turn it finally queues one. But overflow already saved from
+    // a completed item is real progress toward the next build: it stays put
+    // however long the queue sits empty, ready for whatever is queued next.
+    if (idleAllTurn && colony.queue.length === 0) colony.storedProd -= out.prodToQueue;
   }
 }
 

@@ -429,6 +429,9 @@ export async function enterAsyncGame(
   // onion stand-ins claim the other saved seats by name (the addBotForSeat
   // hotjoin flow — the same one the Empires screen uses for absent players)
   for (const other of otherSeatNames) addBotForSeat(active, other, 'onion');
+  // a solo human vs instant-committing bots: any auto-turn/realtime clock the
+  // shared save carries would only rush the one person actually thinking
+  hosted.host.muteTurnClocks();
   return active;
 }
 

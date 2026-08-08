@@ -8,7 +8,7 @@
   import { describeSaveError, downloadBlob, importSaveIntoRoom, previewSave, type SavePreview } from '../saveload';
   import { buildReplay, setCurrentReplay } from '../replay';
   import { enterAsyncGame } from '../net';
-  import { buildReconciliationKickoff, runReconciliation } from '../reconcileRun';
+  import { buildReconciliationKickoff, LIVE_RECON_REALTIME_SECONDS, runReconciliation } from '../reconcileRun';
   import { buildReconciliationStart } from '@storage/reconcile';
   import { encodeSaveFile, verifySaveEnvelope, type SaveEnvelope } from '@storage/index';
   import { generateSeed } from '@protocol/setup';
@@ -344,7 +344,7 @@
       preview = await previewSave(bytes);
       resumeTurn = 'latest';
       asyncSeat = 0;
-      reconNote = `✓ ${fname} — resumes at turn ${envelope.game.last_turn} with a ${'{'}20s{'}'} realtime turn clock. Load as host and everyone joins by name (bots stand in for the missing), or ⏳ Play async to fight the bots alone. Scoring is unchanged: when the scripts run out, the population (core worlds count on the green stars) decides.`;
+      reconNote = `✓ ${fname} — resumes at turn ${envelope.game.last_turn} with a ${LIVE_RECON_REALTIME_SECONDS}s realtime turn clock. Load as host and everyone joins by name (bots stand in for the missing), or ⏳ Play async to fight the bots alone (solo play mutes the clock). Scoring is unchanged: when the scripts run out, the population (core worlds count on the green stars) decides.`;
     } catch (e) {
       reconNote = '';
       app.error = describeSaveError(e);
@@ -520,6 +520,12 @@
           </select>
         </label>
         <button data-testid="play-async" onclick={playAsync} disabled={app.connecting}>⏳ Play async (bots stand in)</button>
+        {#if resumeTurn !== 'latest'}
+          <span class="warnline" data-testid="async-branch-warning">
+            ⚠ resuming at an earlier turn BRANCHES the save (its history is rewritten) — a branched file cannot feed
+            reconciliation. Play async from “latest” if this game is headed for a merge.
+          </span>
+        {/if}
       </span>
       <p class="dim">
         Players joining the room get their old empire back by using the same name they played under

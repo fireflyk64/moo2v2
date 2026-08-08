@@ -397,6 +397,18 @@ export class HostCore<S> {
     this.broadcastLobby();
   }
 
+  /** vs-computer rooms (async resume: bots on every other seat): the laggard /
+   * realtime clocks only rush the lone human, so force them off no matter what
+   * the imported save's settings say. Host-local — the game log is untouched,
+   * so hashes and replays are unaffected. */
+  muteTurnClocks(): void {
+    this.settings = { ...this.settings, autoTurnSeconds: 0, realtimeTurnSeconds: 0 };
+    if (this.autoTurnTimer) {
+      clearTimeout(this.autoTurnTimer);
+      this.autoTurnTimer = null;
+    }
+  }
+
   /** Host-triggered game start; seq 0 is the game_start system command.
    * With pick bidding on, contested picks go to sealed-bid auction first. */
   startGame(seed: string): void {

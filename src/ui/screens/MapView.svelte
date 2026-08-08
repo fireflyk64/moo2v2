@@ -13,6 +13,7 @@
   import { app, getActive, savePerGame } from '../state.svelte';
   import { BUILD_HOTKEYS, bestColonyFor, cancelPin, pinBuild, pinnedStatus, resolveHotkeyItem } from '../quickBuild';
   import AutopilotBar from '../components/AutopilotBar.svelte';
+  import PlanetDialog from '../components/PlanetDialog.svelte';
 
   const MAP_BG_CACHE = new Map<string, string>();
 
@@ -221,6 +222,9 @@
     return session().getPlanned();
   });
   const me = () => (replayState ? (replayViewAs ?? 0) : session().playerId);
+  /** reconciliation: the economy follows the recorded script — every build
+   * affordance on the map (quick-build, B hotkeys, governor bar) goes dark */
+  const scripted = $derived(gs?.reconcile !== undefined);
   const foeName = (id: number) => gs?.empires.find((e) => e.id === id)?.raceName ?? `#${id}`;
   const view = $derived.by(() => (gs ? selectors.galaxyView(gs, me()) : []));
   const fleets = $derived.by(() => (gs ? selectors.fleetRows(gs, me()) : []));
@@ -612,7 +616,7 @@
       queueHotkey(key);
       return;
     }
-    if (key === 'b' && selectedStarId !== null && myColonyHere) {
+    if (key === 'b' && selectedStarId !== null && myColonyHere && !scripted) {
       e.preventDefault();
       buildArm = true;
       return;
@@ -965,13 +969,43 @@
     return mixHex(STAR_COLORS[color], '#ffffff', color === 'blue' ? 0.62 : 0.5);
   }
   const prettify = (id: string) => id.replaceAll('_', ' ');
+
+  /** the one-world popup (bugs.md: click a planet to manage its production) */
+  let managePlanetId = $state<number | null>(null);
+
+  // ---- viewport budget: the map column must end ABOVE the sticky chat
+  // footer, however many banners (auto-turn, host-offline, victory…) are
+  // stacked above it — a hard-coded height pushed the map's horizontal
+  // scrollbar under the footer whenever a banner appeared (bugs.md #1) ----
+  let wrapEl = $state<HTMLDivElement | null>(null);
+  let wrapH = $state(0);
+  function measureWrap() {
+    if (!wrapEl) return;
+    const footer = document.querySelector('footer');
+    const footerH = footer instanceof HTMLElement ? footer.offsetHeight : 0;
+    const h = Math.floor(window.innerHeight - wrapEl.getBoundingClientRect().top - footerH - 10);
+    if (Math.abs(h - wrapH) > 1) wrapH = h;
+  }
+  $effect(() => {
+    void app.version; // banners come and go with game state — re-measure
+    measureWrap();
+  });
+  $effect(() => {
+    window.addEventListener('resize', measureWrap);
+    const ro = new ResizeObserver(() => measureWrap());
+    ro.observe(document.body);
+    return () => {
+      window.removeEventListener('resize', measureWrap);
+      ro.disconnect();
+    };
+  });
 </script>
 
 <svelte:window onkeydown={onMapKey} />
 
-<div class="wrap">
+<div class="wrap" bind:this={wrapEl} style={wrapH > 0 ? `height:${wrapH}px` : undefined}>
   <div class="mapcol">
-    {#if app.autopilot.enabled}
+    {#if app.autopilot.enabled && !scripted}
       <!-- autopilot players live on the map: the same sliders as the colony
            screen, so weights are adjustable without leaving it -->
       {#if !replay}<AutopilotBar />{/if}
@@ -1451,9 +1485,16 @@
           <li data-testid="planet-{p.id}">
             <span class="orbit">{p.orbit}</span>
             <PixelPlanet seed={p.id} climate={p.climate} body={p.body} size={16} />
-            {p.body === 'planet' ? `${p.climate} · size ${p.sizeClass} · ${prettify(p.minerals)} · ${p.gravity}-g` : prettify(p.body)}
+            <!-- clicking a world opens its popup: planet facts, and the full
+                 production picture when it is your colony (bugs.md) -->
+            <button
+              class="plink"
+              data-testid="planet-open-{p.id}"
+              title="open this world — facts, and production management if it is your colony"
+              onclick={() => (managePlanetId = p.id)}
+            >{p.body === 'planet' ? `${p.climate} · size ${p.sizeClass} · ${prettify(p.minerals)} · ${p.gravity}-g` : prettify(p.body)}</button>
             {#each selected.colonies.filter((c) => gs?.colonies.find((x) => x.id === c.id)?.planetId === p.id) as c (c.id)}
-              <b style="color:{playerColor(c.owner)}"> — {c.name}</b>
+              <button class="plink" style="color:{playerColor(c.owner)}" title="open {c.name}" onclick={() => (managePlanetId = p.id)}><b> — {c.name}</b></button>
               {#if c.owner === me() && c.outpost}
                 <button
                   data-testid="scrap-outpost-{c.id}"
@@ -1514,7 +1555,7 @@
           </li>
         {/each}
       </ul>
-      {#if myColonyHere}
+      {#if myColonyHere && !scripted}
         {#if buildArm}
           <div class="buildarm" data-testid="build-arm">
             🔨 <b>Build at {bestYardHere?.name ?? '…'}</b> — press a key:
@@ -1591,6 +1632,12 @@
     {/if}
   </aside>
 </div>
+
+{#if managePlanetId !== null && !replay}
+  <!-- live games only: the dialog reads the active session (a replay has
+       none — its aside panel already shows the same facts) -->
+  <PlanetDialog planetId={managePlanetId} onclose={() => (managePlanetId = null)} />
+{/if}
 
 <style>
   .bodyx {
@@ -1733,10 +1780,11 @@
   .wrap {
     display: flex;
     gap: 0.8rem;
-    /* include nav, section padding, sticky footer and map legend in the
-       viewport budget so fit mode keeps the full map + legend visible */
+    /* fallback before the first measurement: the real height is measured at
+       runtime (banners above + sticky footer below vary), so the map's own
+       scrollbars always stay on-screen */
     height: calc(100dvh - 14rem);
-    min-height: 30rem;
+    min-height: 18rem;
   }
   .mapcol {
     flex: 1;
@@ -1794,6 +1842,21 @@
   }
   .zoombtn {
     font-size: 0.8rem;
+  }
+  /* planet rows open the one-world popup: styled as text, clickable */
+  .plink {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .plink:hover {
+    text-decoration: underline;
+    color: var(--accent-soft, var(--accent));
   }
   .star {
     cursor: pointer;

@@ -5,6 +5,7 @@
   import { itemDescription } from '@engine/data/index';
   import { app, getActive, savePerGame } from '../state.svelte';
   import AutopilotBar from '../components/AutopilotBar.svelte';
+  import BuildQueueMenu from '../components/BuildQueueMenu.svelte';
   import PixelPlanet from '../PixelPlanet.svelte';
   import { leaderDisplayName } from '../leaderNames';
 
@@ -39,6 +40,33 @@
   };
   const pretty = (id: string) => id.replaceAll('_', ' ');
   const SIZE_NAMES: Record<number, string> = { 1: 'tiny', 2: 'small', 3: 'medium', 4: 'large', 5: 'huge' };
+
+  // ---- viewport budget: contain the table vertically so its horizontal
+  // scrollbar sits ON-SCREEN above the sticky chat footer instead of below
+  // the last row of a long table (bugs.md #1 — banners made it worse by
+  // pushing everything further down) ----
+  let tablewrapEl = $state<HTMLDivElement | null>(null);
+  let tablewrapH = $state(0);
+  function measureTable() {
+    if (!tablewrapEl) return;
+    const footer = document.querySelector('footer');
+    const footerH = footer instanceof HTMLElement ? footer.offsetHeight : 0;
+    const h = Math.floor(window.innerHeight - tablewrapEl.getBoundingClientRect().top - footerH - 10);
+    if (Math.abs(h - tablewrapH) > 1) tablewrapH = h;
+  }
+  $effect(() => {
+    void app.version; // banners above come and go with game state
+    measureTable();
+  });
+  $effect(() => {
+    window.addEventListener('resize', measureTable);
+    const ro = new ResizeObserver(() => measureTable());
+    ro.observe(document.body);
+    return () => {
+      window.removeEventListener('resize', measureTable);
+      ro.disconnect();
+    };
+  });
 
   /** what each planet feature means for production (hover on the planet cell) */
   const MINERAL_PROD_INFO: Record<string, string> = {
@@ -362,28 +390,6 @@
     return res;
   }
 
-  function setBuild(row: selectors.ColonyRow, item: string) {
-    if (!item) return;
-    // choosing something already queued PROMOTES one instance of it to the
-    // active slot — repeats (ships, projects) are preserved, not collapsed
-    const q = row.queueEntries;
-    const idx = row.queue.indexOf(item);
-    const items =
-      idx >= 0
-        ? [q[idx]!, ...q.slice(0, idx), ...q.slice(idx + 1)]
-        : q.length
-          ? [item, ...q.slice(1)]
-          : [item];
-    submitNoted('set_build_queue', { colonyId: row.id, items });
-  }
-
-  /** insert at the very front: the new item builds NOW, and the displaced
-   * build keeps its queue place (slot 1) — no more change-head-then-requeue */
-  function insertFront(row: selectors.ColonyRow, item: string) {
-    if (!item) return;
-    submitNoted('set_build_queue', { colonyId: row.id, items: [item, ...row.queueEntries] });
-  }
-
   /** toggle repeat on the active build (ships and repeatable projects): the
    * entry stays at the head after completing and builds another copy */
   function toggleRepeat(row: selectors.ColonyRow) {
@@ -391,29 +397,6 @@
     if (!q.length) return;
     const head = { item: q[0]!.item, ...(q[0]!.repeat ? {} : { repeat: true }) };
     submitNoted('set_build_queue', { colonyId: row.id, items: [head, ...q.slice(1)] });
-  }
-
-  function removeQueued(row: selectors.ColonyRow, index: number) {
-    submitNoted('set_build_queue', {
-      colonyId: row.id,
-      items: row.queueEntries.filter((_, i) => i !== index),
-    });
-  }
-
-  /** promote a queued entry to the active slot; everything else keeps its
-   * order (and the displaced head keeps its invested production, sticky) */
-  function promoteQueued(row: selectors.ColonyRow, index: number) {
-    const q = row.queueEntries;
-    if (index <= 0 || index >= q.length) return;
-    submitNoted('set_build_queue', {
-      colonyId: row.id,
-      items: [q[index]!, ...q.slice(0, index), ...q.slice(index + 1)],
-    });
-  }
-
-  function appendBuild(row: selectors.ColonyRow, item: string) {
-    if (!item) return;
-    submitNoted('set_build_queue', { colonyId: row.id, items: [...row.queueEntries, item] });
   }
 
   function buy(row: selectors.ColonyRow) {
@@ -553,8 +536,10 @@
 
 <!-- the table scrolls inside its own container: the page never pans sideways,
      so the tab bar and commit footer stay put, and the checkbox + colony name
-     columns stay pinned so you never lose which planet you are editing -->
-<div class="tablewrap">
+     columns stay pinned so you never lose which planet you are editing.
+     Vertically it is capped to the measured viewport budget, so the
+     horizontal scrollbar is always reachable above the sticky footer -->
+<div class="tablewrap" bind:this={tablewrapEl} style={tablewrapH > 0 ? `max-height:${tablewrapH}px` : undefined}>
 <table data-testid="colony-table">
   <thead>
     <tr>
@@ -785,28 +770,18 @@
         <td title={ex.bc}>{row.output.bcIncome}</td>
         <td class:neg={row.output.pollution > 0} title="production lost to pollution">{row.output.pollution}</td>
         <td>
-          <select
-            data-testid="build-{row.id}"
-            value={row.activeItem ?? ''}
-            title={row.activeItem
-              ? `${row.name} — ${label(row.activeItem)}${itemDescription(row.activeItem) ? `: ${itemDescription(row.activeItem)}` : ''}`
-              : row.name}
-            onchange={(e) => setBuild(row, (e.target as HTMLSelectElement).value)}
-          >
-            <option value="" disabled>— build —</option>
-            {#if row.activeItem && !row.buildable.includes(row.activeItem)}
-              <option value={row.activeItem}>{label(row.activeItem)}</option>
-            {/if}
-            <!-- keyed by index: the same non-buildable item can legitimately
-                 appear twice (repeat refits, spy past the roster cap) and a
-                 duplicate string key crashes the whole table -->
-            {#each row.queue.slice(1).filter((q) => !row.buildable.includes(q)) as q, qi (qi)}
-              <option value={q}>{label(q)} (queued)</option>
-            {/each}
-            {#each row.buildable as item (item)}
-              <option value={item}>{label(item)}</option>
-            {/each}
-          </select>
+          <!-- the build MENU (bugs.md): one control shows the active item,
+               the whole queue (reorder / remove / repeat / build-now) and
+               everything buildable — no more hunting across three dropdowns -->
+          <BuildQueueMenu
+            colonyId={row.id}
+            colonyName={row.name}
+            entries={row.queueEntries}
+            buildable={row.buildable}
+            {label}
+            describe={(item) => itemDescription(item) ?? ''}
+            submitQueue={(items) => submitNoted('set_build_queue', { colonyId: row.id, items })}
+          />
           {#if row.activeItem && itemMayRepeat(row.activeItem)}
             <button
               class="repeat"
@@ -842,41 +817,14 @@
           {/if}
         </td>
         <td>
-          <select
-            class="queuenow"
-            data-testid="queue-now-{row.id}"
-            value=""
-            title="build NOW: goes in front of {row.activeItem ? label(row.activeItem) : 'the queue'}, which keeps its place and nothing invested is lost"
-            onchange={(e) => { insertFront(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}
-          >
-            <option value="">⚡ build now</option>
-            {#each row.buildable as item (item)}
-              <option value={item}>{label(item)}</option>
-            {/each}
-          </select>
-          {#each row.queue.slice(1) as q, qi (qi)}
-            <span class="queuechip" data-testid="queued-{row.id}-{qi + 1}">
-              <button
-                class="chipact"
-                data-testid="queue-front-{row.id}-{qi + 1}"
-                title="move {label(q)} to the front — it builds NOW, everything else keeps its order"
-                onclick={() => promoteQueued(row, qi + 1)}
-              >⏫</button>
-              <span title={label(q)}>{row.queueEntries[qi + 1]?.repeat ? '⟳ ' : ''}{label(q)}</span>
-              <button
-                class="chipact"
-                data-testid="queue-remove-{row.id}-{qi + 1}"
-                title="remove {label(q)} from the queue"
-                onclick={() => removeQueued(row, qi + 1)}
-              >✕</button>
+          <!-- glanceable queue tail; management lives in the build menu -->
+          {#if row.queue.length > 1}
+            <span class="queuepeek" data-testid="queue-peek-{row.id}" title={row.queue.slice(1).map((q, qi) => `${qi + 2}. ${label(q)}`).join('\n')}>
+              {row.queue.slice(1).map((q) => label(q)).join(' · ')}
             </span>
-          {/each}
-          <select data-testid="queue-add-{row.id}" value="" title="append to the back of the queue" onchange={(e) => { appendBuild(row, (e.target as HTMLSelectElement).value); (e.target as HTMLSelectElement).value = ''; }}>
-            <option value="">+ queue</option>
-            {#each row.buildable as item (item)}
-              <option value={item}>{label(item)}</option>
-            {/each}
-          </select>
+          {:else}
+            <span class="dim">—</span>
+          {/if}
         </td>
         <td>
           {#if row.buildings.length}
@@ -947,9 +895,19 @@
     font-size: 0.78rem;
   }
   .tablewrap {
-    overflow-x: auto;
+    overflow: auto;
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
+  }
+  /* the header row rides the inner scroll so long tables keep their labels */
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--panel-2);
+  }
+  thead th:nth-child(-n + 2) {
+    z-index: 4; /* corner cells: sticky on BOTH axes, above rows and columns */
   }
   table {
     /* separate, not collapse: collapsed borders detach from position:sticky
@@ -1073,35 +1031,16 @@
     background: color-mix(in srgb, var(--accent) 16%, transparent);
     outline: 1px dashed var(--accent);
   }
-  .queuechip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.15rem;
-    font-size: 0.72rem;
-    padding: 0 0.15rem;
-    margin-right: 0.15rem;
-    background: var(--panel-3);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    opacity: 0.85;
-  }
-  .chipact {
-    font-size: 0.72rem;
-    padding: 0 0.15rem;
-    margin: 0;
-    background: none;
-    border: none;
-    opacity: 0.65;
-    cursor: pointer;
-  }
-  .chipact:hover {
-    opacity: 1;
-    color: var(--accent);
-  }
-  .queuenow {
-    border-color: var(--accent);
-    color: var(--accent-soft);
-    margin-right: 0.25rem;
+  /* glanceable queue tail (management lives in the build menu) */
+  .queuepeek {
+    display: inline-block;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    font-size: 0.75rem;
+    color: var(--text-dim);
   }
   .repeat {
     padding: 0 0.3rem;
@@ -1114,10 +1053,6 @@
     color: var(--accent);
     border-color: var(--accent);
     opacity: 1;
-  }
-  .queuechip:hover {
-    opacity: 1;
-    border-color: var(--line-bright);
   }
   .movenote {
     font-size: 0.8rem;

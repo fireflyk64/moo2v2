@@ -86,7 +86,9 @@
   let governedFp = '';
   $effect(() => {
     const s = gs;
-    if (!s || !app.autopilot.enabled || s.phase !== 'planning' || (s.winner !== null && !s.victoryContinued)) return;
+    // reconciliation: the economy is scripted — a governor pass would only
+    // bounce off the command lockout
+    if (!s || s.reconcile !== undefined || !app.autopilot.enabled || s.phase !== 'planning' || (s.winner !== null && !s.victoryContinued)) return;
     const pinnedIds = Object.keys(app.pins).filter((k) => (app.pins[Number(k)]?.length ?? 0) > 0);
     const fp = `${s.turn}:${JSON.stringify(app.autopilot.weights)}:${pinnedIds.join(',')}`;
     if (fp === governedFp) return;
@@ -108,7 +110,7 @@
   let researchFp = '';
   $effect(() => {
     const s = gs;
-    if (!s || s.phase !== 'planning' || (s.winner !== null && !s.victoryContinued) || !app.researchQueue.length) return;
+    if (!s || s.reconcile !== undefined || s.phase !== 'planning' || (s.winner !== null && !s.victoryContinued) || !app.researchQueue.length) return;
     const emp = s.empires.find((e) => e.id === session().playerId);
     if (!emp || emp.research.fieldNum !== null) return;
     const fp = `${s.turn}:${app.researchQueue.map((q) => q.fieldNum).join(',')}`;
@@ -249,11 +251,18 @@
       .sort((x, y) => x.through - y.through);
     return behind[0] ?? null;
   });
-  /** solo (vs local bots) game: the bots commit instantly, so "everyone else
-   * has committed" is true every single turn — pure noise, never shown */
+  /** vs-computer game: local solo bots, OR bot stand-ins on every other seat
+   * (async play, hotseat takeover). Either way the machines commit instantly,
+   * so "everyone else has committed" is true every single turn — pure noise,
+   * never shown */
   const soloGame = $derived.by(() => {
     void app.version;
-    return (getActive()?.soloBots.length ?? 0) > 0;
+    const active = getActive();
+    if (!active) return false;
+    if (active.soloBots.length > 0) return true;
+    const me = session().playerId;
+    const others = session().getRoster().filter((p) => p.id !== me);
+    return others.length > 0 && others.every((p) => active.bots.some((b) => b.seatId === p.id));
   });
   /** commit urgency: red = everyone else committed and they are waiting on you;
    * green = others have started committing. Latched one-way per turn so an
@@ -366,10 +375,13 @@
     if (app.viewing) return 'a battle replay is up';
     if (app.viewingGround) return 'an invasion playback is up';
     if (timelapse || timelapseBusy) return 'the campaign timelapse is up';
-    if (researchIdle && app.researchQueue.length === 0) return 'labs idle — pick research';
+    // reconciliation: labs/queues/treasury belong to the recorded script —
+    // stopping for them would halt auto-play every turn over nothing the
+    // player is allowed to fix
+    if (!reconcileLive && researchIdle && app.researchQueue.length === 0) return 'labs idle — pick research';
     if (urgentOfferCount > 0) return 'a leader awaits your answer';
-    if ((summary?.bc ?? 0) < 0 && !app.autopilot.enabled) return 'treasury is in the red';
-    if (emptyQueueCount > 0 && !app.autopilot.enabled) return 'a colony has an empty build queue';
+    if (!reconcileLive && (summary?.bc ?? 0) < 0 && !app.autopilot.enabled) return 'treasury is in the red';
+    if (!reconcileLive && emptyQueueCount > 0 && !app.autopilot.enabled) return 'a colony has an empty build queue';
     const fresh = app.reports.filter((r) => r.turn === resolvedTurn);
     if (fresh.some((r) => r.kind === 'colony_ship_arrived')) return 'a colony ship reached an open planet';
     if (fresh.some((r) => r.kind === 'artifact_tech')) return 'ancient artifacts yielded a technology';
@@ -929,7 +941,7 @@
   {/if}
   <nav>
     <button class:active={tab === 'colonies'} data-testid="tab-colonies" disabled={reconcileLive} title={reconcileLive ? 'reconciliation: the economy follows the recorded script' : undefined} onclick={() => (tab = 'colonies')}>
-      Colonies{#if defaultBuildCount > 0}<span class="idlebadge" data-testid="default-build-badge" title="{defaultBuildCount} colon{defaultBuildCount > 1 ? 'ies are' : 'y is'} not actively constructing (empty queue, housing or trade goods)">{defaultBuildCount}</span>{/if}
+      Colonies{#if defaultBuildCount > 0 && !reconcileLive}<span class="idlebadge" data-testid="default-build-badge" title="{defaultBuildCount} colon{defaultBuildCount > 1 ? 'ies are' : 'y is'} not actively constructing (empty queue, housing or trade goods)">{defaultBuildCount}</span>{/if}
     </button>
     <button class:active={tab === 'map'} data-testid="tab-map" onclick={() => (tab = 'map')}>Map</button>
     <button class:active={tab === 'research'} class:pulse={researchIdle && !reconcileLive} data-testid="tab-research" disabled={reconcileLive} title={reconcileLive ? 'reconciliation: research follows the recorded script' : undefined} onclick={() => (tab = 'research')}>Research</button>

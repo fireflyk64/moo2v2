@@ -18,6 +18,7 @@ import { HULL_WEIGHT, selectors, shipMarines, starDistance } from '@engine/index
 import { marinesOf } from '@engine/economy';
 import type { GameState, Ship } from '@engine/types';
 import type { GameSession } from '@protocol/session';
+import type { BotPersonality } from './soloBot';
 
 export type ReconcileTactic = 'consolidated' | 'split' | 'hybrid';
 
@@ -29,13 +30,52 @@ export interface ReconcileBotMemory {
 export const freshReconcileMemory = (): ReconcileBotMemory => ({ targets: [] });
 
 const ORBITAL_DEFENSES = ['star_base', 'battle_station', 'star_fortress', 'missile_base', 'ground_batteries'];
-/** frigate-equivalents a defensive structure is worth when pricing a strike */
-const BASE_WEIGHT = 4;
-/** the assembled group must outweigh the priced garrison by this much */
-const WIN_RATIO_NUM = 5; // 1.25x as integers
-const WIN_RATIO_DEN = 4;
-/** commitment window before a stuck target is dropped */
-const TARGET_LAPSE = 20;
+
+/** Every doctrine knob, per seat: the tuning surface for reconciliation AI
+ * experiments (bugs.md: give each AI different parameters and tune). Defaults
+ * are the shipped, lab-measured doctrine — omitted fields fall back to it. */
+export interface ReconcileBotParams {
+  /** frigate-equivalents a defensive structure adds to a target's price */
+  baseWeight: number;
+  /** win bar: the group must outweigh the priced garrison by num/den */
+  winRatioNum: number;
+  winRatioDen: number;
+  /** turns a stuck commitment survives before re-targeting */
+  targetLapse: number;
+  /** % of the group that must be assembled before jumping a defended star */
+  assemblePct: number;
+  /** declare war when myWeight*100 >= theirs*warParityPct (100 = parity) */
+  warParityPct: number;
+  /** target-value bonus for a core (victory) world */
+  coreBonus: number;
+  /** split: navy weight where a 3rd group forms */
+  splitThirdAt: number;
+  /** hybrid: navy weights where the 1st / 2nd raider group forms */
+  hybridRaiderAt: number;
+  hybridSecondRaiderAt: number;
+  /** hybrid: main-fleet tonnage share, % */
+  hybridMainPct: number;
+  /** marine wave must exceed the defenders by this margin to fly */
+  transportMargin: number;
+  /** personality handed to onionBattleOrders when this seat fights */
+  battlePersonality: BotPersonality;
+}
+
+export const DEFAULT_RECONCILE_PARAMS: ReconcileBotParams = {
+  baseWeight: 4,
+  winRatioNum: 5, // 1.25x as integers
+  winRatioDen: 4,
+  targetLapse: 20,
+  assemblePct: 85,
+  warParityPct: 90,
+  coreBonus: 50,
+  splitThirdAt: 24,
+  hybridRaiderAt: 18,
+  hybridSecondRaiderAt: 36,
+  hybridMainPct: 60,
+  transportMargin: 2,
+  battlePersonality: 'balanced',
+};
 
 export interface ReconcileBotCtx {
   session: GameSession<GameState>;
@@ -43,6 +83,8 @@ export interface ReconcileBotCtx {
   me: number;
   tactic: ReconcileTactic;
   memory: ReconcileBotMemory;
+  /** doctrine overrides for this seat (defaults: DEFAULT_RECONCILE_PARAMS) */
+  params?: Partial<ReconcileBotParams>;
 }
 
 interface TargetInfo {
@@ -56,6 +98,7 @@ interface TargetInfo {
 
 export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
   const { session, state, me, memory } = ctx;
+  const P: ReconcileBotParams = { ...DEFAULT_RECONCILE_PARAMS, ...ctx.params };
   const empire = state.empires.find((e) => e.id === me);
   if (!empire || empire.eliminated) return;
 
@@ -108,7 +151,7 @@ export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
       .filter((r) => {
         const theirs = rivalWeightTotal.get(r.id) ?? 0;
         const holdsCore = coreIds.size > 0 && state.colonies.some((c) => c.owner === r.id && coreIds.has(c.planetId));
-        return myWeight * 10 >= theirs * 9 || holdsCore;
+        return myWeight * 100 >= theirs * P.warParityPct || holdsCore;
       })
       .sort((a, b) => (rivalWeightTotal.get(a.id) ?? 0) - (rivalWeightTotal.get(b.id) ?? 0) || a.id - b.id)[0];
     if (target) {
@@ -124,11 +167,11 @@ export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
     const sid = starOfPlanet.get(c.planetId);
     if (sid === undefined) continue;
     const t = targets.get(sid) ?? { starId: sid, defWeight: enemyWeightAt.get(sid) ?? 0, value: 0, core: false };
-    t.defWeight += c.buildings.filter((b) => ORBITAL_DEFENSES.includes(b)).length * BASE_WEIGHT;
+    t.defWeight += c.buildings.filter((b) => ORBITAL_DEFENSES.includes(b)).length * P.baseWeight;
     t.value += c.groups.reduce((n, g) => n + Math.floor(g.popK / 1000), 0) + (c.outpost ? 1 : 0);
     if (coreIds.has(c.planetId)) {
       t.core = true;
-      t.value += 50;
+      t.value += P.coreBonus;
     }
     targets.set(sid, t);
   }
@@ -139,12 +182,12 @@ export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
     .sort((a, b) => b[1] - a[1] || a[0] - b[0]);
 
   // ---- groups by tactic ("more fleets later": counts scale with the navy) ----
-  const groupCount = groupCountFor(ctx.tactic, myWeight);
-  const groups = assignGroups(warships, weightOf, groupCount, ctx.tactic);
+  const groupCount = groupCountFor(ctx.tactic, myWeight, P);
+  const groups = assignGroups(warships, weightOf, groupCount, ctx.tactic, P);
   while (memory.targets.length < groups.length) memory.targets.push(null);
   memory.targets.length = groups.length;
 
-  const winnable = (groupWeight: number, t: TargetInfo) => groupWeight * WIN_RATIO_DEN >= t.defWeight * WIN_RATIO_NUM + WIN_RATIO_DEN;
+  const winnable = (groupWeight: number, t: TargetInfo) => groupWeight * P.winRatioDen >= t.defWeight * P.winRatioNum + P.winRatioDen;
 
   for (let gi = 0; gi < groups.length; gi++) {
     const group = groups[gi]!;
@@ -158,16 +201,16 @@ export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
     const committed = memory.targets[gi];
     if (committed) {
       const t = targets.get(committed.starId);
-      const lapsed = state.turn - committed.since > TARGET_LAPSE;
+      const lapsed = state.turn - committed.since > P.targetLapse;
       if (!t || lapsed || !winnable(groupWeight, t)) memory.targets[gi] = null;
     }
 
     // defense first: the heaviest group answers the biggest home fire it can beat
     if (gi === 0 && threats.length) {
-      const answerable = threats.find(([, w]) => groupWeight * WIN_RATIO_DEN >= w * WIN_RATIO_NUM);
+      const answerable = threats.find(([, w]) => groupWeight * P.winRatioDen >= w * P.winRatioNum);
       if (answerable) {
         memory.targets[gi] = { starId: answerable[0], since: state.turn };
-        moveGroup(ctx, group, weightOf, answerable[0], answerable[1]);
+        moveGroup(ctx, P, group, weightOf, answerable[0], answerable[1]);
         continue;
       }
     }
@@ -194,29 +237,29 @@ export function reconcileBotTurn(ctx: ReconcileBotCtx): void {
 
     const target = memory.targets[gi];
     if (target) {
-      moveGroup(ctx, group, weightOf, target.starId, targets.get(target.starId)?.defWeight ?? 0);
+      moveGroup(ctx, P, group, weightOf, target.starId, targets.get(target.starId)?.defWeight ?? 0);
     } else if (gi > 0 && memory.targets[0]) {
       // no winnable soft target: the raider reinforces the main effort
-      moveGroup(ctx, group, weightOf, memory.targets[0]!.starId, targets.get(memory.targets[0]!.starId)?.defWeight ?? 0, true);
+      moveGroup(ctx, P, group, weightOf, memory.targets[0]!.starId, targets.get(memory.targets[0]!.starId)?.defWeight ?? 0, true);
     } else {
       // nothing winnable anywhere: mass at the group's heaviest stack and grow
       massGroup(ctx, group);
     }
   }
 
-  runTransports(ctx, starOfPlanet, enemyWeightAt);
+  runTransports(ctx, P, starOfPlanet, enemyWeightAt);
   runOutposts(ctx, starById, starOfPlanet, targets, myColonyStars);
 }
 
-function groupCountFor(tactic: ReconcileTactic, myWeight: number): number {
+function groupCountFor(tactic: ReconcileTactic, myWeight: number, P: ReconcileBotParams): number {
   if (tactic === 'consolidated') return 1;
-  if (tactic === 'split') return myWeight >= 24 ? 3 : 2;
+  if (tactic === 'split') return myWeight >= P.splitThirdAt ? 3 : 2;
   // hybrid: main fleet always; raiders as the navy grows
-  return 1 + (myWeight >= 18 ? 1 : 0) + (myWeight >= 36 ? 1 : 0);
+  return 1 + (myWeight >= P.hybridRaiderAt ? 1 : 0) + (myWeight >= P.hybridSecondRaiderAt ? 1 : 0);
 }
 
-/** deterministic weight-balanced grouping; hybrid loads ~60% into group 0 */
-function assignGroups(warships: Ship[], weightOf: (s: Ship) => number, count: number, tactic: ReconcileTactic): Ship[][] {
+/** deterministic weight-balanced grouping; hybrid loads ~hybridMainPct% into group 0 */
+function assignGroups(warships: Ship[], weightOf: (s: Ship) => number, count: number, tactic: ReconcileTactic, P: ReconcileBotParams): Ship[][] {
   const groups: Ship[][] = Array.from({ length: count }, () => []);
   if (count === 1) {
     groups[0] = [...warships];
@@ -231,8 +274,8 @@ function assignGroups(warships: Ship[], weightOf: (s: Ship) => number, count: nu
     return best;
   };
   for (const s of sorted) {
-    // hybrid: the main fleet takes ~60% of the tonnage, raiders share the rest
-    const gi = tactic === 'hybrid' ? (weights[0]! * 5 < total * 3 ? 0 : lightest(1)) : lightest(0);
+    // hybrid: the main fleet takes ~hybridMainPct% of the tonnage
+    const gi = tactic === 'hybrid' ? (weights[0]! * 100 < total * P.hybridMainPct ? 0 : lightest(1)) : lightest(0);
     groups[gi]!.push(s);
     weights[gi]! += weightOf(s);
   }
@@ -244,6 +287,7 @@ function assignGroups(warships: Ship[], weightOf: (s: Ship) => number, count: nu
  * clearly outweighs the garrison) jumps the target. */
 function moveGroup(
   ctx: ReconcileBotCtx,
+  P: ReconcileBotParams,
   group: Ship[],
   weightOf: (s: Ship) => number,
   targetStar: number,
@@ -265,7 +309,7 @@ function moveGroup(
   // caution around installations: jump only with ~the whole group assembled
   // AND a clear win over the priced garrison (reinforcing an ongoing fight
   // relaxes the bar — the battle is already joined)
-  const assembled = Math.max(1, Math.ceil(totalW * 0.85));
+  const assembled = Math.max(1, Math.ceil((totalW * P.assemblePct) / 100));
   let muster = targetStar;
   let musterW = atTargetW;
   for (const [star, st] of stacks) {
@@ -276,7 +320,7 @@ function moveGroup(
   }
   const starById = new Map(state.stars.map((s) => [s.id, s]));
   for (const [from, st] of stacks) {
-    const winsAlone = st.w * WIN_RATIO_DEN >= defWeight * WIN_RATIO_NUM + WIN_RATIO_DEN;
+    const winsAlone = st.w * P.winRatioDen >= defWeight * P.winRatioNum + P.winRatioDen;
     const jump = reinforce || atTargetW > 0 ? winsAlone || atTargetW > 0 : st.w >= assembled && winsAlone;
     const dest = jump ? targetStar : muster;
     if (dest === from) continue;
@@ -336,7 +380,7 @@ function massGroup(ctx: ReconcileBotCtx, group: Ship[]): void {
 }
 
 /** loaded marine transports ride to cleared enemy skies in one wave */
-function runTransports(ctx: ReconcileBotCtx, starOfPlanet: Map<number, number>, enemyWeightAt: Map<number, number>): void {
+function runTransports(ctx: ReconcileBotCtx, P: ReconcileBotParams, starOfPlanet: Map<number, number>, enemyWeightAt: Map<number, number>): void {
   const { session, state, me } = ctx;
   const atWarWith = new Set(
     state.relations.filter((r) => r.status === 'war' && (r.a === me || r.b === me)).map((r) => (r.a === me ? r.b : r.a)),
@@ -357,7 +401,7 @@ function runTransports(ctx: ReconcileBotCtx, starOfPlanet: Map<number, number>, 
   if (!cleared) return;
   const loaded = state.ships.filter((s) => s.owner === me && s.shipKind === 'transport' && shipMarines(s) > 0 && s.location.kind === 'star');
   const wave = loaded.reduce((n, t) => n + shipMarines(t), 0);
-  if (wave <= cleared.militia + 2) return;
+  if (wave <= cleared.militia + P.transportMargin) return;
   for (const t of loaded) {
     if (t.location.kind === 'star' && t.location.starId === cleared.starId) continue;
     const from = (t.location as { starId: number }).starId;

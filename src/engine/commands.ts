@@ -1768,6 +1768,16 @@ export function validateCommand(state: GameState, cmd: EngineCommand): string | 
     ) {
       return 'reconciliation: colonies and population follow the recorded script';
     }
+    // ...and so does the ECONOMY: the build stages never run, so a queue edit
+    // never builds, bought production never completes (BC would simply burn),
+    // and jobs/research/tax move numbers nothing reads. Reject them loudly
+    // instead of letting the map quick-build or a governor mislead the player.
+    if (
+      state.reconcile !== undefined &&
+      ['set_build_queue', 'buy_production', 'sell_building', 'set_jobs', 'set_research', 'queue_extra_research', 'set_tax_rate'].includes(cmd.kind)
+    ) {
+      return 'reconciliation: the economy follows the recorded script';
+    }
   }
   const def = COMMANDS[cmd.kind];
   if (!def) return `unknown command ${cmd.kind}`;

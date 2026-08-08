@@ -16,7 +16,7 @@ import type { GameSession } from '@protocol/session';
 import type { SaveEnvelope } from '@storage/repo';
 import type { ReconcileStart } from '@storage/reconcile';
 import { onionBattleOrders } from './onionBot';
-import { freshReconcileMemory, reconcileBotTurn, type ReconcileTactic } from './reconcileBot';
+import { freshReconcileMemory, reconcileBotTurn, type ReconcileBotParams, type ReconcileTactic } from './reconcileBot';
 
 /** safety slack past the scoring turn (the election decides AT endTurn) */
 const AFTER_END_SLACK = 5;
@@ -29,7 +29,12 @@ export interface ReconcileRunResult {
 export async function runReconciliation(
   start: ReconcileStart,
   onProgress?: (turn: number, cap: number) => void,
-  opts: { extraTurns?: number; tactics?: Record<number, ReconcileTactic> } = {},
+  opts: {
+    extraTurns?: number;
+    tactics?: Record<number, ReconcileTactic>;
+    /** per-seat doctrine overrides — the AI tuning surface */
+    params?: Record<number, Partial<ReconcileBotParams>>;
+  } = {},
 ): Promise<ReconcileRunResult> {
   const engine = createGameEngine();
   let state = engine.init(start.payload as never) as GameState;
@@ -72,6 +77,7 @@ export async function runReconciliation(
         me,
         tactic: opts.tactics?.[me] ?? 'split', // lab-measured default (bugs/reconcile-tactics.md)
         memory: memories.get(me)!,
+        params: opts.params?.[me],
       });
     }
 
@@ -86,7 +92,7 @@ export async function runReconciliation(
           if (side < 0) continue;
           const filled = side === battle.attacker ? battle.ordersA : battle.ordersD;
           if (filled) continue;
-          const orders = onionBattleOrders(state, side, battle, 'balanced');
+          const orders = onionBattleOrders(state, side, battle, opts.params?.[side]?.battlePersonality ?? 'balanced');
           applyCmd(side, 'battle_orders', { battleId: battle.id, orders });
         }
       }

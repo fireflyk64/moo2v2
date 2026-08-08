@@ -42,10 +42,12 @@ test('two browsers play real turns: orders, commit, hashes, reload-resume', asyn
 
   // --- issue real orders on the colonies spreadsheet ---
   // (housing/trade goods are always buildable regardless of start mode)
-  const buildA = a.locator('[data-testid^="build-"]').first();
-  await buildA.selectOption('housing');
-  const buildB = b.locator('[data-testid^="build-"]').first();
-  await buildB.selectOption('trade_goods');
+  await a.locator('[data-testid^="build-"]').first().click();
+  await a.locator('[data-testid^="menu-now-"][data-testid$="-housing"]').first().click();
+  await a.keyboard.press('Escape'); // close the build menu
+  await b.locator('[data-testid^="build-"]').first().click();
+  await b.locator('[data-testid^="menu-now-"][data-testid$="-trade_goods"]').first().click();
+  await b.keyboard.press('Escape');
 
   // set research on both (first available field button)
   await a.getByTestId('tab-research').click();
