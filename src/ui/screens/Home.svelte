@@ -636,7 +636,7 @@
   {#if app.error}<p class="error" data-testid="error">{app.error}</p>{/if}
 </div>
 <p class="labline">
-  <a href="#battle-lab">⚗ Battle Lab</a> — build fleets for both sides and watch them fight (balance sandbox)
+  <a href="#battle-lab">⚗ Battle Lab</a> — build fleets for both sides and watch them fight (balance)
   · <button class="manualbtn" data-testid="open-manual" onclick={() => (manualOpen = true)}>📖 Manual — how every mode works</button>
 </p>
 {#if manualOpen}<ManualDialog onclose={() => (manualOpen = false)} />{/if}
