@@ -25,6 +25,7 @@
   import FirstContactDialog from '../components/FirstContactDialog.svelte';
   import { musicCue, musicEnabled, toggleMusic } from '../music';
   import { generateTimelapse, type TimelapseData } from '../timelapse';
+  import { normalizeResearchQueue } from '../researchQueue';
 
   let tab = $state<'colonies' | 'map' | 'research' | 'fleets' | 'designer' | 'empires' | 'reports'>('colonies');
   let seenReports = $state(0);
@@ -125,9 +126,11 @@
     const emp = s.empires.find((e) => e.id === me);
     if (!emp) return;
     const choices = selectors.researchChoices(s, me);
-    const done = new Set(emp.completedFields);
-    // completed entries drop out; then start the first offered one
-    const queue = app.researchQueue.filter((q) => !done.has(q.fieldNum));
+    // normalize: completed entries drop out, and any deep entry gets its
+    // unresearched prerequisite ladder inserted ahead of it (also heals
+    // queues saved before chain expansion existed); then start the first
+    // offered one
+    const queue = normalizeResearchQueue(app.researchQueue, emp.completedFields, emp.research.fieldNum);
     app.researchQueue = queue;
     for (let i = 0; i < queue.length; i++) {
       const entry = queue[i]!;
@@ -309,6 +312,19 @@
     if (deadline === null) return null;
     return Math.max(0, Math.ceil((deadline - nowTick) / 1000));
   });
+  /** hired leaders on my payroll — the wage-crisis warning only matters when
+   * there is someone to lose */
+  const myLeaderCount = $derived.by(() => {
+    if (!gs) return 0;
+    return gs.empires.find((e) => e.id === session().playerId)?.leaders.length ?? 0;
+  });
+  /** projected insolvency with leaders hired: the moment the treasury dips
+   * below zero the engine fires the most expensive leader, silently from the
+   * player's seat (playtest: "sometimes my leaders just vanish") — warn the
+   * turn BEFORE it happens */
+  const wageCrisis = $derived(
+    !reconcileLive && myLeaderCount > 0 && summary !== null && summary.bc + summary.bcDelta < 0,
+  );
   /** live leader offers for this player (drives the nav badge) */
   const leaderOfferCount = $derived.by(() => {
     if (!gs) return 0;
@@ -380,9 +396,13 @@
     // player is allowed to fix
     if (!reconcileLive && researchIdle && app.researchQueue.length === 0) return 'labs idle — pick research';
     if (urgentOfferCount > 0) return 'a leader awaits your answer';
+    // autopilot cannot fix a deficit, and the engine fires leaders the moment
+    // the treasury goes negative — this one stops even with autopilot on
+    if (wageCrisis) return 'the treasury cannot cover leader wages — unpaid leaders quit';
     if (!reconcileLive && (summary?.bc ?? 0) < 0 && !app.autopilot.enabled) return 'treasury is in the red';
     if (!reconcileLive && emptyQueueCount > 0 && !app.autopilot.enabled) return 'a colony has an empty build queue';
     const fresh = app.reports.filter((r) => r.turn === resolvedTurn);
+    if (fresh.some((r) => r.kind === 'leader_quit')) return 'a leader quit over unpaid wages';
     if (fresh.some((r) => r.kind === 'colony_ship_arrived')) return 'a colony ship reached an open planet';
     if (fresh.some((r) => r.kind === 'artifact_tech')) return 'ancient artifacts yielded a technology';
     if (fresh.some((r) => r.kind === 'splinter_joined')) return 'a splinter colony joined the empire';
@@ -899,6 +919,12 @@
   {:else if ffNote}
     <div class="banner warn" data-testid="ff-note">{ffNote}</div>
   {/if}
+  {#if wageCrisis}
+    <div class="banner warn" data-testid="wage-warning">
+      💸 Projected deficit next turn ({summary?.bc} BC {summary !== null && summary.bcDelta < 0 ? '−' : '+'}{Math.abs(summary?.bcDelta ?? 0)}/turn) — the moment the treasury
+      goes negative, unpaid leaders quit, most expensive first. Raise taxes, sell a building, or dismiss a leader yourself.
+    </div>
+  {/if}
   {#if realtimeTurns && autoTurnRemaining !== null}
     <div class="banner {autoTurnRemaining <= 5 && !iCommitted ? 'warn' : 'dim'}" data-testid="auto-turn-banner">
       ⏱ Realtime: turn advances in {autoTurnRemaining}s{iCommitted ? '' : ' — commit your orders'}.
@@ -1178,7 +1204,7 @@
         <li><b>Colonists</b> move between stars on transports: build one, "load" at a colony, fly it, "unload" (Fleets tab). Within a system they move freely — drag citizens onto a sibling colony in the spreadsheet (no ships needed); between systems the freighter run flies your <i>second-best</i> drive (the newest engines go to the warfleet). Colony bases settle other planets in the same system.</li>
         <li><b>Battles</b> only happen between empires at <b>war</b> — declare it on the Empires tab. A battle is a single pass; set stance/targeting/retreat before the clash. Bombardment after a win uses every weapon's strategic power (bombs and missiles hit hardest, beams at half strength; planetary shields block weak hits outright) but can never wipe out a colony's last population unit. Capturing a colony takes an <b>invasion</b>: barracks train 🪖 marines (1 per 5 turns, 4 boarding each transport you build), and a won battle offers the invade order — the defenders' own marines and militia decide whether the landing succeeds, and the assault plays back automatically over the map (rewatch it on the Empires tab, or stage one in the Battle Lab's ground assault preview). Undefended outposts fall to any winning fleet.</li>
         <li><b>☠ stars</b> are guarded by monsters — clear the keeper to colonize. Orion holds the Guardian and the best worlds in the galaxy.</li>
-        <li><b>Leaders</b> offer their services on the Empires tab; colony leaders boost one colony, ship officers the whole fleet.</li>
+        <li><b>Leaders</b> offer their services on the Empires tab — hover a skill chip to see exactly what it does at the leader's level. Colony leaders must be <i>assigned a seat</i>: their bonuses then cover every colony in that star system. Ship officers boost the whole fleet, no assignment needed. Each leader draws a salary every turn, and the moment the treasury goes negative your most expensive leader quits — unpaid, immediately.</li>
         <li><b>Victory</b>: conquer everyone, win the council vote (⅔ of population), or build the dimensional portal and beat the Andromedans at home.</li>
         <li><b>Play by mail</b> (📬 on the home screen): one player at a time takes the room, plays, commits and "mails in" — progress uploads on every commit and the turn advances when the last player commits. If a friend is online at the same time, you simply join their live game.</li>
       </ul>

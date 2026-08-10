@@ -3,6 +3,7 @@
   import { applicationsOfField, applicationById, fieldByNum, fieldById, fieldsOfSubject, SUBJECTS, type Subject } from '@engine/data/index';
   import { EFFECTS, EFFECT_ALIASES } from '@engine/data/effectsMap';
   import { app, getActive, savePerGame } from '../state.svelte';
+  import { normalizeResearchQueue } from '../researchQueue';
 
   const session = () => getActive()!.session;
   const gs = $derived.by(() => {
@@ -117,11 +118,17 @@
 
   // ---- research queue (client-side): when the current field completes, the
   // shell auto-issues set_research for the first queued field that is offered.
-  // Deeper fields may be queued ahead of time — they wait until unlocked. ----
+  // Queueing a deep field queues its whole unresearched prerequisite ladder
+  // ahead of it — a lone deep entry could never start (playtest: "clicking a
+  // further-down tech doesn't select the research"). ----
   const queuedNums = $derived(new Set(app.researchQueue.map((q) => q.fieldNum)));
   function enqueue(fieldNum: number, fieldId: string, target: string | null) {
     if (queuedNums.has(fieldNum)) return;
-    app.researchQueue = [...app.researchQueue, { fieldNum, fieldId, targetApp: target }];
+    app.researchQueue = normalizeResearchQueue(
+      [...app.researchQueue, { fieldNum, fieldId, targetApp: target }],
+      empire?.completedFields ?? [],
+      empire?.research.fieldNum ?? null,
+    );
     savePerGame();
   }
   function dequeue(i: number) {
@@ -208,7 +215,7 @@
   <div class="treebar">
     <button data-testid="toggle-techtree" onclick={toggleTree}>🌳 Tech tree {showTree ? '▾' : '▸'}</button>
     {#if showTree}
-      <span class="dim">✓ researched · 🔬 in progress · ● available now · ⏭ queued · faded = locked behind earlier fields · hover an application for its effect</span>
+      <span class="dim">✓ researched · 🔬 in progress · ● available now · ⏭ queued · faded = locked behind earlier fields · click a field name to queue it (locked fields queue their prerequisites first) · hover an application for its effect</span>
     {/if}
   </div>
   {#if showTree}
@@ -231,13 +238,22 @@
               data-testid="tnode-{f.id}"
             >
               <div class="thead">
-                <b>{pretty(f.id)}</b>
+                {#if !done && !current && !queued}
+                  <button
+                    class="tname"
+                    data-testid="tnode-queue-{f.id}"
+                    title="queue this field — unresearched prerequisites are queued ahead of it, then each starts automatically"
+                    onclick={() => enqueue(f.num, f.id, null)}
+                  ><b>{pretty(f.id)}</b></button>
+                {:else}
+                  <span class="tname"><b>{pretty(f.id)}</b></span>
+                {/if}
                 <span class="tcost">{f.cost}</span>
                 <span class="tmark">{done ? '✓' : current ? '🔬' : queued ? '⏭' : offered ? '●' : ''}</span>
                 {#if !done && !current && !queued}
                   <button
                     class="tq"
-                    title="queue this field — starts automatically once unlocked and its turn comes"
+                    title="queue this field — unresearched prerequisites are queued ahead of it, then each starts automatically"
                     onclick={() => enqueue(f.num, f.id, null)}
                   >⏭</button>
                 {/if}
@@ -288,7 +304,7 @@
                     disabled={queuedNums.has(f.num)}
                     title={queuedNums.has(f.num)
                       ? 'already queued'
-                      : 'queue this field — it starts automatically once unlocked and its turn comes'}
+                      : 'queue this field — unresearched prerequisites are queued ahead of it, then each starts automatically'}
                     onclick={() => enqueue(f.num, f.id, null)}
                   >⏭</button>
                 {/if}
@@ -533,8 +549,24 @@
   }
   .thead b {
     text-transform: capitalize;
+  }
+  .tname {
     flex: 1;
     min-width: 0;
+    text-align: left;
+  }
+  /* the field name doubles as the queue control — a plain-text button */
+  button.tname {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  button.tname:hover b {
+    text-decoration: underline;
   }
   .tcost {
     color: var(--text-dim);

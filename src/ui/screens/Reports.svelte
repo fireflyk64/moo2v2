@@ -16,9 +16,9 @@
   // they care about instead
   const CATEGORIES: Record<string, string[]> = {
     combat: ['battle_pending', 'battle_resolved', 'bombardment', 'colony_captured', 'invasion_repelled', 'monster_slain', 'guardian_defeated', 'antaran_raid', 'antarans_withdraw', 'colony_razed', 'empire_eliminated', 'ship_stranded_retreat'],
-    economy: ['building_complete', 'ship_built', 'freighters_built', 'colony_founded', 'freighter_upkeep', 'food_chartered', 'cp_overage', 'treasury_deficit', 'event_donation', 'event_depression', 'event_pirates', 'terraformed', 'planet_constructed'],
+    economy: ['building_complete', 'ship_built', 'freighters_built', 'colony_founded', 'freighter_upkeep', 'food_chartered', 'cp_overage', 'treasury_deficit', 'leader_quit', 'event_donation', 'event_depression', 'event_pirates', 'terraformed', 'planet_constructed'],
     research: ['research_complete', 'design_updated', 'tech_stolen', 'tech_theft_suffered'],
-    danger: ['starvation', 'tech_theft_suffered', 'sabotage_suffered', 'bombardment', 'colony_razed', 'antaran_raid', 'event_plague', 'event_meteor', 'event_depression', 'event_pirates', 'treasury_deficit', 'colony_died', 'population_lost'],
+    danger: ['starvation', 'tech_theft_suffered', 'sabotage_suffered', 'bombardment', 'colony_razed', 'antaran_raid', 'event_plague', 'event_meteor', 'event_depression', 'event_pirates', 'treasury_deficit', 'leader_quit', 'colony_died', 'population_lost'],
   };
   let category = $state<'all' | keyof typeof CATEGORIES>('all');
 
@@ -98,7 +98,7 @@
       case 'spy_trained': return `a new agent reported for duty (${p['count']}/10)`;
       case 'leader_offer': return `${leaderOf(p['leaderId'] ?? p['name'])} offers their services (${p['price']} BC)`;
       case 'leader_level': return `${leaderOf(p['leaderId'])} advanced to level ${p['level']}`;
-      case 'leader_quit': return `${leaderOf(p['leaderId'])} quit over unpaid wages`;
+      case 'leader_quit': return `💼 ${leaderOf(p['leaderId'])} quit over unpaid wages — leaders walk the moment the treasury goes negative`;
       case 'treaty_signed': return `treaty signed: ${p['kind']} between ${nameOf(p['a'])} and ${nameOf(p['b'])}`;
       case 'surrender': return `${nameOf(p['from'])} surrendered to ${nameOf(p['to'])}`;
       case 'council_convened': return `the Galactic Council convenes: ${(p['candidates'] as number[]).map(nameOf).join(' vs ')}`;

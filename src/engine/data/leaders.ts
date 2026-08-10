@@ -115,11 +115,14 @@ export const LEADERS: LeaderRow[] = [
   { id: 'kronos', name: 'Rear Admiral Kronos', title: 'the Ancient Spacefarer', kind: 'ship', skills: [s('galactic_lore', true), s('helmsman'), s('navigator', true)] },
   { id: 'tulock', name: 'Commodore Tulock', title: 'the Bounty Hunter', kind: 'ship', skills: [s('helmsman', true), s('navigator'), s('weaponry', true), s('assassin'), s('commando')] },
   { id: 'grogg', name: 'Director Grogg', title: 'the Gnolam Capitalist', kind: 'colony', skills: [s('financial_leader', true), s('labor_leader'), s('megawealth')] },
-  { id: 'androgena', name: 'Director Androgena', title: '', kind: 'colony', skills: [s('farming_leader'), s('financial_leader'), s('labor_leader'), s('medicine')] },
+  // the source table leaves androgena's and brainac's epithet cells blank; a
+  // titleless card reads as "this leader does nothing" (playtest), so they
+  // get ours
+  { id: 'androgena', name: 'Director Androgena', title: 'the Caretaker', kind: 'colony', skills: [s('farming_leader'), s('financial_leader'), s('labor_leader'), s('medicine')] },
   { id: 'megatron', name: 'Commissioner Megatron', title: 'the Relic Android', kind: 'colony', skills: [s('farming_leader', true), s('labor_leader', true), s('science_leader', true)] },
   { id: 'cyr', name: 'Lord Admiral Cyr', title: 'the Fighter Ace', kind: 'ship', skills: [s('fighter_pilot')] },
   { id: 'tanus', name: 'Governor Tanus', title: 'the Revolutionary', kind: 'colony', skills: [s('farming_leader'), s('labor_leader'), s('science_leader'), s('spiritual_leader')] },
-  { id: 'brainac', name: 'Director Brainac', title: '', kind: 'colony', skills: [s('farming_leader', true), s('instructor'), s('science_leader', true), s('spiritual_leader', true), s('assassin')] },
+  { id: 'brainac', name: 'Director Brainac', title: 'the Mastermind', kind: 'colony', skills: [s('farming_leader', true), s('instructor'), s('science_leader', true), s('spiritual_leader', true), s('assassin')] },
   { id: 'orphus', name: 'Lord Orphus', title: 'the Peacemaker', kind: 'colony', skills: [s('instructor'), s('medicine'), s('spiritual_leader', true), s('diplomat', true), s('famous')] },
   { id: 'ailis', name: 'Commissioner Ailis', title: 'the Gifted', kind: 'colony', skills: [s('environmentalist'), s('medicine', true), s('spiritual_leader')] },
   { id: 'houri', name: 'Governor Houri', title: 'the Environmentalist', kind: 'colony', skills: [s('environmentalist', true)] },
@@ -167,4 +170,77 @@ export function leaderPoints(row: LeaderRow): number {
 
 export function skillMagnitude(sk: LeaderSkill, level: number): number {
   return SKILL_BASE[sk.skill] * (sk.enhanced ? 2 : 1) * level;
+}
+
+/** The five combat skills that only ship officers contribute (L2) — on a
+ * colony leader they are decorative, and the UI says so. */
+export const SHIP_COMBAT_SKILLS: ReadonlySet<LeaderSkillId> = new Set([
+  'weaponry',
+  'helmsman',
+  'ordnance',
+  'tactics',
+  'fighter_pilot',
+]);
+
+/** Skills that act at the leader's seat of office (system administration,
+ * L2) — they do NOTHING while the leader is unassigned, which the UI warns
+ * about. Everything else is empire- or fleet-scope and always on. */
+export const COLONY_SCOPE_SKILLS: ReadonlySet<LeaderSkillId> = new Set([
+  'farming_leader',
+  'labor_leader',
+  'science_leader',
+  'financial_leader',
+  'spiritual_leader',
+  'environmentalist',
+  'medicine',
+]);
+
+/** Player-facing meaning of a skill at a given level, with the actual
+ * magnitude — what the Empires-screen skill chips show on hover. Wording
+ * mirrors how leaders.ts really applies each skill; keep them in sync. */
+export function skillDescription(sk: LeaderSkill, level: number, kind: LeaderKind): string {
+  const m = skillMagnitude(sk, level);
+  const base = (): string => {
+    switch (sk.skill) {
+      case 'assassin': return `${m}% chance each turn to eliminate an enemy spy targeting us (best assassin counts)`;
+      case 'commando': return `+${m} ground combat attack & defense, empire-wide`;
+      case 'diplomat': return `+${m}% Galactic Council vote weight`;
+      case 'engineer': return 'the fleet can repair itself anywhere, even in deep space';
+      case 'environmentalist': return `absorbs ${m} pollution at every colony in the governed star system`;
+      case 'famous': return `${Math.min(50, m)}% discount hiring further leaders, +${m / 5}% leader offer chance`;
+      case 'farming_leader': return `+${m}% food at every colony in the governed star system`;
+      case 'fighter_pilot': return `+${m}% fighter squadron damage, fleet-wide`;
+      case 'financial_leader': return `+${m}% BC income at every colony in the governed star system`;
+      case 'galactic_lore': return `+${m} parsec${m === 1 ? '' : 's'} scanner range`;
+      case 'helmsman': return `+${m} beam defense, fleet-wide`;
+      case 'instructor': return `+${m} XP/turn for every hired leader (best instructor counts)`;
+      case 'labor_leader': return `+${m}% industry at every colony in the governed star system`;
+      case 'medicine': return `+${m}% population growth at every colony in the governed star system`;
+      case 'megawealth': return `+${m} BC/turn empire income`;
+      case 'navigator': {
+        const pc = sk.enhanced ? level : Math.floor(level / 2);
+        return pc > 0
+          ? `+${pc} parsec${pc === 1 ? '' : 's'}/turn fleet speed (best navigator counts)`
+          : `fleet speed +1 parsec/turn from level 2 (best navigator counts)`;
+      }
+      case 'operations': return `+${m} command points`;
+      case 'ordnance': return `+${m}% maximum weapon damage, fleet-wide`;
+      case 'researcher': return `+${m} RP/turn empire-wide`;
+      case 'science_leader': return `+${m}% research at every colony in the governed star system`;
+      case 'security': return `+${m} ground combat defense, empire-wide`;
+      case 'spiritual_leader': return `+${m}% morale at every colony in the governed star system`;
+      case 'spy_master': return `+${m} spy offense`;
+      case 'tactics': return `+${m}% combat speed, fleet-wide`;
+      case 'telepath': return `+${m} spy offense; conquered citizens assimilate twice as fast`;
+      case 'trader': return `+${Math.min(200, m)}% trade treaty income`;
+      case 'weaponry': return `+${m} beam attack, fleet-wide`;
+      default: {
+        const exhaustive: never = sk.skill;
+        return exhaustive;
+      }
+    }
+  };
+  return kind === 'colony' && SHIP_COMBAT_SKILLS.has(sk.skill)
+    ? `${base()} — ship officers only: no effect from a colony leader`
+    : base();
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { encodeRaceString } from '../raceString';
   import { leaderById, salaryOf, MAX_LEADERS_PER_KIND, countKind } from '@engine/leaders';
+  import { skillDescription, COLONY_SCOPE_SKILLS } from '@engine/data/leaders';
   import { selectors, shipStyleOf, SHIP_STYLES, HULLS_BUILDABLE } from '@engine/index';
   import { PICK_ROWS, GOVERNMENTS, pickById } from '@engine/data/index';
   import type { ProposalKind } from '@engine/types';
@@ -464,7 +465,11 @@
           </div>
           <div class="skills">
             {#each row?.skills ?? [] as s (s.skill)}
-              <span class="skill" class:enh={s.enhanced}>{s.skill.replaceAll('_', ' ')}{s.enhanced ? ' ★' : ''}</span>
+              <span
+                class="skill"
+                class:enh={s.enhanced}
+                title="{skillDescription(s, 1, row?.kind ?? 'colony')} — grows with the leader's level{s.enhanced ? ' (★ enhanced: double strength)' : ''}"
+              >{s.skill.replaceAll('_', ' ')}{s.enhanced ? ' ★' : ''}</span>
             {/each}
           </div>
           <div class="foot">
@@ -491,6 +496,8 @@
     <div class="cards" data-testid="leader-roster">
       {#each me.leaders as l (l.leaderId)}
         {@const row = leaderById.get(l.leaderId)}
+        {@const idleSeat =
+          row?.kind === 'colony' && l.colonyId === null && row.skills.some((s) => COLONY_SCOPE_SKILLS.has(s.skill))}
         <div class="leadercard" class:ship={row?.kind === 'ship'}>
           <div class="portrait">{portraitOf(l.leaderId, row?.kind)}</div>
           <div class="who">
@@ -505,21 +512,28 @@
           </div>
           <div class="skills">
             {#each row?.skills ?? [] as s (s.skill)}
-              <span class="skill" class:enh={s.enhanced}>{s.skill.replaceAll('_', ' ')}{s.enhanced ? ' ★' : ''}</span>
+              <span
+                class="skill"
+                class:enh={s.enhanced}
+                title="{skillDescription(s, l.level, row?.kind ?? 'colony')}{s.enhanced ? ' (★ enhanced: double strength)' : ''}"
+              >{s.skill.replaceAll('_', ' ')}{s.enhanced ? ' ★' : ''}</span>
             {/each}
           </div>
           <div class="foot">
             {#if row?.kind === 'colony'}
               <select
                 data-testid="assign-{l.leaderId}"
-                title="seat of office — bonuses cover every colony in that star system"
+                class:seatwarn={idleSeat}
+                title={idleSeat
+                  ? 'no seat of office — this leader\'s colony bonuses do NOTHING until assigned to a colony (they then cover every colony in that star system)'
+                  : 'seat of office — bonuses cover every colony in that star system'}
                 value={l.colonyId ?? -1}
                 onchange={(e) => {
                   const v = Number((e.target as HTMLSelectElement).value);
                   submit('assign_leader', { leaderId: l.leaderId, colonyId: v < 0 ? null : v });
                 }}
               >
-                <option value={-1}>unassigned</option>
+                <option value={-1}>{idleSeat ? '⚠ unassigned — bonuses idle' : 'unassigned'}</option>
                 {#each myColonies as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
               </select>
             {:else}
@@ -886,6 +900,11 @@
     font-size: 0.75rem;
   }
   .leadercard .skill.enh {
+    border-color: var(--gold, #d8b653);
+    color: #ffe9b0;
+  }
+  /* unassigned colony leader: their system bonuses are idle until seated */
+  .leadercard select.seatwarn {
     border-color: var(--gold, #d8b653);
     color: #ffe9b0;
   }
