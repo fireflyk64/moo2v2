@@ -591,7 +591,11 @@ export function guardianReward(state: GameState, victorId: number, events: TurnE
   const empire = state.empires.find((e) => e.id === victorId);
   if (!empire) return;
   grantApp(empire, 'death_ray');
-  if (!state.empires.some((e) => e.leaders.some((l) => l.leaderId === 'loknar'))) {
+  // the Loknar offer honors the no-leaders game option (the death ray stays)
+  if (
+    state.settings.modes.noLeaders !== true &&
+    !state.empires.some((e) => e.leaders.some((l) => l.leaderId === 'loknar'))
+  ) {
     state.leaderOffers.push({ empireId: victorId, leaderId: 'loknar', priceBc: 100, expiresTurn: state.turn + 10 });
   }
   events.push({ visibleTo: victorId, kind: 'guardian_defeated', payload: { empireId: victorId } });

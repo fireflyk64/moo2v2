@@ -278,6 +278,10 @@ export interface GameStateSettings {
     outOfBoxThinking?: boolean;
     /** unlocks the planetary construction ship once ALL construction fields are researched (absent = off) */
     constructionShip?: boolean;
+    /** play without leaders: leadersUpkeep never rolls an offer (and the
+     * Guardian bounty skips Loknar), so no hires/salaries/bonuses all game
+     * (absent in older saves = off) */
+    noLeaders?: boolean;
   };
   battleOrdersTimeoutMs: number;
   debugCommands: boolean;

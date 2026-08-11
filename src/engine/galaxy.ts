@@ -542,7 +542,16 @@ export function generateGalaxy(
   const homeStars: Star[] = [];
   const nonHole = stars.filter((s) => s.color !== 'black_hole' && s.color !== 'green');
   let bestSpread: Star[] | null = null;
-  for (let attempt = 0; attempt < 200 && !bestSpread; attempt++) {
+  // neighborhood equalizer (bugs.md #17): uniform rolls made one player's
+  // nearest real planet up to 3x farther than another's on the same map
+  // (measured 152-530cp, same-map gaps up to 310cp). Instead of accepting
+  // the FIRST valid well-separated home set, draw up to 12 of them and keep
+  // the one whose homes face the most SIMILAR distance to their nearest
+  // world outside the set (smallest between-home spread; ties -> smallest
+  // worst-case distance, then the earliest draw). Deterministic: same
+  // seeded rng, stable iteration order.
+  const candidateSets: Star[][] = [];
+  for (let attempt = 0; attempt < 200 && candidateSets.length < 12; attempt++) {
     const shuffled = [...nonHole];
     rng.shuffle(shuffled);
     const chosen: Star[] = [];
@@ -552,7 +561,34 @@ export function generateGalaxy(
         if (chosen.length === empireTraits.length) break;
       }
     }
-    if (chosen.length === empireTraits.length) bestSpread = chosen;
+    if (chosen.length === empireTraits.length) candidateSets.push(chosen);
+  }
+  if (candidateSets.length > 0) {
+    const hasWorld = new Set(planets.filter((p) => p.body === 'planet').map((p) => p.starId));
+    const nearestWorld = (home: Star, set: Star[]): number => {
+      let best = Infinity;
+      for (const s of stars) {
+        if (s.id === home.id || !hasWorld.has(s.id) || set.some((c) => c.id === s.id)) continue;
+        const d = starDistance(home, s);
+        if (d < best) best = d;
+      }
+      return best;
+    };
+    // seed with the first draw so a degenerate map (every gap Infinity)
+    // still keeps a valid set instead of falling through to the dense path
+    bestSpread = candidateSets[0]!;
+    let bestScore = Infinity;
+    let bestWorst = Infinity;
+    for (const set of candidateSets) {
+      const gaps = set.map((h) => nearestWorld(h, set));
+      const spread = Math.max(...gaps) - Math.min(...gaps);
+      const worst = Math.max(...gaps);
+      if (spread < bestScore || (spread === bestScore && worst < bestWorst)) {
+        bestScore = spread;
+        bestWorst = worst;
+        bestSpread = set;
+      }
+    }
   }
   if (!bestSpread) {
     // dense fallback: greedy farthest-point pick — maximize the minimum

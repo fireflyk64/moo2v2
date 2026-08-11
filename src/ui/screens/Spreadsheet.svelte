@@ -198,7 +198,12 @@
     if (!item) return;
     for (const row of rows) {
       if (!selected.has(row.id) || !row.buildable.includes(item)) continue;
-      const items = row.queue.length ? [item, ...row.queueEntries.slice(1)] : [item];
+      // build the pick NOW but KEEP the whole existing queue behind it — the
+      // old head used to be dropped, so "set build for all" after a new tech
+      // (automated factories) silently deleted what every colony had lined
+      // up. Invested production is safe either way: in normal mode it carries
+      // to the new head, in sticky mode the engine parks it on the old item.
+      const items = [item, ...row.queueEntries].slice(0, 12);
       submitNoted('set_build_queue', { colonyId: row.id, items });
     }
   }
@@ -457,12 +462,13 @@
     <select
       data-testid="bulk-build"
       value=""
+      title="each colony builds this next — everything already queued stays, right behind it"
       onchange={(e) => {
         bulkBuild((e.target as HTMLSelectElement).value);
         (e.target as HTMLSelectElement).value = '';
       }}
     >
-      <option value="">set build for all…</option>
+      <option value="">build now for all…</option>
       {#each bulkOptions as o (o.item)}<option value={o.item}>{label(o.item)}{o.n < o.total ? ` (${o.n} of ${o.total})` : ''}</option>{/each}
     </select>
     <select
@@ -665,7 +671,9 @@
           </span>
         </td>
         <td data-testid="pop-{row.id}" title="projected growth next turn: {growthLabel(row.growthK)}">
-          {row.popUnits}/{row.maxPop}
+          <!-- one decimal: the whole-unit display hid fractional starvation
+               dips (2.05 → 1.95 read as "2 → 1", a phantom full-pop loss) -->
+          {row.outpost ? row.popUnits : (row.popK / 1000).toFixed(1)}/{row.maxPop}
           {#if !row.outpost}
             <span class="growth" class:neg={row.growthK < 0}>{growthLabel(row.growthK)}</span>
           {/if}

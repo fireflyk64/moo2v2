@@ -109,6 +109,12 @@ export interface BattleOrders {
    * ships, transports) alive instead of capturing-and-scuttling them.
    * Optional for wire/save compatibility; absent = false (classic behavior). */
   spareNoncombatants?: boolean;
+  /** attacker only, monster lairs: fight the battle for real even when the
+   * fleet masses MONSTER_CLEAR_WEIGHT — the deterministic lossless auto-clear
+   * (battles.ts) is skipped, so the player gets a watchable battle (and risks
+   * real damage). ABSENT = false: old logs, timeout defaults and the bots
+   * keep the instant clear byte-for-byte. */
+  fightOut?: boolean;
   /** WHERE the fight happens (0.22.0 engagement choice).
    * Attacker: planetId of a defender colony at the star to assault (that
    * colony's defenses join and take the bombardment/invasion), or null for a

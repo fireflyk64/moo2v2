@@ -12,7 +12,10 @@ import { gameEngine } from '@engine/adapter';
 import type { GameState } from '@engine/types';
 import { SoloBot, type BotPersonality } from '@ui/soloBot';
 
-const SEED = 'deadbeefdeadbeefdeadbeefdeadbeef';
+// re-seeded 2026-08-11: the 0.34.0 home-neighborhood equalizer re-dealt the
+// old 'deadbeef…' map (the militarist bled its fleet in a long war there and
+// snapshotted at 2 warships); this deal shows the personality contrasts again
+const SEED = 'cafef00dcafef00dcafef00dcafef00d';
 const TURN_CAP = 120;
 const identity = (name: string) => ({ name, engineVersion: '0.1.0', dataVersion: 'dv-test', roomCode: 'PROF', lobbyServer: 'memory' });
 

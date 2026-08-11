@@ -202,6 +202,7 @@
   let d1PickPoints = $state(10);
   let d1CoreWorlds = $state<'off' | 'central' | 'random'>('off');
   let d1OutOfBox = $state(false);
+  let d1NoLeaders = $state(false);
   let d1Note = $state('');
 
   interface D1Row {
@@ -250,7 +251,7 @@
         startMode: d1StartMode,
         pickPoints: d1PickPoints,
         coreWorlds: d1CoreWorlds,
-        modes: { ...DEFAULT_SETTINGS.modes, outOfBoxThinking: d1OutOfBox },
+        modes: { ...DEFAULT_SETTINGS.modes, outOfBoxThinking: d1OutOfBox, noLeaders: d1NoLeaders },
       };
       const guests = d1Guests.map((g) => {
         if (!g.payload || g.errors.length) throw new Error(`fix ${g.summary}: ${g.errors.join('; ')}`);
@@ -594,6 +595,7 @@
         <option value="off">off</option><option value="central">central</option><option value="random">scattered</option>
       </select>
       <label><input type="checkbox" data-testid="d1-oob" bind:checked={d1OutOfBox} /> out-of-box picks</label>
+      <label title="play without leaders: no offers, salaries or leader bonuses for anyone"><input type="checkbox" data-testid="d1-noleaders" bind:checked={d1NoLeaders} /> no leaders</label>
     </span>
     <button
       data-testid="d1-start-btn"

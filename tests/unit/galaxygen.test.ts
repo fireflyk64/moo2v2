@@ -326,3 +326,53 @@ describe('mirror mode (bug: replicated rotated starts, players on the edge)', ()
     }
   });
 });
+
+describe('home-neighborhood equalizer (bugs.md #17)', () => {
+  /** the generator's own fairness metric: distance from a home star to the
+   * nearest OTHER star holding a real planet (other homes excluded) */
+  function nearestWorldGaps(g: ReturnType<typeof generateGalaxy>): number[] {
+    const homes = homeStarsOf(g);
+    const homeIds = new Set(homes.map((s) => s.id));
+    const hasWorld = new Set(g.planets.filter((p) => p.body === 'planet').map((p) => p.starId));
+    return homes.map((h) => {
+      let best = Infinity;
+      for (const s of g.stars) {
+        if (s.id === h.id || homeIds.has(s.id) || !hasWorld.has(s.id)) continue;
+        best = Math.min(best, starDistance(h, s));
+      }
+      return best;
+    });
+  }
+
+  it('both players face a similar distance to their first colony target', () => {
+    // pre-equalizer, uniform home picks measured spread p50 79 / max 310cp on
+    // this metric — one player's nearest real planet could be 3x farther than
+    // the other's. The equalizer draws several valid home sets and keeps the
+    // most even one; these bounds fail comfortably on the old first-draw code.
+    const spreads: number[] = [];
+    for (let i = 0; i < 24; i++) {
+      const seed = ((i * 2654435761) % 4294967291).toString(16).padStart(8, '0').repeat(4);
+      const g = generateGalaxy(seed, settingsOf({}), traitsFor(2));
+      const gaps = nearestWorldGaps(g);
+      expect(gaps.every((x) => Number.isFinite(x))).toBe(true);
+      spreads.push(Math.max(...gaps) - Math.min(...gaps));
+    }
+    spreads.sort((a, b) => a - b);
+    expect(spreads[Math.floor(spreads.length / 2)]!).toBeLessThanOrEqual(40); // median (measured ~7)
+    expect(spreads.at(-1)!).toBeLessThanOrEqual(250); // worst map (measured ~132)
+  });
+
+  it('equalizing never violates the pairwise home-separation guarantee', () => {
+    for (const seed of SEEDS) {
+      for (const players of [2, 4]) {
+        const g = generateGalaxy(seed, settingsOf({ galaxySize: 'large', playerCount: players }), traitsFor(players));
+        const homes = homeStarsOf(g);
+        for (let i = 0; i < homes.length; i++) {
+          for (let j = i + 1; j < homes.length; j++) {
+            expect(starDistance(homes[i]!, homes[j]!)).toBeGreaterThanOrEqual(900);
+          }
+        }
+      }
+    }
+  });
+});

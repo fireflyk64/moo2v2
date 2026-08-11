@@ -55,3 +55,22 @@ describe('leader offers actually happen (bug: leaders were never encountered)', 
     expect(OFFER_TTL).toBeGreaterThanOrEqual(8);
   });
 });
+
+describe('the no-leaders game option', () => {
+  it('with modes.noLeaders no offer ever rolls, for anyone, all game', () => {
+    for (const seed of SEEDS) {
+      let state = newGame(seed);
+      state.settings.modes.noLeaders = true;
+      for (let t = 0; t < 80; t++) {
+        state = gameEngine.apply(state, { turn: state.turn, playerId: -1, kind: 'advance_turn', payload: {} });
+        if (state.phase === 'battle_orders') {
+          state = gameEngine.apply(state, { turn: state.turn, playerId: -1, kind: 'resolve_combat', payload: {} });
+        }
+        const events = gameEngine.takeEvents() as TurnEvent[];
+        expect(events.some((e) => e.kind === 'leader_offer'), `seed ${seed} turn ${state.turn}`).toBe(false);
+      }
+      expect(state.leaderOffers).toEqual([]);
+      for (const e of state.empires) expect(e.leaders).toEqual([]);
+    }
+  });
+});

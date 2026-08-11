@@ -13,7 +13,7 @@
 
 import { foodLogistics, selectors } from '@engine/index';
 import { itemCost, SHIP_BUILDABLES, PROJECT_BUILDABLES } from '@engine/items';
-import type { GameState } from '@engine/types';
+import { ANDROID_RACE, type GameState } from '@engine/types';
 import type { GameSession } from '@protocol/session';
 import { BUILD_ORDER } from './soloBot';
 
@@ -129,12 +129,16 @@ export function governColonies(
   // a colony can now starve forever next to a surplus world. Order ONE fleet
   // whenever shipping would actually feed someone (uncovered lack AND surplus
   // left over to ship) and none is already queued.
+  const logi = foodLogistics(planned, empire, (c) => rows.get(c.id)?.output ?? { foodNet: 0 });
   let needFreighters =
     !myColonies.some((c) => c.queue.some((q) => q.item === 'freighter_fleet')) &&
-    (() => {
-      const logi = foodLogistics(planned, empire, (c) => rows.get(c.id)?.output ?? { foodNet: 0 });
-      return [...logi.lack.values()].some((l) => l > 0) && logi.leftoverSurplus > 0;
-    })();
+    [...logi.lack.values()].some((l) => l > 0) &&
+    logi.leftoverSurplus > 0;
+  // incremental food (bugs report): while nobody is actually going hungry the
+  // governor keeps the player's farming EXACTLY as set — it only rebalances
+  // workers vs scientists. Farmers are only re-planned when a colony truly
+  // lacks food, so toggling autopilot no longer scrambles a healthy food web.
+  const foodHealthy = ![...logi.lack.values()].some((l) => l > 0);
 
   for (const colony of ordered) {
     const row = rows.get(colony.id)!;
@@ -147,7 +151,7 @@ export function governColonies(
     // everyone else works the weight-picked preset
     const buildingShips = !!head0 && (head0.startsWith('design:') || SHIP_BUILDABLES.has(head0));
     const preset = colony.buildings.length >= 5 && w.research >= 3 && !buildingShips ? 'research' : preset0;
-    const jobs = selectors.presetJobs(planned, colony.id, preset);
+    const jobs = selectors.presetJobs(planned, colony.id, preset, { keepFarmers: foodHealthy });
     if (jobs) {
       // slider-picked scientist shifts, plus the v2 bot's growth term: big
       // colonies staff real labs (an extra scientist per 6 pop beyond 10)
@@ -160,7 +164,16 @@ export function governColonies(
           g.scientists++;
         }
       }
-      submit('set_jobs', { colonyId: colony.id, groups: jobs });
+      // only submit a CHANGE — an identical reassignment every pass made the
+      // governor look like it was "redoing" jobs it had not touched
+      const current = colony.groups.filter((g) => g.race !== ANDROID_RACE);
+      const same =
+        jobs.length === current.length &&
+        jobs.every((j, i) => {
+          const c = current[i]!;
+          return j.race === c.race && j.farmers === c.farmers && j.workers === c.workers && j.scientists === c.scientists;
+        });
+      if (!same) submit('set_jobs', { colonyId: colony.id, groups: jobs });
     }
 
     // v2-bot buyout rule: colony ships get bought outright when the treasury

@@ -2,7 +2,7 @@
   // Pre-battle orders: the only input combat takes. The pass itself is an
   // automatic cinematic once both sides have ordered (or the timeout fires).
   import type { PendingBattle } from '@engine/types';
-  import { fleetBombardDamage, planetShieldBlock } from '@engine/battles';
+  import { fleetBombardDamage, fleetHullWeight, MONSTER_CLEAR_WEIGHT, planetShieldBlock } from '@engine/battles';
   import { ATTACK_TACTICS } from '@engine/groundTactics';
   import { colonyPopUnits, marinesOf, shipMarines } from '@engine/economy';
   import { ownerName } from '../colors';
@@ -226,6 +226,20 @@
     return { marines, defenders: marinesOf(colony) + Math.ceil(colonyPopUnits(colony) / 2) };
   });
 
+  // the deterministic instant clear (fleet >= MONSTER_CLEAR_WEIGHT hull
+  // points vs an ordinary lair) would resolve this battle with no sim and no
+  // replay. A human ALWAYS fights it out — no checkbox: offering a
+  // guaranteed-lossless clear would push every player to take it over the
+  // actual battle. The instant clear stays a bot/timeout behavior only.
+  const instantClear = $derived.by(() => {
+    void app.version;
+    const gs = session().getState();
+    if (!gs || !isAttacker || battle.defender !== -2) return false;
+    const lair = gs.monsters.filter((m) => m.starId === battle.starId && !m.kind.startsWith('antaran_'));
+    if (lair.length === 0 || lair.some((m) => m.kind === 'guardian')) return false;
+    return fleetHullWeight(gs, battle.attacker, battle.starId) >= MONSTER_CLEAR_WEIGHT;
+  });
+
   function submit() {
     const invading = isAttacker && engagePlanetId !== null && invadePreview !== null && invade;
     session().submit('battle_orders', {
@@ -243,6 +257,9 @@
         ...(formation ? { formation } : {}),
         // ground tactic rides attacker orders only, and only with a landing
         ...(invading && invadeTactic ? { invadeTactic } : {}),
+        // only ever submitted where the instant clear would trigger — absent
+        // everywhere else, so every other battle's orders stay byte-exact
+        ...(instantClear ? { fightOut: true } : {}),
       },
     });
   }

@@ -581,7 +581,11 @@ export function resolveBattle(state: GameState, battle: PendingBattle, events: T
   // zero attacker losses, no sim. Applies to every empire alike. The Orion
   // Guardian and the Antaran faction (id -3) still demand a real battle;
   // below the bar the normal fight runs so light fleets test their mettle.
-  if (battle.attacker >= 0 && battle.defender === MONSTER_EMPIRE) {
+  // fightOut (0.34.0): an attacker who ORDERS the fight fought gets the real
+  // sim (and its replay) instead — the instant clear silently swallowed every
+  // strong-fleet monster battle, so a human could never watch one (bugs.md).
+  const wantsFight = (battle.ordersA as BattleOrders | null)?.fightOut === true;
+  if (battle.attacker >= 0 && battle.defender === MONSTER_EMPIRE && !wantsFight) {
     const lair = monstersAt(state, battle.starId, MONSTER_EMPIRE);
     if (
       lair.length > 0 &&

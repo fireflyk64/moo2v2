@@ -41,6 +41,9 @@ export interface GameSettings {
     outOfBoxThinking?: boolean;
     /** unlocks the planetary construction ship (endgame construction reward) */
     constructionShip?: boolean;
+    /** play without leaders: no offers ever roll (and no Loknar bounty), so
+     * no hires, salaries or leader bonuses exist all game (absent = off) */
+    noLeaders?: boolean;
   };
   /** ms for the battle-orders sub-phase before host applies defaults */
   battleOrdersTimeoutMs: number;
@@ -182,6 +185,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
     randomEvents: true,
     outOfBoxThinking: false,
     constructionShip: false,
+    noLeaders: false,
   },
   battleOrdersTimeoutMs: 60_000,
   debugCommands: false,

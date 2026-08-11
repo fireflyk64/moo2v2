@@ -71,7 +71,9 @@
         return `🎉 research breakthrough: ${what}${p['extra'] ? ' (purchased application)' : ''}`;
       }
       case 'battle_pending': return `battle brewing: ${nameOf(p['attacker'])} vs ${nameOf(p['defender'])}`;
-      case 'battle_resolved': return `battle at ${starOf(p['starId'])}: winner ${p['winner'] === null ? 'none' : nameOf(p['winner'])}`;
+      case 'battle_resolved': return p['autoCleared']
+        ? `the lair at ${starOf(p['starId'])} was overwhelmed by sheer mass — instant victory, no losses (no battle to watch)`
+        : `battle at ${starOf(p['starId'])}: winner ${p['winner'] === null ? 'none' : nameOf(p['winner'])}`;
       case 'bombardment': {
         if (p['outpostDestroyed']) return `an outpost was destroyed by orbital bombardment`;
         const pop = Number(p['popKilled'] ?? 0);

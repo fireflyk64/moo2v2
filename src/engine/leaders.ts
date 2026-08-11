@@ -223,6 +223,9 @@ export const OFFER_BASE_CHANCE = 8; // %/turn with an open slot
  * accepted and harmless (skills are per-empire). Once ANY contact exists the
  * classic global market applies. */
 export function leadersUpkeep(state: GameState, events: TurnEvent[]): void {
+  // no-leaders game option: the market never opens — no offers, salaries or
+  // XP the whole game (a setup checkbox, not a mid-game switch)
+  if (state.settings.modes.noLeaders === true) return;
   const globalMarket = anyEmpireContact(state);
   const takenFor = (empireId: number, leaderId: string): boolean =>
     globalMarket

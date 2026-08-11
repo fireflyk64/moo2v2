@@ -784,8 +784,8 @@
       class="stat"
       data-testid="freighters"
       class:neg={summary.freightersFree < summary.freightersNeeded}
-      title="freighters: {summary.freightersFree} free of {summary.freighters} total ({summary.freighters - summary.freightersFree} busy). NEEDED now: {summary.freightersNeeded} for food deliveries{summary.colonistsInTransit > 0 ? ` + ${5 * summary.colonistsInTransit} hauling ${summary.colonistsInTransit} colonist${summary.colonistsInTransit > 1 ? 's' : ''} (5 per colonist)` : ''}.{summary.freightersFree < summary.freightersNeeded ? ` SHORT ${summary.freightersNeeded - summary.freightersFree} — build freighter fleets or food goes undelivered.` : ''}"
-    >🚚 {summary.freightersFree}/{summary.freighters}</span>
+      title="freighters: {summary.freightersInUse} of {summary.freighters} working this turn ({summary.freightersInUse - 5 * summary.colonistsInTransit} hauling food{summary.colonistsInTransit > 0 ? `, ${5 * summary.colonistsInTransit} carrying ${summary.colonistsInTransit} colonist${summary.colonistsInTransit > 1 ? 's' : ''} (5 per colonist)` : ''}). NEEDED now: {summary.freightersNeeded} for food deliveries.{summary.freightersFree < summary.freightersNeeded ? ` SHORT ${summary.freightersNeeded - summary.freightersFree} — build freighter fleets or food goes undelivered.` : ''}"
+    >🚚 {summary.freightersInUse}/{summary.freighters}</span>
     <span class="stat" data-testid="rp" title="research points per turn">🔬 {summary.researchPerTurn}</span>
     <span
       class="stat"

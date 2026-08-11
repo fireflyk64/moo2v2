@@ -141,3 +141,46 @@ describe('job presets vs empire food', () => {
     expect(w).toBeGreaterThan(s);
   });
 });
+
+describe('incremental presets (keepFarmers — the autopilot food fix)', () => {
+  it('keepFarmers preserves a deliberate farming surplus exactly, per group', () => {
+    const state = newGame();
+    const { home } = stageBreadbasket(state);
+    // the player hand-set MORE farmers than the minimum (a deliberate buffer)
+    const minimal = selectors.presetJobs(state, home.id, 'industry')!;
+    const minFarmers = minimal.reduce((n, g) => n + g.farmers, 0);
+    const surplus = minFarmers + 1;
+    let left = surplus;
+    for (const g of home.groups) {
+      const units = Math.floor(g.popK / 1000);
+      g.farmers = Math.min(units, left);
+      left -= g.farmers;
+      g.workers = units - g.farmers;
+      g.scientists = 0;
+    }
+    const before = home.groups.map((g) => g.farmers);
+    const kept = selectors.presetJobs(state, home.id, 'research', { keepFarmers: true })!;
+    // farmer counts untouched, group by group — only the rest was reassigned
+    kept.forEach((g, i) => expect(g.farmers).toBe(before[i]));
+    expect(kept.reduce((n, g) => n + g.farmers, 0)).toBe(surplus);
+    // and the research preset really moved the non-farmers to science
+    expect(kept.reduce((n, g) => n + g.scientists, 0)).toBeGreaterThan(0);
+    expect(kept.reduce((n, g) => n + g.workers, 0)).toBe(0);
+  });
+
+  it('without keepFarmers the preset still minimizes farmers (unchanged)', () => {
+    const state = newGame();
+    const { home } = stageBreadbasket(state);
+    const minimal = selectors.presetJobs(state, home.id, 'industry')!;
+    const minFarmers = minimal.reduce((n, g) => n + g.farmers, 0);
+    // over-farm, then run the classic preset: the surplus is reclaimed
+    for (const g of home.groups) {
+      const units = Math.floor(g.popK / 1000);
+      g.farmers = units;
+      g.workers = 0;
+      g.scientists = 0;
+    }
+    const swept = selectors.presetJobs(state, home.id, 'industry')!;
+    expect(swept.reduce((n, g) => n + g.farmers, 0)).toBe(minFarmers);
+  });
+});

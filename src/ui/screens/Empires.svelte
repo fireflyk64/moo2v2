@@ -448,6 +448,7 @@
     </details>
   {/if}
 
+  {#if gs.settings.modes.noLeaders !== true}
   <h3>Leaders ({countKind(me, 'colony')}/{MAX_LEADERS_PER_KIND} colony, {countKind(me, 'ship')}/{MAX_LEADERS_PER_KIND} ship)</h3>
   {#if myOffers.length}
     <div class="cards" data-testid="leader-offers">
@@ -546,6 +547,7 @@
     </div>
   {:else}
     <p class="dim">No leaders in your employ. Offers arrive from time to time — Famous and charismatic help.</p>
+  {/if}
   {/if}
 
   <h3>Agents ({me.spies.count}/10)</h3>

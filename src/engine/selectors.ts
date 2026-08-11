@@ -251,6 +251,9 @@ export interface EmpireSummary {
   freightersNeeded: number;
   /** freighters not tied up hauling colonists between systems */
   freightersFree: number;
+  /** freighters actually working this turn: food hauls + colonist transits
+   * (the number the freighter_upkeep report charges for) */
+  freightersInUse: number;
   /** colonist units currently riding freighters */
   colonistsInTransit: number;
   colonies: number;
@@ -324,6 +327,7 @@ export function empireSummary(state: GameState, empireId: number): EmpireSummary
     freighters: empire.freighters,
     freightersNeeded: ceilDiv(freightersNeeded, 5) * 5,
     freightersFree: freeFreighters(state, empire),
+    freightersInUse: logi.freightersInUse,
     colonistsInTransit: (state.popTransits ?? []).reduce(
       (n, t) => n + (t.empireId === empireId ? t.units : 0),
       0,
@@ -369,6 +373,12 @@ export function presetJobs(
   state: GameState,
   colonyId: number,
   preset: JobPreset,
+  opts?: {
+    /** incremental mode (autopilot with healthy food): every group's farmer
+     * count is preserved EXACTLY as assigned — only the worker/scientist
+     * split is rebalanced, so the empire's food flow never changes hands */
+    keepFarmers?: boolean;
+  },
 ): Array<{ race: number; farmers: number; workers: number; scientists: number }> | null {
   const colony = state.colonies.find((c) => c.id === colonyId);
   if (!colony || colony.outpost || colony.groups.length === 0) return null;
@@ -391,6 +401,40 @@ export function presetJobs(
       g.scientists = units - g.farmers - g.workers;
     }
   };
+
+  if (opts?.keepFarmers) {
+    const perGroup = flexible.map((g) => Math.min(unitsOf(g), g.farmers));
+    const rest = total - perGroup.reduce((a, b) => a + b, 0);
+    const assignKeep = (workers: number): void => {
+      let w = workers;
+      flexible.forEach((g, i) => {
+        const units = unitsOf(g);
+        g.farmers = perGroup[i]!;
+        g.workers = Math.min(units - g.farmers, w);
+        w -= g.workers;
+        g.scientists = units - g.farmers - g.workers;
+      });
+    };
+    let workers = 0;
+    if (preset === 'industry') {
+      workers = rest;
+    } else if (preset === 'blend') {
+      for (let w = rest; w >= 0; w--) {
+        assignKeep(w);
+        if (colonyOutput(state, probe).pollution <= 2) {
+          workers = w;
+          break;
+        }
+      }
+    }
+    assignKeep(workers);
+    return flexible.map((g) => ({
+      race: g.race,
+      farmers: g.farmers,
+      workers: g.workers,
+      scientists: g.scientists,
+    }));
+  }
 
   // fewest farmers that (a) feed the colony and (b) keep exporting the food
   // the REST of the empire depends on — a research/industry sweep must not
