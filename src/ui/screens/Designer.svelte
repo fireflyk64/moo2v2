@@ -259,7 +259,7 @@
   const hullsOpen = $derived(empire ? availableHulls(empire) : []);
   const HULL_REQS: Record<string, string> = {
     cruiser: 'requires Capsule Construction',
-    battleship: 'requires Astro Construction',
+    battleship: 'requires Robotics',
     titan: 'requires Titan Construction',
     doomstar: 'requires Doom Star Construction',
   };

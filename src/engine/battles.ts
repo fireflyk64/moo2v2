@@ -376,6 +376,9 @@ function baseToCombat(state: GameState, empire: Empire, colony: Colony, syntheti
     startingArmor: stats.armorHp,
     style: shipStyleOf(empire),
     modelIdx: colony.id, // stations vary per colony
+    // batteries with no orbital platform of their own render as a ground-fed
+    // weapons emplacement, not a full star base (display-only)
+    ...(baseBuilding ? {} : { modelKind: 'defense_platform' }),
   };
 }
 

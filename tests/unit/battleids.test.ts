@@ -49,7 +49,7 @@ function stageSiege(state: GameState) {
   state.ships = state.ships.filter(
     (s) => !((s.owner === 0 || s.owner === 1) && (s.shipKind === 'design' || s.shipKind === 'scout')),
   );
-  if (!attacker.completedFields.includes(19)) attacker.completedFields.push(19); // battleship hull
+  if (!attacker.completedFields.includes(62)) attacker.completedFields.push(62); // battleship hull (robotics)
   const bomber = {
     id: allocId(state, 0),
     name: 'Bomber',

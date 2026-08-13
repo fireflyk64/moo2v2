@@ -271,11 +271,12 @@ export type ArtClass =
   | 'doomstar'
   | 'star_base'
   | 'battlestation'
-  | 'star_fortress';
+  | 'star_fortress'
+  | 'defense_platform';
 
 export const ART_CLASSES: readonly ArtClass[] = [
   'scout', 'frigate', 'destroyer', 'cruiser', 'battleship', 'titan', 'doomstar',
-  'star_base', 'battlestation', 'star_fortress',
+  'star_base', 'battlestation', 'star_fortress', 'defense_platform',
 ];
 
 interface ClassSpec {
@@ -296,6 +297,7 @@ const CLASS_SPECS: Record<ArtClass, ClassSpec> = {
   star_base: { w: 21, h: 21, tier: 3, base: true },
   battlestation: { w: 25, h: 25, tier: 4, base: true },
   star_fortress: { w: 31, h: 31, tier: 5, base: true },
+  defense_platform: { w: 17, h: 17, tier: 2, base: true },
 };
 
 /** how many model variants a class offers within a style */
@@ -315,6 +317,8 @@ export function wrapVariant(cls: ArtClass, idx: number | undefined): number {
 /** resolve the art class the viewer should draw for a combat ship */
 export function artClassOf(init: { hull: string; hullIdx: number; isBase: boolean; modelKind?: string }): ArtClass | string {
   if (init.modelKind === 'scout') return 'scout';
+  // batteries-only colony defense: a weapons emplacement, not a star base
+  if (init.modelKind === 'defense_platform') return 'defense_platform';
   if ((ART_CLASSES as readonly string[]).includes(init.hull)) return init.hull as ArtClass;
   if (MONSTER_KINDS.includes(init.hull)) return init.hull; // monsters key art by kind
   if (init.isBase) return init.hullIdx >= 9 ? 'star_fortress' : init.hullIdx === 8 ? 'battlestation' : 'star_base';
@@ -1818,6 +1822,106 @@ function planDoomstar(g: G, style: string, r: Rnd): void {
   g.eng(1, 0);
 }
 
+/** The four installation classes must read as DIFFERENT things at a glance
+ * while keeping the style's family silhouette (exactly how ship classes share
+ * a style's language): star_base stays the style plan's clean core station;
+ * battlestation is that station UP-ARMED with bolted-on weapon barbettes;
+ * star_fortress additionally sits inside a broken bastion ring bristling with
+ * battery clusters. Barbette count and angles are seeded per style, so every
+ * style grows its arsenal in its own pattern. Mirrored about the spine to
+ * keep the top-lit look; bridgeComponents trusses any pod the style's
+ * geometry left floating. */
+function decorateStation(g: G, cls: ArtClass, style: string): void {
+  if (cls !== 'battlestation' && cls !== 'star_fortress') return;
+  const r = new Rnd(`station-arms/${style}/${cls}`);
+  const c = (g.w - 1) / 2;
+  const R = ((g.h - 1) >> 1) - 0.5;
+  // weapon barbettes: armored pod + outward barrel + hot muzzle, at ±angle
+  const pods = cls === 'star_fortress' ? 3 : 2;
+  const a0 = r.range(0.2, 0.7); // style-specific first-barbette bearing
+  const podR = R * (cls === 'star_fortress' ? 0.58 : 0.7);
+  for (let i = 0; i < pods; i++) {
+    const a = a0 + (i * Math.PI) / pods;
+    const px = c + Math.cos(a) * podR;
+    const dy = Math.sin(a) * podR;
+    for (const s of [1, -1]) {
+      const py = g.cy + s * dy;
+      g.set(px, py, R_HULL);
+      g.set(px + 1, py, R_HULL);
+      g.set(px, py + s, R_SHADE);
+      g.set(px + 1, py + s, R_SHADE);
+      g.set(c + Math.cos(a) * (podR + 1.4), g.cy + s * Math.sin(a) * (podR + 1.4), R_TRIM); // barrel
+      const mx = c + Math.cos(a) * (podR + 2.4);
+      const my = g.cy + s * Math.sin(a) * (podR + 2.4);
+      g.set(mx, my, R_GLOW); // muzzle
+      g.guns.push({ x: Math.round(mx), y: Math.round(my) });
+    }
+  }
+  if (cls === 'star_fortress') {
+    // broken bastion ring: armored arc segments at the outer edge, mirrored
+    const segs = 3 + (hashStr(style) % 2); // 3 or 4 per half
+    const g0 = r.range(0.25, 0.6);
+    for (let i = 0; i < segs; i++) {
+      const mid = g0 + (i * Math.PI) / segs;
+      for (let t = -0.24; t <= 0.24; t += 0.06) {
+        const x = c + Math.cos(mid + t) * R;
+        const dy = Math.sin(mid + t) * R;
+        g.set(x, g.cy - dy, R_TRIM);
+        g.set(x, g.cy + dy, R_TRIM);
+      }
+      const bx = c + Math.cos(mid) * (R - 1);
+      const bdy = Math.sin(mid) * (R - 1);
+      for (const s of [1, -1]) {
+        g.set(bx, g.cy + s * bdy, R_HULL);
+        g.set(bx, g.cy + s * bdy - 1, R_LIGHT);
+        if (i % 2 === 0) g.set(bx + 1, g.cy + s * bdy, R_GLOW); // battery cluster
+      }
+    }
+  }
+  bridgeComponents(g);
+}
+
+/** The batteries-only colony defense (missile base / ground batteries with no
+ * orbital platform): a ground-fed weapons emplacement, visibly NOT a crewed
+ * star base — an armored gun tower with radiator vanes and a supply tether,
+ * no habitat ring, no dock lights. Vane geometry and barrel length vary per
+ * style (seeded); the palette layer applies the style material and player
+ * color as usual. */
+function planDefensePlatform(g: G, style: string, r: Rnd): void {
+  const c = (g.w - 1) / 2;
+  const HH = (g.h - 1) >> 1;
+  // armored core block with shaded flanks
+  g.box(c - 2, c + 2, 0, 2, R_HULL);
+  g.band(c - 3, 0, 1, R_SHADE);
+  g.band(c + 3, 0, 1, R_SHADE);
+  // twin turret pods above/below the core
+  g.boxPair(c - 1, c + 1, 3, 4, R_HULL);
+  // heavy forward barrels with hot muzzles
+  const barrel = 3 + r.int(2);
+  for (const dy of [1, -1]) {
+    for (let x = 1; x <= barrel; x++) g.set(c + 3 + x, g.cy + dy, R_TRIM);
+    g.set(c + 4 + barrel, g.cy + dy, R_GLOW);
+    g.guns.push({ x: Math.round(c + 4 + barrel), y: g.cy + dy });
+  }
+  // radiator vanes: style-varied rake and count
+  const vanes = 1 + (hashStr(style) % 2);
+  for (let v = 0; v < vanes; v++) {
+    const vx = c - 2 - v * 2;
+    g.linePair(vx, 3 + 2, vx - 2, HH - 1, R_ACCENT);
+    g.linePair(vx + 1, 3 + 2, vx - 1, HH - 1, R_ACCENT);
+  }
+  // supply tether trailing off toward the planet side
+  for (let x = 1; x < c - 3; x++) g.set(x, g.cy, x % 2 === 0 ? R_SHADE : R_TRIM);
+  g.set(0, g.cy, R_GLOW); // tether beacon
+  g.bevel();
+  // targeting array + status lights
+  g.sym(c, 0, R_GLOW);
+  g.sym(c - 1, 4, R_GLOW);
+  g.set(c + 2, g.cy - 3, R_ACCENT);
+  g.set(c + 2, g.cy + 3, R_ACCENT);
+  bridgeComponents(g);
+}
+
 // ---- monsters & Antarans ----
 function monsterPlan(kind: string, g: G, r: Rnd): void {
   const L = g.w;
@@ -2096,7 +2200,9 @@ export function getShipModel(req: ModelRequest): ShipModel {
   const r = new Rnd(`${req.style}/${req.cls}/${variant}`);
   const plan = PLANS[req.style] ?? planRaptor;
   if (req.cls === 'doomstar') planDoomstar(g, req.style, r);
+  else if (req.cls === 'defense_platform') planDefensePlatform(g, req.style, r);
   else plan(g, req.cls, spec, r, variant);
+  if (spec.base && req.cls !== 'defense_platform') decorateStation(g, req.cls, req.style);
   if (!spec.base && req.cls !== 'doomstar') bakeAttachments(g, specials, req.heavyBeams ?? false, req.missileTubes ?? 0);
   const model = g.toModel();
   if (g.w !== spec.w) model.pxScale = spec.w / g.w;

@@ -323,12 +323,19 @@ export function hullIndexOf(hull: string): number {
 }
 
 /** Hull availability (C7): frigate/destroyer always; cruiser needs capsule
- * construction (field 21); battleship astro construction (field 19); titan and
- * doomstar need their construction applications. */
+ * construction (field 21); battleship robotics (field 62); titan and
+ * doomstar need their construction applications. The ladder is deliberately
+ * spread: cruiser tier 4, battleship tier 6, titan tier 8 (astro
+ * construction), doomstar tier 15. Battleship used to sit on astro
+ * construction too — the same field whose pick decides titan — so battleship
+ * and titan unlocked in the same instant and there was no battleship era at
+ * all (bug report: save f979b65e, turn 112 with robotics done and still no
+ * battleship). Robotics is also where the battlestation app lives, so
+ * hull-scale orbital construction arrives together. */
 export function availableHulls(empire: Empire): string[] {
   const out = ['frigate', 'destroyer'];
   if (empire.completedFields.includes(21)) out.push('cruiser');
-  if (empire.completedFields.includes(19)) out.push('battleship');
+  if (empire.completedFields.includes(62)) out.push('battleship');
   if (empire.knownApps.includes('titan_construction')) out.push('titan');
   if (empire.knownApps.includes('doom_star_construction')) out.push('doomstar');
   return out;

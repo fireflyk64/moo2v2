@@ -95,6 +95,14 @@ describe('declarative tech/building effects (Phase 5 wiring)', () => {
     expect(availableHulls(empire)).toEqual(['frigate', 'destroyer']);
     empire.completedFields.push(21); // capsule construction
     expect(availableHulls(empire)).toContain('cruiser');
+    // battleship unlocks at ROBOTICS (62) — the tier-6 field — NOT astro
+    // construction (19), whose pick decides titan (regression: save f979b65e
+    // had robotics done at turn 112 and could not design battleships)
+    expect(availableHulls(empire)).not.toContain('battleship');
+    empire.completedFields.push(19); // astro construction alone: not the gate
+    expect(availableHulls(empire)).not.toContain('battleship');
+    empire.completedFields.push(62); // robotics
+    expect(availableHulls(empire)).toContain('battleship');
     grantApp(empire, 'titan_construction');
     expect(availableHulls(empire)).toContain('titan');
     const bad = designStats(state, empire, {
